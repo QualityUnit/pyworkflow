@@ -1,0 +1,66 @@
+{
+  "$schema": "https://mintlify.com/schema.json",
+  "name": "PyWorkflow",
+  "favicon": "/favicon.svg",
+  "colors": {
+    "primary": "#1c64fd",
+    "light": "#1c64fd",
+    "dark": "#1c64fd",
+    "anchors": {
+      "from": "#1c64fd",
+      "to": "#07C983"
+    }
+  },
+  "topbarLinks": [
+    {
+      "name": "GitHub",
+      "url": "https://github.com/qualityunit/pyworkflow"
+    }
+  ],
+  "topbarCtaButton": {
+    "name": "Get Started",
+    "url": "/quickstart"
+  },
+  "anchors": [
+    {
+      "name": "GitHub",
+      "icon": "github",
+      "url": "https://github.com/qualityunit/pyworkflow"
+    },
+    {
+      "name": "Community",
+      "icon": "discord",
+      "url": "https://discord.gg/pyworkflow"
+    }
+  ],
+  "navigation": [
+    {
+      "group": "Getting Started",
+      "pages": [
+        "introduction",
+        "quickstart"
+      ]
+    },
+    {
+      "group": "Core Concepts",
+      "pages": [
+        "concepts/workflows",
+        "concepts/steps",
+        "concepts/events",
+        "concepts/sleep"
+      ]
+    }
+  ],
+  "footerSocials": {
+    "github": "https://github.com/qualityunit/pyworkflow"
+  },
+  "feedback": {
+    "thumbsRating": true,
+    "suggestEdit": true,
+    "raiseIssue": true
+  },
+  "modeToggle": {
+    "default": "dark",
+    "isHidden": false
+  }
+}

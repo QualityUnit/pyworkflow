@@ -1,0 +1,155 @@
+---
+title: 'Introduction'
+description: 'Distributed, durable workflow orchestration for Python'
+---
+
+<img
+  className="block dark:hidden"
+  src="/images/hero-light.svg"
+  alt="PyWorkflow Hero Light"
+/>
+<img
+  className="hidden dark:block"
+  src="/images/hero-dark.svg"
+  alt="PyWorkflow Hero Dark"
+/>
+
+## What is PyWorkflow?
+
+PyWorkflow is a workflow orchestration framework that enables you to build complex, long-running business processes as simple Python code. It handles the hard parts of distributed systems:
+
+- **Fault tolerance** - Automatic recovery from failures
+- **Automatic retries** - Configurable retry strategies with backoff
+- **State management** - Event sourcing for complete auditability
+- **Horizontal scaling** - Distribute work across multiple workers
+
+## Why PyWorkflow?
+
+Building reliable, long-running processes is hard. Traditional approaches require you to manually handle:
+
+- What happens when a server restarts mid-process?
+- How do you retry failed operations without duplicating work?
+- How do you pause for hours or days without holding connections?
+- How do you track what happened and when?
+
+PyWorkflow solves these problems by treating your workflows as **event-sourced state machines** that can suspend, resume, and recover from any point.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Distributed by Default" icon="server">
+    All workflows execute across Celery workers for horizontal scaling. Start with one worker, scale to hundreds.
+  </Card>
+  <Card title="Durable Execution" icon="database">
+    Event sourcing ensures workflows can recover from any failure. Every state change is recorded and can be replayed.
+  </Card>
+  <Card title="Time Travel" icon="clock">
+    Sleep for minutes, hours, or days with automatic resumption. Workflows suspend without holding resources.
+  </Card>
+  <Card title="Fault Tolerant" icon="shield">
+    Automatic retries with configurable backoff strategies. Distinguish between transient and permanent failures.
+  </Card>
+  <Card title="Zero-Resource Suspension" icon="pause">
+    Workflows suspend without holding connections, threads, or memory. Resume on any available worker.
+  </Card>
+  <Card title="Production Ready" icon="rocket">
+    Built on battle-tested Celery and Redis. Comprehensive logging and monitoring support.
+  </Card>
+</CardGroup>
+
+## How It Works
+
+PyWorkflow uses **event sourcing** to achieve durable, fault-tolerant execution:
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   Your Application                  │
+│                                                     │
+│  start(my_workflow, args)                          │
+│         │                                           │
+└─────────┼───────────────────────────────────────────┘
+          │
+          ▼
+    ┌─────────┐
+    │  Redis  │  ◄──── Message Broker
+    └─────────┘
+          │
+          ├──────┬──────┬──────┐
+          ▼      ▼      ▼      ▼
+     ┌──────┐ ┌──────┐ ┌──────┐
+     │Worker│ │Worker│ │Worker│  ◄──── Horizontal Scaling
+     └──────┘ └──────┘ └──────┘
+          │      │      │
+          └──────┴──────┘
+                 │
+                 ▼
+          ┌──────────┐
+          │ Storage  │  ◄──── Event Log
+          └──────────┘
+```
+
+1. **All state changes are recorded as events** in an append-only log
+2. **Deterministic replay** enables workflow resumption from any point
+3. **Complete audit trail** of everything that happened in the workflow
+
+## Quick Example
+
+```python
+from pyworkflow import workflow, step, start, sleep
+
+@step()
+async def send_welcome_email(user_id: str):
+    print(f"Sending welcome email to {user_id}")
+    return f"Email sent to {user_id}"
+
+@step()
+async def send_tips_email(user_id: str):
+    print(f"Sending tips email to {user_id}")
+    return f"Tips sent to {user_id}"
+
+@workflow()
+async def onboarding_workflow(user_id: str):
+    # Send welcome email immediately
+    await send_welcome_email(user_id)
+
+    # Sleep for 1 day - zero resources consumed
+    await sleep("1d")
+
+    # Automatically resumes after 1 day
+    await send_tips_email(user_id)
+
+    return "Onboarding complete"
+
+# Start the workflow
+run_id = start(onboarding_workflow, user_id="user_123")
+```
+
+## Use Cases
+
+PyWorkflow is ideal for:
+
+- **User onboarding flows** - Multi-step processes with delays
+- **Order processing** - Payment, fulfillment, and notification pipelines
+- **Data pipelines** - ETL workflows with retry and monitoring
+- **Scheduled tasks** - Complex scheduling with dependencies
+- **Approval workflows** - Human-in-the-loop processes
+- **Notification sequences** - Drip campaigns and follow-ups
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Quick Start"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Get up and running with PyWorkflow in under 5 minutes.
+  </Card>
+  <Card
+    title="Core Concepts"
+    icon="book"
+    href="/concepts/workflows"
+  >
+    Deep dive into workflows, steps, and event sourcing.
+  </Card>
+</CardGroup>

@@ -1,0 +1,301 @@
+---
+title: 'Steps'
+description: 'Isolated, retryable units of work that form the building blocks of workflows'
+---
+
+## What is a Step?
+
+A step is an isolated, retryable unit of work within a workflow. Steps are where the actual business logic executes - calling APIs, processing data, sending emails, etc. Each step runs on a Celery worker and can be retried independently if it fails.
+
+```python
+from pyworkflow import step
+
+@step()
+async def send_email(to: str, subject: str, body: str):
+    """Send an email - retries automatically on failure."""
+    async with EmailClient() as client:
+        await client.send(to=to, subject=subject, body=body)
+    return {"sent": True, "to": to}
+```
+
+## Key Characteristics
+
+<CardGroup cols={2}>
+  <Card title="Isolated" icon="box">
+    Each step runs independently with its own retry policy and timeout.
+  </Card>
+  <Card title="Retryable" icon="rotate">
+    Failed steps automatically retry with configurable backoff strategies.
+  </Card>
+  <Card title="Cached" icon="database">
+    Completed step results are cached and replayed during workflow resumption.
+  </Card>
+  <Card title="Distributed" icon="server">
+    Steps execute on Celery workers, distributing load across your cluster.
+  </Card>
+</CardGroup>
+
+## Creating Steps
+
+<Tabs>
+  <Tab title="Decorator">
+    ```python
+    from pyworkflow import step
+
+    @step()
+    async def fetch_user(user_id: str):
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"/api/users/{user_id}")
+            return response.json()
+    ```
+  </Tab>
+  <Tab title="Class">
+    ```python
+    from pyworkflow import Step
+
+    class FetchUserStep(Step):
+        async def execute(self, user_id: str):
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"/api/users/{user_id}")
+                return response.json()
+
+    # Usage in workflow
+    user = await FetchUserStep()(user_id)
+    ```
+  </Tab>
+</Tabs>
+
+### Configuration Options
+
+<Tabs>
+  <Tab title="Decorator">
+    ```python
+    @step(
+        name="fetch_user_data",      # Custom step name
+        max_retries=5,               # Retry up to 5 times
+        retry_delay="exponential",   # Exponential backoff
+        timeout="30s"                # Step timeout
+    )
+    async def fetch_user(user_id: str):
+        pass
+    ```
+  </Tab>
+  <Tab title="Class">
+    ```python
+    class FetchUserStep(Step):
+        name = "fetch_user_data"
+        max_retries = 5
+        retry_delay = "exponential"
+        timeout = "30s"
+
+        async def execute(self, user_id: str):
+            pass
+    ```
+  </Tab>
+</Tabs>
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `name` | `str` | Function/class name | Unique identifier for the step |
+| `max_retries` | `int` | `3` | Maximum retry attempts |
+| `retry_delay` | `str` | `"fixed"` | Retry strategy: `"fixed"`, `"exponential"`, or duration |
+| `timeout` | `str` | `"60s"` | Maximum step execution time |
+
+## Retry Strategies
+
+### Fixed Delay
+
+Retry with a constant delay between attempts:
+
+```python
+@step(max_retries=3, retry_delay="30s")
+async def call_api():
+    # Retries at: 30s, 60s, 90s
+    pass
+```
+
+### Exponential Backoff
+
+Retry with increasing delays (recommended for external APIs):
+
+```python
+@step(max_retries=5, retry_delay="exponential")
+async def call_external_api():
+    # Retries at: 1s, 2s, 4s, 8s, 16s
+    pass
+```
+
+### Custom Delay in Error
+
+Specify retry delay when raising an error:
+
+```python
+from pyworkflow import step, RetryableError
+
+@step(max_retries=3)
+async def rate_limited_api():
+    response = await call_api()
+
+    if response.status_code == 429:
+        retry_after = response.headers.get("Retry-After", "60")
+        raise RetryableError(
+            "Rate limited",
+            retry_after=f"{retry_after}s"
+        )
+
+    return response.json()
+```
+
+## Error Handling
+
+### RetryableError
+
+Use for transient failures that should be retried:
+
+```python
+from pyworkflow import step, RetryableError
+
+@step(max_retries=3)
+async def fetch_data():
+    try:
+        return await external_api.get_data()
+    except ConnectionError:
+        raise RetryableError("Connection failed")
+    except TimeoutError:
+        raise RetryableError("Request timed out", retry_after="10s")
+```
+
+### FatalError
+
+Use for permanent failures that should stop the workflow:
+
+```python
+from pyworkflow import step, FatalError
+
+@step()
+async def validate_input(data: dict):
+    if "email" not in data:
+        raise FatalError("Email is required")
+
+    if not is_valid_email(data["email"]):
+        raise FatalError(f"Invalid email: {data['email']}")
+
+    return data
+```
+
+### Error Flow
+
+```
+Step Execution
+      │
+      ├─── Success ───────────────────────> Return Result
+      │
+      └─── Exception
+              │
+              ├─── FatalError ────────────> Workflow Failed
+              │
+              └─── RetryableError / Other
+                      │
+                      ├─── Retries Left ──> Wait & Retry
+                      │
+                      └─── No Retries ────> Workflow Failed
+```
+
+## Step Results and Caching
+
+When a workflow resumes after suspension, completed steps are not re-executed. Instead, their cached results are returned:
+
+```python
+@workflow()
+async def my_workflow():
+    # First run: executes the step
+    # After resume: returns cached result
+    user = await fetch_user("user_123")
+
+    await sleep("1h")
+
+    # After 1 hour, workflow resumes
+    # fetch_user is NOT called again - cached result is used
+    await send_email(user["email"], "Hello!")
+```
+
+<Warning>
+  Step results must be serializable. PyWorkflow supports common Python types (dict, list, str, int, datetime, etc.) and uses cloudpickle for complex objects.
+</Warning>
+
+## Parallel Step Execution
+
+Execute multiple steps concurrently using `asyncio.gather()`:
+
+```python
+import asyncio
+from pyworkflow import workflow, step
+
+@step()
+async def fetch_user(user_id: str):
+    return await api.get_user(user_id)
+
+@step()
+async def fetch_orders(user_id: str):
+    return await api.get_orders(user_id)
+
+@step()
+async def fetch_preferences(user_id: str):
+    return await api.get_preferences(user_id)
+
+@workflow()
+async def load_dashboard(user_id: str):
+    # All three steps run in parallel
+    user, orders, preferences = await asyncio.gather(
+        fetch_user(user_id),
+        fetch_orders(user_id),
+        fetch_preferences(user_id)
+    )
+
+    return {
+        "user": user,
+        "orders": orders,
+        "preferences": preferences
+    }
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Keep steps small and focused">
+    Each step should do one thing well. This makes retries more efficient - if a step fails, only that specific operation is retried.
+  </Accordion>
+
+  <Accordion title="Make steps idempotent">
+    Steps may be retried, so ensure they can be safely re-executed. Use idempotency keys when calling external APIs.
+
+    ```python
+    @step()
+    async def charge_payment(order_id: str, amount: float):
+        # Use order_id as idempotency key
+        return await stripe.charges.create(
+            amount=amount,
+            idempotency_key=f"charge-{order_id}"
+        )
+    ```
+  </Accordion>
+
+  <Accordion title="Use appropriate timeouts">
+    Set timeouts based on expected execution time. External API calls should have shorter timeouts than data processing steps.
+  </Accordion>
+
+  <Accordion title="Handle errors explicitly">
+    Distinguish between retryable and fatal errors. Don't retry errors that will never succeed.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Events" icon="timeline" href="/concepts/events">
+    Learn how event sourcing enables durability and replay.
+  </Card>
+  <Card title="Error Handling" icon="shield-check" href="/guides/error-handling">
+    Deep dive into retry strategies and error handling.
+  </Card>
+</CardGroup>

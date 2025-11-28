@@ -1,0 +1,266 @@
+---
+title: 'Events'
+description: 'Event sourcing provides durability, auditability, and deterministic replay'
+---
+
+## What is Event Sourcing?
+
+PyWorkflow uses event sourcing to achieve durable, fault-tolerant execution. Instead of storing just the current state, every state change is recorded as an immutable event in an append-only log. This enables:
+
+- **Durability**: Workflows survive crashes and restarts
+- **Replay**: Workflows can resume from any point
+- **Auditability**: Complete history of everything that happened
+
+```
+Workflow Execution Timeline
+────────────────────────────────────────────────────────►
+
+Event 1          Event 2           Event 3           Event 4
+workflow_started → step_completed → sleep_started → ...
+
+       │              │                │
+       ▼              ▼                ▼
+┌──────────────────────────────────────────────────┐
+│              Event Log (Append-Only)              │
+└──────────────────────────────────────────────────┘
+```
+
+## How It Works
+
+### Recording Events
+
+As your workflow executes, PyWorkflow automatically records events:
+
+```python
+@workflow()
+async def order_workflow(order_id: str):
+    # Event: workflow_started
+
+    order = await validate_order(order_id)
+    # Event: step_completed (validate_order)
+
+    await sleep("1h")
+    # Event: sleep_started
+    # Workflow suspends here...
+
+    # ... 1 hour later ...
+    # Event: workflow_resumed
+
+    await send_confirmation(order)
+    # Event: step_completed (send_confirmation)
+
+    return order
+    # Event: workflow_completed
+```
+
+### Replaying Events
+
+When a workflow resumes after suspension, PyWorkflow replays all recorded events to restore the exact state:
+
+```python
+# Replay process:
+# 1. Load all events for this run_id
+# 2. For each step_completed event, cache the result
+# 3. Re-execute the workflow function
+# 4. When a step is called, return cached result instead of executing
+# 5. Continue from where we left off
+```
+
+<Note>
+  During replay, steps are not re-executed. Their cached results from the event log are returned immediately. This ensures deterministic execution.
+</Note>
+
+## Event Types
+
+PyWorkflow records 16 different event types:
+
+### Workflow Events
+
+| Event | Description |
+|-------|-------------|
+| `workflow_started` | Workflow execution began |
+| `workflow_completed` | Workflow finished successfully |
+| `workflow_failed` | Workflow terminated with an error |
+| `workflow_suspended` | Workflow paused (sleep, webhook) |
+| `workflow_resumed` | Workflow continued after suspension |
+
+### Step Events
+
+| Event | Description |
+|-------|-------------|
+| `step_started` | Step execution began |
+| `step_completed` | Step finished successfully (result cached) |
+| `step_failed` | Step failed (may retry) |
+| `step_retrying` | Step is being retried |
+
+### Sleep Events
+
+| Event | Description |
+|-------|-------------|
+| `sleep_started` | Sleep/delay began |
+| `sleep_completed` | Sleep finished, workflow resuming |
+
+### Log Events
+
+| Event | Description |
+|-------|-------------|
+| `log_info` | Info-level log message |
+| `log_warning` | Warning-level log message |
+| `log_error` | Error-level log message |
+| `log_debug` | Debug-level log message |
+
+## Event Structure
+
+Each event contains:
+
+```python
+{
+    "id": "evt_abc123",           # Unique event ID
+    "run_id": "run_xyz789",       # Workflow run ID
+    "type": "step_completed",     # Event type
+    "timestamp": "2025-01-15T10:30:45Z",
+    "sequence": 3,                # Order in the event log
+    "data": {                     # Event-specific data
+        "step_id": "validate_order",
+        "step_name": "validate_order",
+        "result": {"order_id": "ORD-123", "valid": True},
+        "duration_ms": 150
+    }
+}
+```
+
+## Inspecting Events
+
+### Via Storage Backend
+
+```python
+from pyworkflow.storage.file import FileStorageBackend
+
+storage = FileStorageBackend()
+
+# Get all events for a workflow run
+events = await storage.get_events("run_xyz789")
+
+for event in events:
+    print(f"{event.sequence}: {event.type}")
+    print(f"  Data: {event.data}")
+    print(f"  Time: {event.timestamp}")
+```
+
+### Example Event Log
+
+```
+Sequence | Type              | Data
+---------|-------------------|----------------------------------
+1        | workflow_started  | {workflow: "order_processing"}
+2        | step_started      | {step_id: "validate_order"}
+3        | step_completed    | {step_id: "validate_order", result: {...}}
+4        | step_started      | {step_id: "process_payment"}
+5        | step_failed       | {step_id: "process_payment", error: "timeout"}
+6        | step_retrying     | {step_id: "process_payment", attempt: 2}
+7        | step_started      | {step_id: "process_payment"}
+8        | step_completed    | {step_id: "process_payment", result: {...}}
+9        | sleep_started     | {duration: "1h", wake_time: "..."}
+10       | workflow_suspended| {reason: "sleep"}
+```
+
+## Deterministic Replay
+
+For replay to work correctly, workflows must be deterministic:
+
+<Warning>
+  **Don't do this** - Non-deterministic operations break replay:
+
+  ```python
+  @workflow()
+  async def bad_workflow():
+      # BAD: Random values differ on replay
+      order_id = f"ORD-{random.randint(1000, 9999)}"
+
+      # BAD: Current time differs on replay
+      if datetime.now().hour < 12:
+          await morning_flow()
+      else:
+          await afternoon_flow()
+  ```
+</Warning>
+
+<Tip>
+  **Do this instead** - Use steps for non-deterministic operations:
+
+  ```python
+  @step()
+  async def generate_order_id():
+      # Results are cached, so same ID on replay
+      return f"ORD-{random.randint(1000, 9999)}"
+
+  @step()
+  async def get_current_time():
+      # Cached, so same time on replay
+      return datetime.now()
+
+  @workflow()
+  async def good_workflow():
+      order_id = await generate_order_id()
+      current_time = await get_current_time()
+
+      if current_time.hour < 12:
+          await morning_flow()
+      else:
+          await afternoon_flow()
+  ```
+</Tip>
+
+## Storage Backends
+
+Events are stored in a pluggable storage backend:
+
+| Backend | Status | Use Case |
+|---------|--------|----------|
+| **File** | Available | Development, single-machine |
+| **Redis** | Planned | Production, distributed |
+| **PostgreSQL** | Planned | Enterprise, complex queries |
+| **SQLite** | Planned | Embedded applications |
+
+### Configuring Storage
+
+```python
+from pyworkflow.storage.file import FileStorageBackend
+
+# File storage (default)
+storage = FileStorageBackend(
+    base_path="/var/lib/pyworkflow/events"
+)
+
+# Configure PyWorkflow to use this storage
+from pyworkflow import configure
+configure(storage=storage)
+```
+
+## Benefits of Event Sourcing
+
+<CardGroup cols={2}>
+  <Card title="Complete Audit Trail" icon="scroll">
+    Every action is recorded. Know exactly what happened and when.
+  </Card>
+  <Card title="Time Travel Debugging" icon="clock-rotate-left">
+    Replay workflows to debug issues. See the exact state at any point.
+  </Card>
+  <Card title="Failure Recovery" icon="shield">
+    Resume from the last successful point after a crash or restart.
+  </Card>
+  <Card title="Event-Driven Architecture" icon="bolt">
+    Events can trigger other systems, enabling loose coupling.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Sleep" icon="clock" href="/concepts/sleep">
+    Learn how workflows suspend and resume with sleep.
+  </Card>
+  <Card title="Deployment" icon="rocket" href="/guides/deployment">
+    Configure storage backends for production.
+  </Card>
+</CardGroup>

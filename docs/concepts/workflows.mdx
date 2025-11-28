@@ -1,0 +1,240 @@
+---
+title: 'Workflows'
+description: 'Top-level orchestration functions that coordinate steps and handle business logic'
+---
+
+## What is a Workflow?
+
+A workflow is the top-level orchestration function that coordinates multiple steps, handles business logic, and can pause for extended periods using sleep or webhooks. Workflows are the entry point for your business processes.
+
+```python
+from pyworkflow import workflow, step, start, sleep
+
+@workflow()
+async def order_processing(order_id: str):
+    # Validate and process the order
+    order = await validate_order(order_id)
+    payment = await process_payment(order)
+
+    # Wait for fulfillment
+    await sleep("2h")
+
+    # Ship and notify
+    await create_shipment(order)
+    await send_confirmation(order)
+
+    return {"status": "completed", "order_id": order_id}
+```
+
+## Key Characteristics
+
+<CardGroup cols={2}>
+  <Card title="Durable" icon="database">
+    Workflows survive crashes, restarts, and deployments. State is preserved through event sourcing.
+  </Card>
+  <Card title="Suspendable" icon="pause">
+    Workflows can pause for minutes, hours, or days without consuming resources.
+  </Card>
+  <Card title="Distributed" icon="server">
+    Workflows execute across Celery workers, enabling horizontal scaling.
+  </Card>
+  <Card title="Deterministic" icon="rotate">
+    Workflows can be replayed from any point using the recorded event log.
+  </Card>
+</CardGroup>
+
+## Creating Workflows
+
+<Tabs>
+  <Tab title="Decorator">
+    ```python
+    from pyworkflow import workflow
+
+    @workflow()
+    async def my_workflow(user_id: str, amount: float):
+        # Your workflow logic here
+        result = await some_step(user_id, amount)
+        return result
+    ```
+  </Tab>
+  <Tab title="Class">
+    ```python
+    from pyworkflow import Workflow
+
+    class MyWorkflow(Workflow):
+        async def run(self, user_id: str, amount: float):
+            result = await SomeStep()(user_id, amount)
+            return result
+    ```
+  </Tab>
+</Tabs>
+
+### Configuration Options
+
+<Tabs>
+  <Tab title="Decorator">
+    ```python
+    @workflow(
+        name="custom_workflow_name",  # Override the function name
+        max_duration="24h",           # Maximum workflow runtime
+        max_retries=3                 # Retry the entire workflow on failure
+    )
+    async def my_workflow():
+        pass
+    ```
+  </Tab>
+  <Tab title="Class">
+    ```python
+    class MyWorkflow(Workflow):
+        name = "custom_workflow_name"
+        max_duration = "24h"
+        max_retries = 3
+
+        async def run(self):
+            pass
+    ```
+  </Tab>
+</Tabs>
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `name` | `str` | Function/class name | Unique identifier for the workflow |
+| `max_duration` | `str` | `"7d"` | Maximum time the workflow can run |
+| `max_retries` | `int` | `0` | Number of times to retry the entire workflow |
+
+## Starting Workflows
+
+### Synchronous Start
+
+The `start()` function dispatches a workflow to Celery and returns immediately:
+
+```python
+from pyworkflow import start
+
+# Start the workflow (non-blocking)
+run_id = start(order_processing, order_id="ORD-123")
+print(f"Workflow started with ID: {run_id}")
+```
+
+### With Idempotency Key
+
+Prevent duplicate workflow executions:
+
+```python
+run_id = start(
+    order_processing,
+    order_id="ORD-123",
+    idempotency_key="order-ORD-123"
+)
+
+# Calling again with same key returns the same run_id
+run_id_2 = start(
+    order_processing,
+    order_id="ORD-123",
+    idempotency_key="order-ORD-123"
+)
+
+assert run_id == run_id_2  # True - same workflow
+```
+
+## Workflow Lifecycle
+
+```
+┌─────────────┐
+│   PENDING   │  Workflow created, waiting to start
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│   RUNNING   │  Workflow is executing
+└──────┬──────┘
+       │
+       ├────────────────┐
+       │                │
+       ▼                ▼
+┌─────────────┐  ┌─────────────┐
+│  SUSPENDED  │  │   FAILED    │  Error occurred
+└──────┬──────┘  └─────────────┘
+       │
+       │ (sleep ends / webhook received)
+       ▼
+┌─────────────┐
+│   RUNNING   │  Resumed execution
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│  COMPLETED  │  Workflow finished successfully
+└─────────────┘
+```
+
+## Workflow Context
+
+Inside a workflow, you can access the execution context:
+
+```python
+from pyworkflow import workflow
+from pyworkflow.core.context import get_current_context
+
+@workflow()
+async def my_workflow():
+    ctx = get_current_context()
+
+    print(f"Run ID: {ctx.run_id}")
+    print(f"Workflow: {ctx.workflow_name}")
+    print(f"Started at: {ctx.started_at}")
+
+    # Access step results from replay
+    previous_result = ctx.step_results.get("step_id")
+```
+
+## Error Handling
+
+Workflows automatically handle errors based on their type:
+
+```python
+from pyworkflow import workflow, FatalError, RetryableError
+
+@workflow(max_retries=3)
+async def my_workflow():
+    try:
+        result = await risky_operation()
+        return result
+    except ValidationError as e:
+        # Fatal errors stop the workflow immediately
+        raise FatalError(f"Invalid input: {e}")
+    except TemporaryError as e:
+        # Retryable errors trigger workflow retry
+        raise RetryableError(f"Temporary failure: {e}")
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Keep workflows focused">
+    Each workflow should handle a single business process. If a workflow is getting complex, consider breaking it into smaller workflows that call each other.
+  </Accordion>
+
+  <Accordion title="Use meaningful names">
+    Workflow names should clearly describe their purpose: `process_order`, `onboard_user`, `send_notification_sequence`.
+  </Accordion>
+
+  <Accordion title="Handle idempotency">
+    Use idempotency keys for workflows that shouldn't run twice for the same input. This prevents duplicate processing during retries.
+  </Accordion>
+
+  <Accordion title="Set appropriate timeouts">
+    Use `max_duration` to prevent workflows from running indefinitely. Consider the longest possible execution path.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Steps" icon="stairs" href="/concepts/steps">
+    Learn about steps - the building blocks of workflows.
+  </Card>
+  <Card title="Sleep" icon="clock" href="/concepts/sleep">
+    Pause workflows for any duration without consuming resources.
+  </Card>
+</CardGroup>

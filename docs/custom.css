@@ -1,0 +1,20 @@
+/* Custom styles for PyWorkflow docs */
+
+/* Override Tip callout to use primary brand color */
+[data-callout-type="tip"],
+.callout-tip,
+div[class*="tip"] {
+  --callout-color: #1c64fd !important;
+  border-color: #1c64fd !important;
+}
+
+[data-callout-type="tip"] svg,
+.callout-tip svg {
+  color: #1c64fd !important;
+}
+
+/* Tip background with transparency */
+[data-callout-type="tip"],
+.callout-tip {
+  background-color: rgba(28, 100, 253, 0.1) !important;
+}

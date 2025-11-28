@@ -1,0 +1,199 @@
+---
+title: 'Quick Start'
+description: 'Get up and running with PyWorkflow in under 5 minutes'
+---
+
+## Installation
+
+Install PyWorkflow using pip:
+
+```bash
+pip install pyworkflow
+```
+
+## Prerequisites
+
+PyWorkflow requires Redis and Celery workers for distributed execution.
+
+<Tabs>
+  <Tab title="Docker Compose (Recommended)">
+    The easiest way to get started is with Docker Compose:
+
+    ```bash
+    cd devops
+    docker-compose up -d
+    ```
+
+    This starts Redis, Celery workers, and Celery Beat automatically.
+  </Tab>
+  <Tab title="Manual Setup">
+    Start each component manually:
+
+    ```bash
+    # 1. Start Redis
+    docker run -d -p 6379:6379 redis:7-alpine
+
+    # 2. Start Celery worker(s)
+    celery -A pyworkflow.celery.app worker --loglevel=info
+
+    # 3. Start Celery Beat (for automatic sleep resumption)
+    celery -A pyworkflow.celery.app beat --loglevel=info
+    ```
+  </Tab>
+</Tabs>
+
+## Your First Workflow
+
+Create a simple onboarding workflow that sends emails with delays:
+
+```python
+from pyworkflow import workflow, step, start, sleep
+
+@step()
+async def send_welcome_email(user_id: str):
+    """Send a welcome email to the new user."""
+    print(f"Sending welcome email to user {user_id}")
+    return f"Email sent to {user_id}"
+
+@step()
+async def send_tips_email(user_id: str):
+    """Send helpful tips after the welcome period."""
+    print(f"Sending tips email to user {user_id}")
+    return f"Tips sent to {user_id}"
+
+@workflow()
+async def onboarding_workflow(user_id: str):
+    # Send welcome email immediately
+    await send_welcome_email(user_id)
+
+    # Sleep for 1 day - workflow suspends, zero resources used
+    await sleep("1d")
+
+    # Automatically resumes after 1 day
+    await send_tips_email(user_id)
+
+    return "Onboarding complete"
+
+# Start the workflow
+run_id = start(onboarding_workflow, user_id="user_123")
+print(f"Workflow started: {run_id}")
+```
+
+## What Happens Under the Hood
+
+<Steps>
+  <Step title="Workflow Starts">
+    Your workflow is dispatched to an available Celery worker.
+  </Step>
+  <Step title="Welcome Email Sent">
+    The `send_welcome_email` step executes and the result is recorded.
+  </Step>
+  <Step title="Workflow Suspends">
+    When `sleep("1d")` is called, the workflow suspends and the worker is freed.
+    Zero resources are consumed during the sleep period.
+  </Step>
+  <Step title="Automatic Resumption">
+    After 1 day, Celery Beat automatically schedules the workflow to resume.
+  </Step>
+  <Step title="Tips Email Sent">
+    The workflow picks up where it left off, sending the tips email.
+  </Step>
+  <Step title="Workflow Completes">
+    The final result is recorded and the workflow is marked as complete.
+  </Step>
+</Steps>
+
+## Key Concepts
+
+<CardGroup cols={2}>
+  <Card title="Workflows" icon="diagram-project" href="/concepts/workflows">
+    Top-level orchestration functions that coordinate steps and handle business logic.
+  </Card>
+  <Card title="Steps" icon="stairs" href="/concepts/steps">
+    Isolated, retryable units of work that run on Celery workers.
+  </Card>
+  <Card title="Sleep" icon="clock" href="/concepts/sleep">
+    Pause workflows for any duration without consuming resources.
+  </Card>
+  <Card title="Events" icon="timeline" href="/concepts/events">
+    Event sourcing provides durability and deterministic replay.
+  </Card>
+</CardGroup>
+
+## Adding Error Handling
+
+Make your workflows fault-tolerant with automatic retries:
+
+```python
+from pyworkflow import step, RetryableError, FatalError
+
+@step(max_retries=3, retry_delay="exponential")
+async def call_payment_api(amount: float):
+    """Process payment with automatic retry on failure."""
+    try:
+        result = await payment_gateway.charge(amount)
+        return result
+    except PaymentGatewayTimeoutError:
+        # Retry with exponential backoff
+        raise RetryableError("Gateway timeout", retry_after="10s")
+    except InsufficientFundsError:
+        # Don't retry - this is a permanent failure
+        raise FatalError("Insufficient funds")
+```
+
+<Tip>
+  Use `RetryableError` for transient failures (network issues, timeouts) and `FatalError` for permanent failures (invalid input, business rule violations).
+</Tip>
+
+## Running in Parallel
+
+Execute multiple steps concurrently using `asyncio.gather()`:
+
+```python
+import asyncio
+from pyworkflow import workflow, step
+
+@step()
+async def fetch_user(user_id: str):
+    return {"id": user_id, "name": "Alice"}
+
+@step()
+async def fetch_orders(user_id: str):
+    return [{"id": "ORD-1"}, {"id": "ORD-2"}]
+
+@step()
+async def fetch_recommendations(user_id: str):
+    return ["Product A", "Product B"]
+
+@workflow()
+async def dashboard_data(user_id: str):
+    # Fetch all data in parallel
+    user, orders, recommendations = await asyncio.gather(
+        fetch_user(user_id),
+        fetch_orders(user_id),
+        fetch_recommendations(user_id)
+    )
+
+    return {
+        "user": user,
+        "orders": orders,
+        "recommendations": recommendations
+    }
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core Concepts" icon="book" href="/concepts/workflows">
+    Learn about workflows, steps, and event sourcing in depth.
+  </Card>
+  <Card title="Error Handling" icon="shield-check" href="/guides/error-handling">
+    Build fault-tolerant workflows with retry strategies.
+  </Card>
+  <Card title="Testing" icon="flask-vial" href="/guides/testing">
+    Write unit and integration tests for your workflows.
+  </Card>
+  <Card title="Deployment" icon="rocket" href="/guides/deployment">
+    Deploy to production with Docker and Kubernetes.
+  </Card>
+</CardGroup>

@@ -49,10 +49,11 @@ celery -A pyworkflow.celery.app beat --loglevel=info
 Or use Docker Compose (recommended):
 
 ```bash
+cd devops
 docker-compose up -d
 ```
 
-See [DOCKER.md](DOCKER.md) for Docker deployment details.
+See [DISTRIBUTED.md](DISTRIBUTED.md) for complete deployment guide.
 
 ### Your First Workflow
 
@@ -70,7 +71,7 @@ async def send_tips_email(user_id: str):
     print(f"Sending tips email to user {user_id}")
     return f"Tips sent to {user_id}"
 
-@workflow
+@workflow()
 async def onboarding_workflow(user_id: str):
     # Send welcome email immediately
     await send_welcome_email(user_id)
@@ -168,7 +169,7 @@ Workflows can sleep for any duration. During sleep, the workflow suspends and co
 ```python
 from pyworkflow import workflow, sleep
 
-@workflow
+@workflow()
 async def scheduled_reminder(user_id: str):
     # Send immediate reminder
     await send_reminder(user_id, "immediate")
@@ -278,7 +279,7 @@ async def fetch_recommendations(user_id: str):
     # Fetch recommendations
     return ["Product A", "Product B"]
 
-@workflow
+@workflow()
 async def dashboard_data(user_id: str):
     # Fetch all data in parallel
     user, orders, recommendations = await asyncio.gather(
@@ -385,7 +386,7 @@ from pyworkflow.storage.file import FileStorageBackend
 async def my_step(x: int):
     return x * 2
 
-@workflow
+@workflow()
 async def my_workflow(x: int):
     result = await my_step(x)
     return result + 1
@@ -439,10 +440,11 @@ services:
 
 Start everything:
 ```bash
+cd devops
 docker-compose up -d
 ```
 
-See [DOCKER.md](DOCKER.md) for complete deployment guide.
+See [DISTRIBUTED.md](DISTRIBUTED.md) for complete deployment guide with Kubernetes.
 
 ---
 
@@ -453,6 +455,7 @@ Check out the [examples/](examples/) directory for complete working examples:
 - **[simple_no_sleep.py](examples/functional/simple_no_sleep.py)** - Basic workflow without sleep
 - **[simple_example.py](examples/functional/simple_example.py)** - Workflow with sleep and resumption
 - **[basic_workflow.py](examples/functional/basic_workflow.py)** - Complete example with retries, errors, and sleep
+- **[distributed_example.py](examples/functional/distributed_example.py)** - Multi-worker distributed execution example
 
 ---
 
@@ -483,7 +486,7 @@ Check out the [examples/](examples/) directory for complete working examples:
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions are welcome!
 
 ### Development Setup
 
@@ -510,7 +513,7 @@ poetry run mypy pyworkflow
 
 ## Documentation
 
-- **[Docker Deployment Guide](DOCKER.md)** - Production deployment with Docker Compose
+- **[Distributed Deployment Guide](DISTRIBUTED.md)** - Production deployment with Docker Compose and Kubernetes
 - [Examples](examples/) - Working examples and patterns
 - [API Reference](docs/api-reference.md) (Coming soon)
 - [Architecture Guide](docs/architecture.md) (Coming soon)

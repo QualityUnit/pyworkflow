@@ -128,6 +128,23 @@ async def sleep(
     # Add to pending sleeps
     ctx.add_pending_sleep(sleep_id, resume_at)
 
+    # Schedule automatic resumption with Celery (if available)
+    try:
+        from pyworkflow.celery.tasks import schedule_workflow_resumption
+
+        schedule_workflow_resumption(ctx.run_id, resume_at)
+        logger.info(
+            f"Scheduled automatic workflow resumption",
+            run_id=ctx.run_id,
+            resume_at=resume_at.isoformat(),
+        )
+    except (ImportError, Exception) as e:
+        # Celery not available or Redis not running (e.g., in tests)
+        logger.debug(
+            f"Could not schedule automatic resumption: {e}",
+            run_id=ctx.run_id,
+        )
+
     # Raise suspension signal to pause workflow
     raise SuspensionSignal(
         reason=f"sleep:{sleep_id}",

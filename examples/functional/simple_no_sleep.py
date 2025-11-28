@@ -1,7 +1,14 @@
 """
 Simple PyWorkflow Example - No Sleep
 
-A minimal example showing a complete workflow execution without suspensions.
+A minimal example showing distributed workflow execution.
+
+Prerequisites:
+    1. Start Redis: docker run -d -p 6379:6379 redis:7-alpine
+    2. Start Celery worker: celery -A pyworkflow.celery.app worker --loglevel=info
+
+Or use Docker Compose:
+    docker-compose up -d
 """
 
 import asyncio
@@ -79,21 +86,25 @@ async def greeting_workflow(name: str) -> dict:
     return result
 
 
-async def main():
+def main():
     """Run the simple example."""
     # Configure logging (minimal output)
     configure_logging(level="WARNING", show_context=False)
 
     print("\n" + "="*60)
-    print("PyWorkflow - Simple Example (No Sleep)")
+    print("PyWorkflow - Simple Distributed Example")
     print("="*60)
+    print("\n✅ Workflows execute across Celery workers")
+    print("   Steps can run on different machines for horizontal scaling\n")
 
-    # Start the workflow
-    run_id = await start(greeting_workflow, name="Alice")
+    # Start the workflow - executes on Celery workers
+    run_id = start(greeting_workflow, name="Alice")
 
     print(f"\n📋 Workflow Run ID: {run_id}")
-    print("\n" + "="*60 + "\n")
+    print("🔄 Workflow is running on Celery workers...")
+    print("   Check the Celery worker logs to see step execution!\n")
+    print("="*60 + "\n")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

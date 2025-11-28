@@ -1,0 +1,146 @@
+"""
+Celery application for distributed workflow execution.
+
+This module configures Celery for:
+- Distributed step execution across workers
+- Automatic retry with exponential backoff
+- Scheduled task execution (sleep resumption)
+- Result persistence
+"""
+
+from typing import Optional
+
+from celery import Celery
+from kombu import Exchange, Queue
+
+from pyworkflow.observability.logging import configure_logging
+
+
+def create_celery_app(
+    broker_url: Optional[str] = None,
+    result_backend: Optional[str] = None,
+    app_name: str = "pyworkflow",
+) -> Celery:
+    """
+    Create and configure a Celery application for PyWorkflow.
+
+    Args:
+        broker_url: Celery broker URL (default: redis://localhost:6379/0)
+        result_backend: Result backend URL (default: redis://localhost:6379/1)
+        app_name: Application name
+
+    Returns:
+        Configured Celery application
+
+    Examples:
+        # Default configuration
+        app = create_celery_app()
+
+        # Custom Redis
+        app = create_celery_app(
+            broker_url="redis://redis-host:6379/0",
+            result_backend="redis://redis-host:6379/1"
+        )
+
+        # RabbitMQ with Redis backend
+        app = create_celery_app(
+            broker_url="amqp://guest:guest@rabbitmq:5672//",
+            result_backend="redis://localhost:6379/1"
+        )
+    """
+    # Default to Redis if not specified
+    broker_url = broker_url or "redis://localhost:6379/0"
+    result_backend = result_backend or "redis://localhost:6379/1"
+
+    app = Celery(
+        app_name,
+        broker=broker_url,
+        backend=result_backend,
+        include=[
+            "pyworkflow.celery.tasks",
+        ],
+    )
+
+    # Configure Celery
+    app.conf.update(
+        # Task execution settings
+        task_serializer="json",
+        result_serializer="json",
+        accept_content=["json"],
+        timezone="UTC",
+        enable_utc=True,
+        # Task routing
+        task_default_queue="pyworkflow.default",
+        task_default_exchange="pyworkflow",
+        task_default_exchange_type="topic",
+        task_default_routing_key="workflow.default",
+        # Task queues
+        task_queues=(
+            Queue(
+                "pyworkflow.default",
+                Exchange("pyworkflow", type="topic"),
+                routing_key="workflow.#",
+            ),
+            Queue(
+                "pyworkflow.steps",
+                Exchange("pyworkflow", type="topic"),
+                routing_key="workflow.step.#",
+            ),
+            Queue(
+                "pyworkflow.workflows",
+                Exchange("pyworkflow", type="topic"),
+                routing_key="workflow.workflow.#",
+            ),
+            Queue(
+                "pyworkflow.schedules",
+                Exchange("pyworkflow", type="topic"),
+                routing_key="workflow.schedule.#",
+            ),
+        ),
+        # Result backend settings
+        result_expires=3600,  # 1 hour
+        result_persistent=True,
+        # Task execution
+        task_acks_late=True,
+        task_reject_on_worker_lost=True,
+        worker_prefetch_multiplier=1,  # Fair task distribution
+        # Retry settings
+        task_autoretry_for=(Exception,),
+        task_retry_backoff=True,
+        task_retry_backoff_max=600,  # 10 minutes max
+        task_retry_jitter=True,
+        # Monitoring
+        worker_send_task_events=True,
+        task_send_sent_event=True,
+        # Beat scheduler (for sleep resumption)
+        beat_schedule={},
+        # Logging
+        worker_log_format="[%(asctime)s: %(levelname)s/%(processName)s] %(message)s",
+        worker_task_log_format="[%(asctime)s: %(levelname)s/%(processName)s] [%(task_name)s(%(task_id)s)] %(message)s",
+    )
+
+    # Configure logging
+    configure_logging(level="INFO")
+
+    return app
+
+
+# Global Celery app instance
+# Can be customized by calling create_celery_app() with custom config
+celery_app = create_celery_app()
+
+
+def get_celery_app() -> Celery:
+    """
+    Get the global Celery application instance.
+
+    Returns:
+        Celery application
+
+    Example:
+        from pyworkflow.celery.app import get_celery_app
+
+        app = get_celery_app()
+        app.conf.update(broker_url="redis://custom:6379/0")
+    """
+    return celery_app

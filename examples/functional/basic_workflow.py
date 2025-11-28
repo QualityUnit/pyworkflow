@@ -4,9 +4,17 @@ Basic PyWorkflow Example
 This example demonstrates the fundamental concepts of PyWorkflow:
 - Defining workflows with @workflow decorator
 - Creating steps with @step decorator
-- Starting and resuming workflows
-- Using sleep for delays
+- Distributed execution across Celery workers
+- Using sleep for delays with automatic resumption
 - Error handling and retries
+
+Prerequisites:
+    1. Start Redis: docker run -d -p 6379:6379 redis:7-alpine
+    2. Start Celery worker: celery -A pyworkflow.celery.app worker --loglevel=info
+    3. Start Celery Beat: celery -A pyworkflow.celery.app beat --loglevel=info
+
+Or use Docker Compose:
+    docker-compose up -d
 """
 
 import asyncio
@@ -15,7 +23,6 @@ from pyworkflow import (
     FatalError,
     RetryableError,
     configure_logging,
-    resume,
     sleep,
     start,
     step,
@@ -51,7 +58,7 @@ async def fetch_user_data(user_id: int) -> dict:
     }
 
 
-@step
+@step()
 async def validate_user(user_data: dict) -> dict:
     """
     Validate user data.
@@ -69,7 +76,7 @@ async def validate_user(user_data: dict) -> dict:
     return user_data
 
 
-@step
+@step()
 async def process_payment(user_data: dict, amount: float) -> dict:
     """
     Process payment for the user.
@@ -91,7 +98,7 @@ async def process_payment(user_data: dict, amount: float) -> dict:
     }
 
 
-@step
+@step()
 async def send_confirmation(user_data: dict) -> str:
     """Send confirmation email to user."""
     print(f"Sending confirmation to {user_data['email']}")
@@ -153,18 +160,21 @@ async def process_user_order(user_id: int, amount: float) -> dict:
     return result
 
 
-async def main():
+def main():
     """Run the example workflow."""
     # Configure logging
     configure_logging(level="INFO", show_context=False)
 
     print("=" * 60)
-    print("PyWorkflow Basic Example")
+    print("PyWorkflow - Distributed Workflow Example")
     print("=" * 60)
+    print("\n✅ This workflow executes across Celery workers")
+    print("   Steps can run on different machines")
+    print("   Sleep automatically resumes via Celery Beat\n")
 
-    # Start the workflow
-    print("\n1. Starting workflow...")
-    run_id = await start(
+    # Start the workflow - executes on Celery workers
+    print("1. Starting workflow...")
+    run_id = start(
         process_user_order,
         user_id=12345,
         amount=25.0,
@@ -172,16 +182,16 @@ async def main():
     )
 
     print(f"\n✓ Workflow started with run_id: {run_id}")
-
-    # Note: In a real scenario, if the workflow suspends (due to sleep),
-    # you would resume it later like this:
-    #
-    # await resume(run_id)
+    print("🔄 Workflow is running on Celery workers...")
+    print("   Check the Celery worker logs to see:")
+    print("   - Step execution across workers")
+    print("   - Automatic retry on failures")
+    print("   - Automatic resumption after 2-second sleep")
 
     print("\n" + "=" * 60)
-    print("Example completed!")
+    print("Workflow submitted! Monitor via Celery worker logs.")
     print("=" * 60)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

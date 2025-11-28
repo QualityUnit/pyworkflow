@@ -57,13 +57,12 @@ def configure_logging(
     else:
         # Human-readable format
         if show_context:
+            # Include extra context when available (run_id, step_id, etc.)
             console_format = (
                 "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
                 "<level>{level: <8}</level> | "
-                "<cyan>{extra[run_id]}</cyan> | "
                 "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
-                "<level>{message}</level> | "
-                "{extra}"
+                "<level>{message}</level>"
             )
         else:
             console_format = (
@@ -73,13 +72,31 @@ def configure_logging(
                 "<level>{message}</level>"
             )
 
-    # Add console handler
+    # Add console handler with filter to inject context
+    def format_with_context(record):
+        """Add context fields to the format string dynamically."""
+        extra_str = ""
+        if show_context and record["extra"]:
+            # Build context string from extra fields
+            context_parts = []
+            if "run_id" in record["extra"]:
+                context_parts.append(f"run_id={record['extra']['run_id']}")
+            if "step_id" in record["extra"]:
+                context_parts.append(f"step_id={record['extra']['step_id']}")
+            if "workflow_name" in record["extra"]:
+                context_parts.append(f"workflow={record['extra']['workflow_name']}")
+            if context_parts:
+                extra_str = " | " + " ".join(context_parts)
+        record["extra"]["_context"] = extra_str
+        return True
+
     logger.add(
         sys.stderr,
-        format=console_format,
+        format=console_format + "{extra[_context]}",
         level=level,
         colorize=not json_logs,
         serialize=json_logs,
+        filter=format_with_context,
     )
 
     # Add file handler if requested

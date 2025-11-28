@@ -1,5 +1,8 @@
 """
 Unit tests for workflow executor.
+
+Note: These tests use local execution (start_local, resume_local) to test
+workflow logic without requiring Celery infrastructure.
 """
 
 import pytest
@@ -9,7 +12,8 @@ from pyworkflow.core.exceptions import (
     WorkflowAlreadyRunningError,
     WorkflowNotFoundError,
 )
-from pyworkflow.engine.executor import get_workflow_events, get_workflow_run, resume, start
+from pyworkflow.engine.executor import get_workflow_events, get_workflow_run
+from pyworkflow.testing import resume_local, start_local  # Local execution for tests
 from pyworkflow.primitives.sleep import sleep
 from pyworkflow.storage.file import FileStorageBackend
 from pyworkflow.storage.schemas import RunStatus
@@ -29,7 +33,7 @@ class TestWorkflowStart:
             return x * 2
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        run_id = await start(my_workflow, 5, storage=storage)
+        run_id = await start_local(my_workflow, 5, storage=storage)
 
         # Check run was created
         assert run_id is not None
@@ -50,7 +54,7 @@ class TestWorkflowStart:
             return a + b
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        run_id = await start(kwargs_workflow, 10, b=20, storage=storage)
+        run_id = await start_local(kwargs_workflow, 10, b=20, storage=storage)
 
         # Check result was stored
         run = await storage.get_run(run_id)
@@ -67,12 +71,12 @@ class TestWorkflowStart:
         storage = FileStorageBackend(base_path=str(tmp_path))
 
         # First execution
-        run_id1 = await start(
+        run_id1 = await start_local(
             my_workflow, storage=storage, idempotency_key="unique-key-123"
         )
 
         # Second execution with same key - should return same run_id
-        run_id2 = await start(
+        run_id2 = await start_local(
             my_workflow, storage=storage, idempotency_key="unique-key-123"
         )
 
@@ -89,7 +93,7 @@ class TestWorkflowStart:
         storage = FileStorageBackend(base_path=str(tmp_path))
 
         with pytest.raises(ValueError, match="Test failure"):
-            await start(failing_workflow, storage=storage)
+            await start_local(failing_workflow, storage=storage)
 
         # Check that run was marked as failed
         # (We need to get the run_id from storage somehow)
@@ -105,7 +109,7 @@ class TestWorkflowStart:
             return "completed"
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        run_id = await start(suspending_workflow, storage=storage)
+        run_id = await start_local(suspending_workflow, storage=storage)
 
         # Workflow should have suspended
         run = await storage.get_run(run_id)
@@ -125,7 +129,7 @@ class TestWorkflowStart:
             return result
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        run_id = await start(step_workflow, 5, storage=storage)
+        run_id = await start_local(step_workflow, 5, storage=storage)
 
         # Verify completion
         run = await storage.get_run(run_id)
@@ -153,12 +157,12 @@ class TestWorkflowResume:
         storage = FileStorageBackend(base_path=str(tmp_path))
 
         # Start and suspend
-        run_id = await start(resumable_workflow, storage=storage)
+        run_id = await start_local(resumable_workflow, storage=storage)
         run = await storage.get_run(run_id)
         assert run.status == RunStatus.SUSPENDED
 
         # Resume workflow
-        result = await resume(run_id, storage=storage)
+        result = await resume_local(run_id, storage=storage)
 
         # Should complete now
         # Note: This will still suspend because sleep hasn't actually elapsed
@@ -170,7 +174,7 @@ class TestWorkflowResume:
         storage = FileStorageBackend(base_path=str(tmp_path))
 
         with pytest.raises(WorkflowNotFoundError):
-            await resume("nonexistent_run_id", storage=storage)
+            await resume_local("nonexistent_run_id", storage=storage)
 
     @pytest.mark.asyncio
     async def test_resume_with_replay(self, tmp_path):
@@ -193,11 +197,11 @@ class TestWorkflowResume:
         storage = FileStorageBackend(base_path=str(tmp_path))
 
         # Start workflow - will execute first step and suspend
-        run_id = await start(replay_workflow, storage=storage)
+        run_id = await start_local(replay_workflow, storage=storage)
         assert execution_count == 1
 
         # Resume - should replay first step (not execute) and suspend again
-        await resume(run_id, storage=storage)
+        await resume_local(run_id, storage=storage)
 
         # First step should have been replayed, not re-executed
         # So execution_count should still be 1
@@ -216,7 +220,7 @@ class TestWorkflowQueries:
             return "done"
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        run_id = await start(query_workflow, storage=storage)
+        run_id = await start_local(query_workflow, storage=storage)
 
         # Query the run
         run = await get_workflow_run(run_id, storage=storage)
@@ -248,7 +252,7 @@ class TestWorkflowQueries:
             return "completed"
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        run_id = await start(events_workflow, storage=storage)
+        run_id = await start_local(events_workflow, storage=storage)
 
         # Get events
         events = await get_workflow_events(run_id, storage=storage)
@@ -272,7 +276,7 @@ class TestWorkflowQueries:
             return "done"
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        run_id = await start(meta_workflow, storage=storage)
+        run_id = await start_local(meta_workflow, storage=storage)
 
         # Check metadata was stored
         run = await storage.get_run(run_id)
@@ -292,7 +296,7 @@ class TestWorkflowDefaultStorage:
             return "done"
 
         # Start without providing storage
-        run_id = await start(default_workflow)
+        run_id = await start_local(default_workflow)
 
         assert run_id is not None
         assert run_id.startswith("run_")

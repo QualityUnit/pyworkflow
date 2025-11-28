@@ -28,7 +28,7 @@ from pyworkflow.core.step import step
 from pyworkflow.core.workflow import workflow
 from pyworkflow.primitives.sleep import sleep
 
-# Execution engine
+# Execution engine (distributed via Celery)
 from pyworkflow.engine.executor import (
     get_workflow_events,
     get_workflow_run,
@@ -70,7 +70,7 @@ __all__ = [
     "step",
     # Primitives
     "sleep",
-    # Execution
+    # Execution (distributed via Celery)
     "start",
     "resume",
     "get_workflow_run",

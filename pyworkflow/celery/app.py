@@ -8,12 +8,50 @@ This module configures Celery for:
 - Result persistence
 """
 
-from typing import Optional
+import os
+from typing import List, Optional
 
 from celery import Celery
 from kombu import Exchange, Queue
 
 from pyworkflow.observability.logging import configure_logging
+
+
+def discover_workflows(modules: Optional[List[str]] = None) -> None:
+    """
+    Discover and import workflow modules to register workflows with Celery workers.
+
+    This function imports Python modules containing workflow definitions so that
+    Celery workers can find and execute them.
+
+    Args:
+        modules: List of module paths to import (e.g., ["myapp.workflows", "myapp.tasks"])
+                If None, reads from PYWORKFLOW_DISCOVER environment variable
+
+    Environment Variables:
+        PYWORKFLOW_DISCOVER: Comma-separated list of modules to import
+                            Example: "myapp.workflows,myapp.tasks,examples.functional.basic_workflow"
+
+    Examples:
+        # Discover from environment variable
+        discover_workflows()
+
+        # Discover specific modules
+        discover_workflows(["myapp.workflows", "myapp.tasks"])
+    """
+    if modules is None:
+        # Read from environment variable
+        discover_env = os.getenv("PYWORKFLOW_DISCOVER", "")
+        if not discover_env:
+            return
+        modules = [m.strip() for m in discover_env.split(",") if m.strip()]
+
+    for module_path in modules:
+        try:
+            __import__(module_path)
+            print(f"✓ Discovered workflows from: {module_path}")
+        except ImportError as e:
+            print(f"✗ Failed to import {module_path}: {e}")
 
 
 def create_celery_app(
@@ -121,6 +159,9 @@ def create_celery_app(
 
     # Configure logging
     configure_logging(level="INFO")
+
+    # Auto-discover workflows from environment variable or configured modules
+    discover_workflows()
 
     return app
 

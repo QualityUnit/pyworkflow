@@ -9,23 +9,16 @@ RUN apt-get update && \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Poetry
-RUN pip install --no-cache-dir poetry==1.7.1
+# Copy project files
+COPY pyproject.toml ./
 
-# Copy poetry files
-COPY pyproject.toml poetry.lock* ./
+# Install the package with dependencies
+# First install build dependencies
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Configure poetry to not create virtual env (we're in a container)
-RUN poetry config virtualenvs.create false
-
-# Install dependencies
-RUN poetry install --no-root --no-dev
-
-# Copy application code
+# Install the package in editable mode with dependencies
 COPY . .
-
-# Install the package
-RUN poetry install --no-dev
+RUN pip install --no-cache-dir -e .
 
 # Create directory for workflow data
 RUN mkdir -p /app/workflows_data

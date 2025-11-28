@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   redis:
     image: redis:7-alpine
@@ -15,41 +13,43 @@ services:
 
   worker:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: devops/Dockerfile
     command: celery -A pyworkflow.celery.app worker --loglevel=info --concurrency=4
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - PYWORKFLOW_DISCOVER=examples.functional.basic_workflow,examples.functional.distributed_example
     depends_on:
       redis:
         condition: service_healthy
     volumes:
-      - .:/app
-      - ./workflows_data:/app/workflows_data  # Persist workflow data
+      - ..:/app
+      - ../workflows_data:/app/workflows_data  # Persist workflow data
     deploy:
-      replicas: 2  # Run 2 workers for load balancing
+      replicas: 1  # Run 2 workers for load balancing
 
   beat:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: devops/Dockerfile
     command: celery -A pyworkflow.celery.app beat --loglevel=info
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - PYWORKFLOW_DISCOVER=examples.functional.basic_workflow,examples.functional.simple_example,examples.functional.simple_no_sleep,examples.functional.distributed_example
     depends_on:
       redis:
         condition: service_healthy
     volumes:
-      - .:/app
-      - ./workflows_data:/app/workflows_data
+      - ..:/app
+      - ../workflows_data:/app/workflows_data
 
   # Optional: Flower for monitoring Celery workers
   flower:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: devops/Dockerfile
     command: celery -A pyworkflow.celery.app flower --port=5555
     ports:
       - "5555:5555"

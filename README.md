@@ -452,8 +452,6 @@ See [DISTRIBUTED.md](DISTRIBUTED.md) for complete deployment guide with Kubernet
 
 Check out the [examples/](examples/) directory for complete working examples:
 
-- **[simple_no_sleep.py](examples/functional/simple_no_sleep.py)** - Basic workflow without sleep
-- **[simple_example.py](examples/functional/simple_example.py)** - Workflow with sleep and resumption
 - **[basic_workflow.py](examples/functional/basic_workflow.py)** - Complete example with retries, errors, and sleep
 - **[distributed_example.py](examples/functional/distributed_example.py)** - Multi-worker distributed execution example
 

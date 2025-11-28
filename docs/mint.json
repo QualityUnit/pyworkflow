@@ -27,6 +27,11 @@
   },
   "anchors": [
     {
+      "name": "FlowHunt",
+      "icon": "bolt",
+      "url": "https://www.flowhunt.io"
+    },
+    {
       "name": "GitHub",
       "icon": "github",
       "url": "https://github.com/qualityunit/pyworkflow"

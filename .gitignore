@@ -275,3 +275,6 @@ celerybeat-schedule.db
 
 # Claude Code plans
 .claude/plans/
+
+# Add copilot in intellij
+.idea/copilot**

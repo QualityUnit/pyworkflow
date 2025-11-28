@@ -1,120 +1,37 @@
 # PyWorkflow
 
-A Python implementation of durable, event-sourced workflows inspired by [Vercel's Workflow Development Kit](https://github.com/vercel/workflow).
+**Distributed, durable workflow orchestration for Python**
 
-## About This Project
-
-PyWorkflow brings the power of durable workflows to Python developers. It enables building long-running, fault-tolerant workflows with automatic retry, sleep/delay capabilities, webhook integration, and complete observability.
+Build long-running, fault-tolerant workflows with automatic retry, sleep/delay capabilities, and complete observability. PyWorkflow uses event sourcing and Celery for production-grade distributed execution.
 
 ---
 
-## Analysis of Vercel Workflow (TypeScript)
+## What is PyWorkflow?
 
-This project is inspired by Vercel's Workflow framework. Here's our analysis of the original TypeScript implementation:
+PyWorkflow is a workflow orchestration framework that enables you to build complex, long-running business processes as simple Python code. It handles the hard parts of distributed systems: fault tolerance, automatic retries, state management, and horizontal scaling.
 
-### Core Architecture
+### Key Features
 
-**Event-Sourced Execution Model**
-- Complete event log captures all workflow state changes
-- Deterministic replay enables fault tolerance and resumption
-- Events stored in append-only log with sequence numbers
-
-**Two-Tier Queue System**
-- **Workflow Queue**: Handles workflow orchestration (lightweight, high priority)
-- **Step Queue**: Executes actual business logic (worker-intensive, scalable)
-
-**Suspension & Resumption**
-- Workflows suspend at `sleep()` and `createHook()` calls
-- Zero resources consumed during suspension
-- Automatic resumption via scheduled tasks or webhook triggers
-
-### Key Features from Vercel Workflow
-
-| Feature | Description | Implementation |
-|---------|-------------|----------------|
-| **Workflows** | Durable orchestration functions | Async functions with `"use workflow"` directive |
-| **Steps** | Isolated, retryable units of work | Functions with `"use step"` directive |
-| **Sleep** | Time-based delays | `sleep("5s")`, `sleep("2h")`, `sleep("3d")` |
-| **Hooks** | External event integration | `createHook()` for webhooks |
-| **Retry** | Automatic retry with backoff | Default 3 attempts, configurable |
-| **Error Handling** | Fatal vs Retriable errors | `FatalError`, `RetryableError` |
-| **Event Log** | Complete execution history | All state changes recorded |
-| **Storage** | Pluggable backends | PostgreSQL (PgBoss), Local (file-based) |
-
-### API Design (Vercel Workflow)
-
-```typescript
-// Workflow definition
-async function processOrder(orderId: string) {
-  "use workflow";
-
-  const order = await validateOrder(orderId);
-  await sleep("5m");
-  const shipment = await createShipment(orderId);
-
-  return shipment;
-}
-
-// Step definition
-async function validateOrder(orderId: string) {
-  "use step";
-  // Business logic with full Node.js access
-  return order;
-}
-
-// With webhooks
-async function paymentFlow(orderId: string) {
-  "use workflow";
-
-  const hook = await createHook();
-  await sendWebhook(hook.url);
-
-  const result = await hook; // Suspends until webhook receives data
-  return result;
-}
-```
-
-### Technical Implementation Details
-
-**Serialization** (Vercel uses `devalue` library)
-- Complex type support: Date, Map, Set, Error, Stream, ArrayBuffer
-- Binary data → Base64 encoding
-- Errors → Structured objects with stack traces
-
-**Queue Integration** (Vercel uses PgBoss for PostgreSQL)
-- Workflow invocations → workflow queue
-- Step executions → step queue
-- Idempotency keys prevent duplicate execution
-
-**Event Types**
-- `workflow_started`, `workflow_completed`, `workflow_failed`
-- `step_started`, `step_completed`, `step_failed`, `step_retrying`
-- `wait_created`, `wait_completed`
-- `hook_created`, `hook_received`, `hook_disposed`
+- **Distributed by Default**: All workflows execute across Celery workers for horizontal scaling
+- **Durable Execution**: Event sourcing ensures workflows can recover from any failure
+- **Time Travel**: Sleep for minutes, hours, or days with automatic resumption
+- **Fault Tolerant**: Automatic retries with configurable backoff strategies
+- **Zero-Resource Suspension**: Workflows suspend without holding resources during sleep
+- **Production Ready**: Built on battle-tested Celery and Redis
+- **Fully Typed**: Complete type hints and Pydantic validation
+- **Observable**: Structured logging with workflow context
 
 ---
 
-## PyWorkflow: Python Implementation
+## Quick Start
 
-### Design Goals
-
-1. **Distributed by Default**: All workflows execute across Celery workers for horizontal scaling
-2. **Pythonic API**: Use decorators (`@workflow`, `@step`) instead of string directives
-3. **Production-Ready**: Battle-tested Celery for distributed task execution
-4. **Pluggable Storage**: Multiple backends (File, Redis, SQLite, PostgreSQL)
-5. **Type Safety**: Full type hints and Pydantic validation
-6. **Observability**: Structured logging with Loguru
-7. **Fault Tolerant**: Event sourcing enables deterministic replay and recovery
-
-### Quick Start
-
-#### Installation
+### Installation
 
 ```bash
 pip install pyworkflow
 ```
 
-#### Prerequisites
+### Prerequisites
 
 PyWorkflow requires Redis and Celery workers for distributed execution:
 
@@ -129,311 +46,485 @@ celery -A pyworkflow.celery.app worker --loglevel=info
 celery -A pyworkflow.celery.app beat --loglevel=info
 ```
 
-See [DISTRIBUTED.md](DISTRIBUTED.md) for production deployment with Docker Compose and Kubernetes.
+Or use Docker Compose (recommended):
 
-#### Basic Example
+```bash
+docker-compose up -d
+```
+
+See [DOCKER.md](DOCKER.md) for Docker deployment details.
+
+### Your First Workflow
 
 ```python
 from pyworkflow import workflow, step, start, sleep
 
 @step()
-async def process_item(item_id: int):
-    # This runs on any available Celery worker
-    return f"Processed {item_id}"
-
-@workflow
-async def my_workflow(item_id: int):
-    result = await process_item(item_id)
-    await sleep("5m")  # Automatically resumes after 5 minutes!
-    return result
-
-# Start workflow - executes across Celery workers
-run_id = start(my_workflow, item_id=123)
-```
-
-**Key Features:**
-- ✅ **Distributed by Default**: All workflows execute across Celery workers
-- ✅ **Horizontal Scaling**: Add more workers to handle increased load
-- ✅ **Automatic Sleep Resumption**: Celery Beat schedules resumption after sleep
-- ✅ **Fault Tolerant**: Event sourcing enables recovery from failures
-- ✅ **Zero-Resource Sleep**: Workflows suspend without holding resources
-
-#### Basic Example (OOP API)
-
-```python
-from pyworkflow import Workflow, Step
-
-class GreetWorkflow(Workflow):
-    name = "greet_user"
-
-    async def run(self, name: str):
-        message = await CreateGreetingStep()(name)
-        await SendMessageStep()(message)
-        return message
-
-class CreateGreetingStep(Step):
-    async def execute(self, name: str):
-        return f"Hello, {name}!"
-
-class SendMessageStep(Step):
-    async def execute(self, message: str):
-        print(message)
-        return True
-
-# Usage
-workflow = GreetWorkflow()
-run_id = await workflow.start("Alice")
-```
-
-### Core Features
-
-#### 1. Sequential and Parallel Execution
-
-```python
-@workflow
-async def process_order(order_id: str):
-    # Sequential
-    order = await validate_order(order_id)
-
-    # Parallel execution
-    import asyncio
-    payment, inventory = await asyncio.gather(
-        process_payment(order["total"]),
-        reserve_inventory(order["items"])
-    )
-
-    # Continue sequential
-    shipment = await create_shipment(order_id)
-    return shipment
-```
-
-#### 2. Sleep and Delays
-
-```python
-from pyworkflow import workflow, step, sleep, start
-
-@step()
 async def send_welcome_email(user_id: str):
-    # Send email logic
-    return True
+    # This runs on any available Celery worker
+    print(f"Sending welcome email to user {user_id}")
+    return f"Email sent to {user_id}"
 
 @step()
 async def send_tips_email(user_id: str):
-    # Send tips logic
-    return True
-
-@step()
-async def send_feedback_request(user_id: str):
-    # Send feedback request
-    return True
+    print(f"Sending tips email to user {user_id}")
+    return f"Tips sent to {user_id}"
 
 @workflow
-async def onboarding_flow(user_id: str):
+async def onboarding_workflow(user_id: str):
+    # Send welcome email immediately
     await send_welcome_email(user_id)
 
-    await sleep("1d")  # Sleep for 1 day - workflow suspends
+    # Sleep for 1 day - workflow suspends, zero resources used
+    await sleep("1d")
+
+    # Automatically resumes after 1 day!
     await send_tips_email(user_id)
 
-    await sleep("3d")  # Sleep for 3 more days
-    await send_feedback_request(user_id)
+    return "Onboarding complete"
 
-# Start workflow - executes on Celery workers
-run_id = start(onboarding_flow, "user_123")
+# Start workflow - executes across Celery workers
+run_id = start(onboarding_workflow, user_id="user_123")
+print(f"Workflow started: {run_id}")
 ```
 
-**Note**: With Celery Beat running, workflows automatically resume after sleep periods.
+**What happens:**
+1. Workflow starts on a Celery worker
+2. Welcome email is sent
+3. Workflow suspends after calling `sleep("1d")`
+4. Worker is freed to handle other tasks
+5. After 1 day, Celery Beat automatically schedules resumption
+6. Workflow resumes on any available worker
+7. Tips email is sent
 
-#### 3. Error Handling and Retries
+---
+
+## Core Concepts
+
+### Workflows
+
+Workflows are the top-level orchestration functions. They coordinate steps, handle business logic, and can sleep for extended periods.
 
 ```python
-from pyworkflow import FatalError, RetryableError
+from pyworkflow import workflow, start
+
+@workflow(name="process_order", max_duration="1h")
+async def process_order(order_id: str):
+    """
+    Process a customer order.
+
+    This workflow:
+    - Validates the order
+    - Processes payment
+    - Creates shipment
+    - Sends confirmation
+    """
+    order = await validate_order(order_id)
+    payment = await process_payment(order)
+    shipment = await create_shipment(order)
+    await send_confirmation(order)
+
+    return {"order_id": order_id, "status": "completed"}
+
+# Start the workflow
+run_id = start(process_order, order_id="ORD-123")
+```
+
+### Steps
+
+Steps are the building blocks of workflows. Each step is an isolated, retryable unit of work that runs on Celery workers.
+
+```python
+from pyworkflow import step, RetryableError, FatalError
 
 @step(max_retries=5, retry_delay="exponential")
 async def call_external_api(url: str):
+    """
+    Call external API with automatic retry.
+
+    Retries up to 5 times with exponential backoff if it fails.
+    """
     try:
         response = await httpx.get(url)
 
         if response.status_code == 404:
-            raise FatalError("Resource not found")  # Don't retry
+            # Don't retry - resource doesn't exist
+            raise FatalError("Resource not found")
 
         if response.status_code >= 500:
-            raise RetryableError("Server error", retry_after="30s")  # Retry
+            # Retry - server error
+            raise RetryableError("Server error", retry_after="30s")
 
         return response.json()
     except httpx.NetworkError:
-        raise RetryableError("Network error")  # Retry with exponential backoff
+        # Retry with exponential backoff
+        raise RetryableError("Network error")
 ```
 
-### Architecture Comparison
+### Sleep and Delays
 
-| Aspect | Vercel Workflow (TS) | PyWorkflow (Python) |
-|--------|---------------------|---------------------|
-| **API Style** | String directives (`"use workflow"`) | Decorators (`@workflow`, `@step()`) |
-| **Execution** | Custom VM isolation | Celery workers (distributed) |
-| **Queue System** | Custom (PgBoss) | Celery (Redis/RabbitMQ) |
-| **Serialization** | devalue library | cloudpickle + JSON |
-| **Logging** | Custom | Loguru (structured logging) |
-| **Type Safety** | TypeScript types | Python type hints + Pydantic |
-| **Storage** | PostgreSQL, Local | File (✅), Redis (📋), SQLite (📋), PostgreSQL (📋) |
-| **Event Sourcing** | ✅ Full event log | ✅ Full event log (16 event types) |
-| **Sleep** | ✅ Duration strings | ✅ Duration strings + timedelta + datetime |
-| **Auto Resumption** | ✅ Scheduled tasks | ✅ Celery Beat integration |
-| **Distributed** | ✅ Multi-worker | ✅ Horizontal scaling with Celery |
-| **Hooks** | ✅ External events | 📋 Planned (Phase 2) |
+Workflows can sleep for any duration. During sleep, the workflow suspends and consumes zero resources.
 
-### Key Differences
+```python
+from pyworkflow import workflow, sleep
 
-**Advantages of PyWorkflow:**
-- ✅ **Production-Ready Distributed Execution**: Battle-tested Celery integration with horizontal scaling
-- ✅ **Automatic Sleep Resumption**: Celery Beat integration for zero-config resumption
-- ✅ **Comprehensive Event Sourcing**: 16 event types with deterministic replay
-- ✅ **Multiple Storage Backends**: File (implemented), Redis/SQLite/PostgreSQL (planned)
-- ✅ **Pythonic API**: Decorators (`@workflow`, `@step()`) instead of string directives
-- ✅ **Full Type Safety**: Python type hints with Pydantic validation
-- ✅ **Structured Logging**: Loguru integration with context binding
-- ✅ **Complete Test Coverage**: 68 unit tests, 100% passing
+@workflow
+async def scheduled_reminder(user_id: str):
+    # Send immediate reminder
+    await send_reminder(user_id, "immediate")
 
-**Vercel Workflow Advantages:**
-- VM isolation provides stronger step independence
-- Tighter integration with Vercel platform
-- Built-in streaming response support
+    # Sleep for 1 hour
+    await sleep("1h")
+    await send_reminder(user_id, "1 hour later")
 
-### Feature Parity Status
+    # Sleep for 1 day
+    await sleep("1d")
+    await send_reminder(user_id, "1 day later")
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Basic Workflows | ✅ Complete | Functional API with @workflow decorator |
-| Steps with Retry | ✅ Complete | @step() with configurable retry logic |
-| Event Sourcing | ✅ Complete | Full event log with 16 event types |
-| File Storage | ✅ Complete | Thread-safe JSONL-based storage |
-| Sleep/Delays | ✅ Complete | Duration strings, automatic resumption |
-| Distributed Execution | ✅ Complete | Celery integration with auto-scheduling |
-| Observability | ✅ Complete | Loguru structured logging |
-| Parallel Execution | ✅ Complete | Native asyncio.gather() support |
-| Hooks/Webhooks | 📋 Planned | Phase 2 |
-| Redis Storage | 📋 Planned | Phase 2 |
-| SQLite Storage | 📋 Planned | Phase 2 |
-| PostgreSQL Storage | 📋 Planned | Phase 3 |
-| OOP API | 📋 Planned | Phase 3 - Class-based workflows |
-| CLI Tools | 📋 Planned | Phase 3 |
-| Nested Workflows | 📋 Planned | Phase 4 |
+    # Sleep for 1 week
+    await sleep("7d")
+    await send_reminder(user_id, "1 week later")
 
-### Project Status
+    return "All reminders sent"
+```
 
-✅ **Status**: MVP Complete - Production Ready for Distributed Workflows
+**Supported formats:**
+- Duration strings: `"5s"`, `"10m"`, `"2h"`, `"3d"`
+- Timedelta: `timedelta(hours=2, minutes=30)`
+- Datetime: `datetime(2025, 12, 25, 9, 0, 0)`
 
-**Completed Milestones**:
-- ✅ Project structure and dependencies
-- ✅ Core decorators and execution engine (@workflow, @step)
-- ✅ Event sourcing with replay capability
-- ✅ File-based storage backend (thread-safe, JSONL)
-- ✅ Celery integration for distributed execution
-- ✅ Sleep/delay primitives with automatic resumption
+---
+
+## Architecture
+
+### Event-Sourced Execution
+
+PyWorkflow uses event sourcing to achieve durable, fault-tolerant execution:
+
+1. **All state changes are recorded as events** in an append-only log
+2. **Deterministic replay** enables workflow resumption from any point
+3. **Complete audit trail** of everything that happened in the workflow
+
+**Event Types** (16 total):
+- Workflow: `started`, `completed`, `failed`, `suspended`, `resumed`
+- Step: `started`, `completed`, `failed`, `retrying`
+- Sleep: `created`, `completed`
+- Logging: `info`, `warning`, `error`, `debug`
+
+### Distributed Execution
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   Your Application                  │
+│                                                     │
+│  start(my_workflow, args)                          │
+│         │                                           │
+└─────────┼───────────────────────────────────────────┘
+          │
+          ▼
+    ┌─────────┐
+    │  Redis  │  ◄──── Message Broker
+    └─────────┘
+          │
+          ├──────┬──────┬──────┐
+          ▼      ▼      ▼      ▼
+     ┌──────┐ ┌──────┐ ┌──────┐
+     │Worker│ │Worker│ │Worker│  ◄──── Horizontal Scaling
+     └──────┘ └──────┘ └──────┘
+          │      │      │
+          └──────┴──────┘
+                 │
+                 ▼
+          ┌──────────┐
+          │ Storage  │  ◄──── Event Log (File/Redis/PostgreSQL)
+          └──────────┘
+```
+
+### Storage Backends
+
+PyWorkflow supports pluggable storage backends:
+
+| Backend | Status | Use Case |
+|---------|--------|----------|
+| **File** | ✅ Complete | Development, single-machine deployments |
+| **Redis** | 📋 Planned | Production, distributed deployments |
+| **PostgreSQL** | 📋 Planned | Enterprise, complex queries |
+| **SQLite** | 📋 Planned | Embedded applications |
+
+---
+
+## Advanced Features
+
+### Parallel Execution
+
+Use Python's native `asyncio.gather()` for parallel step execution:
+
+```python
+import asyncio
+from pyworkflow import workflow, step
+
+@step()
+async def fetch_user(user_id: str):
+    # Fetch user data
+    return {"id": user_id, "name": "Alice"}
+
+@step()
+async def fetch_orders(user_id: str):
+    # Fetch user orders
+    return [{"id": "ORD-1"}, {"id": "ORD-2"}]
+
+@step()
+async def fetch_recommendations(user_id: str):
+    # Fetch recommendations
+    return ["Product A", "Product B"]
+
+@workflow
+async def dashboard_data(user_id: str):
+    # Fetch all data in parallel
+    user, orders, recommendations = await asyncio.gather(
+        fetch_user(user_id),
+        fetch_orders(user_id),
+        fetch_recommendations(user_id)
+    )
+
+    return {
+        "user": user,
+        "orders": orders,
+        "recommendations": recommendations
+    }
+```
+
+### Error Handling
+
+PyWorkflow distinguishes between retriable and fatal errors:
+
+```python
+from pyworkflow import FatalError, RetryableError, step
+
+@step(max_retries=3, retry_delay="exponential")
+async def process_payment(amount: float):
+    try:
+        # Attempt payment
+        result = await payment_gateway.charge(amount)
+        return result
+    except InsufficientFundsError:
+        # Don't retry - user doesn't have enough money
+        raise FatalError("Insufficient funds")
+    except PaymentGatewayTimeoutError:
+        # Retry - temporary issue
+        raise RetryableError("Gateway timeout", retry_after="10s")
+    except Exception as e:
+        # Unknown error - retry with backoff
+        raise RetryableError(f"Unknown error: {e}")
+```
+
+**Retry strategies:**
+- `retry_delay="fixed"` - Fixed delay between retries (default: 60s)
+- `retry_delay="exponential"` - Exponential backoff (1s, 2s, 4s, 8s, ...)
+- `retry_delay="5s"` - Custom fixed delay
+
+### Idempotency
+
+Prevent duplicate workflow executions with idempotency keys:
+
+```python
+from pyworkflow import start
+
+# Same idempotency key = same workflow
+run_id_1 = start(
+    process_order,
+    order_id="ORD-123",
+    idempotency_key="order-ORD-123"
+)
+
+# This will return the same run_id, not start a new workflow
+run_id_2 = start(
+    process_order,
+    order_id="ORD-123",
+    idempotency_key="order-ORD-123"
+)
+
+assert run_id_1 == run_id_2  # True!
+```
+
+### Observability
+
+PyWorkflow includes structured logging with automatic context:
+
+```python
+from pyworkflow import configure_logging
+
+# Configure logging
+configure_logging(
+    level="INFO",
+    log_file="workflow.log",
+    json_logs=True,  # JSON format for production
+    show_context=True  # Include run_id, step_id, etc.
+)
+
+# Logs automatically include:
+# - run_id: Workflow execution ID
+# - workflow_name: Name of the workflow
+# - step_id: Current step ID
+# - step_name: Name of the step
+```
+
+---
+
+## Testing
+
+PyWorkflow includes testing utilities for unit tests:
+
+```python
+import pytest
+from pyworkflow import workflow, step
+from pyworkflow.testing import start_local, resume_local
+from pyworkflow.storage.file import FileStorageBackend
+
+@step()
+async def my_step(x: int):
+    return x * 2
+
+@workflow
+async def my_workflow(x: int):
+    result = await my_step(x)
+    return result + 1
+
+@pytest.mark.asyncio
+async def test_my_workflow():
+    # Use local execution for tests (no Celery required)
+    storage = FileStorageBackend()
+    run_id = await start_local(my_workflow, 5, storage=storage)
+
+    # Get workflow result
+    run = await storage.get_run(run_id)
+    assert run.status == "completed"
+```
+
+---
+
+## Production Deployment
+
+### Docker Compose
+
+```yaml
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  worker:
+    build: .
+    command: celery -A pyworkflow.celery.app worker --loglevel=info
+    depends_on:
+      - redis
+    deploy:
+      replicas: 3  # Run 3 workers
+
+  beat:
+    build: .
+    command: celery -A pyworkflow.celery.app beat --loglevel=info
+    depends_on:
+      - redis
+
+  flower:
+    build: .
+    command: celery -A pyworkflow.celery.app flower --port=5555
+    ports:
+      - "5555:5555"
+```
+
+Start everything:
+```bash
+docker-compose up -d
+```
+
+See [DOCKER.md](DOCKER.md) for complete deployment guide.
+
+---
+
+## Examples
+
+Check out the [examples/](examples/) directory for complete working examples:
+
+- **[simple_no_sleep.py](examples/functional/simple_no_sleep.py)** - Basic workflow without sleep
+- **[simple_example.py](examples/functional/simple_example.py)** - Workflow with sleep and resumption
+- **[basic_workflow.py](examples/functional/basic_workflow.py)** - Complete example with retries, errors, and sleep
+
+---
+
+## Project Status
+
+✅ **Status**: Production Ready (v1.0)
+
+**Completed Features**:
+- ✅ Core workflow and step execution
+- ✅ Event sourcing with 16 event types
+- ✅ Distributed execution via Celery
+- ✅ Sleep primitive with automatic resumption
 - ✅ Error handling and retry strategies
-- ✅ Comprehensive unit tests (68 tests, 100% passing)
-- ✅ Structured logging with Loguru
-- ✅ Docker Compose and Kubernetes deployment configs
-
-**Current Focus**: Real-world testing and additional storage backends
+- ✅ File storage backend
+- ✅ Structured logging
+- ✅ Comprehensive test coverage (68 tests)
+- ✅ Docker Compose deployment
+- ✅ Idempotency support
 
 **Next Milestones**:
 - 📋 Redis storage backend
-- 📋 Hooks/webhooks primitive
-- 📋 SQLite storage backend
-- 📋 OOP class-based API
+- 📋 PostgreSQL storage backend
+- 📋 Webhook integration
+- 📋 Web UI for monitoring
+- 📋 CLI management tools
 
-### Development Roadmap
-
-**Phase 1: Core MVP** (Weeks 1-3)
-- Basic workflow and step execution
-- Event sourcing engine
-- File-based storage
-- Celery integration
-- Simple error handling
-
-**Phase 2: Durability Features** (Weeks 4-6)
-- Sleep and scheduling
-- Hooks and webhooks
-- Redis and SQLite storage
-- Enhanced serialization
-- Retry strategies
-
-**Phase 3: Production Ready** (Weeks 7-9)
-- PostgreSQL storage
-- Structured logging and metrics
-- CLI management tools
-- Idempotency support
-- Performance optimization
-
-**Phase 4: Advanced Features** (Optional)
-- Parallel execution helpers
-- Nested workflows
-- Web UI
-- Framework integrations
+---
 
 ## Contributing
 
-Contributions are welcome! This project is in early development.
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-### Setting Up Development Environment
+### Development Setup
 
 ```bash
 # Clone repository
 git clone https://github.com/yourusername/pyworkflow
 cd pyworkflow
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
-
-# Install dependencies
-pip install -e ".[dev]"
+# Install with Poetry
+poetry install
 
 # Run tests
-pytest
+poetry run pytest
 
 # Format code
-black pyworkflow tests
-ruff check pyworkflow tests
+poetry run black pyworkflow tests
+poetry run ruff check pyworkflow tests
 
 # Type checking
-mypy pyworkflow
+poetry run mypy pyworkflow
 ```
 
-### Development Guidelines
-
-- Follow PEP 8 style guide
-- Add type hints to all functions
-- Write tests for new features
-- Update documentation
-- See `CLAUDE.md` for AI-assisted development guide
+---
 
 ## Documentation
 
-- **[Distributed Deployment Guide](DISTRIBUTED.md)** - Production deployment with Docker Compose and Kubernetes
-- [CLAUDE.md](CLAUDE.md) - AI-assisted development guide
-- [Examples](examples/) - Functional examples and usage patterns
+- **[Docker Deployment Guide](DOCKER.md)** - Production deployment with Docker Compose
+- [Examples](examples/) - Working examples and patterns
 - [API Reference](docs/api-reference.md) (Coming soon)
-- [User Guide](docs/user-guide.md) (Coming soon)
-- [Storage Backends](docs/storage-backends.md) (Coming soon)
-- [Architecture](docs/architecture.md) (Coming soon)
+- [Architecture Guide](docs/architecture.md) (Coming soon)
+
+---
 
 ## License
 
 Apache License 2.0 - See [LICENSE](LICENSE) file for details.
 
-## Acknowledgments
-
-- Inspired by [Vercel Workflow Development Kit](https://github.com/vercel/workflow)
-- Built with [Celery](https://docs.celeryq.dev/)
-- Event sourcing patterns from [Temporal](https://temporal.io/)
+---
 
 ## Links
 
-- **Vercel Workflow**: https://github.com/vercel/workflow
-- **Documentation**: https://useworkflow.dev/
-- **Celery**: https://docs.celeryq.dev/
-
----
-
-**Note**: This is a community project inspired by Vercel Workflow. It is not officially affiliated with Vercel.
+- **GitHub**: https://github.com/yourusername/pyworkflow
+- **Documentation**: (Coming soon)
+- **Issues**: https://github.com/yourusername/pyworkflow/issues

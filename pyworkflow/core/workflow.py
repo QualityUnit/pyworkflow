@@ -29,32 +29,41 @@ from pyworkflow.serialization.encoder import serialize, serialize_args, serializ
 
 def workflow(
     name: Optional[str] = None,
+    durable: Optional[bool] = None,
     max_duration: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Callable:
     """
-    Decorator to mark async functions as durable workflows.
+    Decorator to mark async functions as workflows.
 
-    Workflows are orchestration functions that coordinate steps and maintain
-    state through event sourcing. They can suspend (sleep/hooks) and resume
-    without losing progress.
+    Workflows are orchestration functions that coordinate steps. They can be:
+    - Durable: Event-sourced, persistent, resumable (durable=True)
+    - Transient: Simple execution without persistence overhead (durable=False)
 
     Args:
         name: Optional workflow name (defaults to function name)
+        durable: Whether workflow is durable (None = use configured default)
         max_duration: Optional max duration (e.g., "1h", "30m")
         metadata: Optional metadata dictionary
 
     Returns:
         Decorated workflow function
 
-    Example:
-        @workflow(name="process_order", max_duration="1h")
+    Example (durable):
+        @workflow(name="process_order", durable=True)
         async def process_order(order_id: str):
             order = await validate_order(order_id)
             payment = await charge_payment(order["total"])
+            await sleep("1h")  # Can suspend and resume
             return payment
 
-    Example (minimal):
+    Example (transient):
+        @workflow(durable=False)
+        async def quick_task():
+            result = await my_step()
+            return result
+
+    Example (use configured default):
         @workflow
         async def simple_workflow():
             result = await my_step()
@@ -82,6 +91,7 @@ def workflow(
         # Store metadata on wrapper
         wrapper.__workflow__ = True
         wrapper.__workflow_name__ = workflow_name
+        wrapper.__workflow_durable__ = durable  # None = use config default
         wrapper.__workflow_max_duration__ = max_duration
         wrapper.__workflow_metadata__ = metadata or {}
 
@@ -94,36 +104,41 @@ async def execute_workflow_with_context(
     workflow_func: Callable,
     run_id: str,
     workflow_name: str,
-    storage: Any,  # StorageBackend
+    storage: Any,  # StorageBackend or None for transient
     args: tuple,
     kwargs: dict,
     event_log: Optional[list] = None,
+    durable: bool = True,
 ) -> Any:
     """
     Execute workflow function with proper context setup.
 
     This is called by the executor to run a workflow with:
     - Context initialization
-    - Event logging
+    - Event logging (durable mode only)
     - Error handling
-    - Suspension handling
+    - Suspension handling (durable mode only)
 
     Args:
         workflow_func: The workflow function to execute
         run_id: Unique run identifier
         workflow_name: Workflow name
-        storage: Storage backend instance
+        storage: Storage backend instance (None for transient)
         args: Positional arguments
         kwargs: Keyword arguments
         event_log: Optional existing event log for replay
+        durable: Whether this is a durable workflow
 
     Returns:
         Workflow result
 
     Raises:
-        SuspensionSignal: When workflow needs to suspend
+        SuspensionSignal: When workflow needs to suspend (durable only)
         Exception: On workflow failure
     """
+    # Determine if we're actually durable (need both flag and storage)
+    is_durable = durable and storage is not None
+
     # Create workflow context
     ctx = WorkflowContext(
         run_id=run_id,
@@ -131,14 +146,15 @@ async def execute_workflow_with_context(
         storage=storage,
         event_log=event_log or [],
         started_at=datetime.now(UTC),
+        durable=is_durable,
     )
 
     # Set as current context
     set_current_context(ctx)
 
     try:
-        # Replay events if resuming
-        if event_log:
+        # Replay events if resuming (durable mode only)
+        if is_durable and event_log:
             from pyworkflow.engine.replay import replay_events
 
             await replay_events(ctx, event_log)
@@ -147,26 +163,29 @@ async def execute_workflow_with_context(
             f"Executing workflow: {workflow_name}",
             run_id=run_id,
             workflow_name=workflow_name,
+            durable=is_durable,
             is_replay=bool(event_log),
         )
 
         # Execute workflow function
         result = await workflow_func(*args, **kwargs)
 
-        # Record completion event
-        completion_event = create_workflow_completed_event(run_id, serialize(result))
-        await storage.record_event(completion_event)
+        # Record completion event (durable mode only)
+        if is_durable:
+            completion_event = create_workflow_completed_event(run_id, serialize(result))
+            await storage.record_event(completion_event)
 
         logger.info(
             f"Workflow completed: {workflow_name}",
             run_id=run_id,
             workflow_name=workflow_name,
+            durable=is_durable,
         )
 
         return result
 
     except SuspensionSignal as e:
-        # Workflow suspended (sleep/hook)
+        # Workflow suspended (sleep/hook) - only happens in durable mode
         logger.info(
             f"Workflow suspended: {e.reason}",
             run_id=run_id,
@@ -185,16 +204,17 @@ async def execute_workflow_with_context(
             exc_info=True,
         )
 
-        # Record failure event
-        import traceback
+        # Record failure event (durable mode only)
+        if is_durable:
+            import traceback
 
-        failure_event = create_workflow_failed_event(
-            run_id=run_id,
-            error=str(e),
-            error_type=type(e).__name__,
-            traceback=traceback.format_exc(),
-        )
-        await storage.record_event(failure_event)
+            failure_event = create_workflow_failed_event(
+                run_id=run_id,
+                error=str(e),
+                error_type=type(e).__name__,
+                traceback=traceback.format_exc(),
+            )
+            await storage.record_event(failure_event)
 
         raise
 

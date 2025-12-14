@@ -37,8 +37,11 @@ class WorkflowContext:
     run_id: str
     workflow_name: str
 
-    # Storage backend for event logging
-    storage: Any  # StorageBackend (avoid circular import)
+    # Storage backend for event logging (None for transient workflows)
+    storage: Optional[Any] = None  # StorageBackend (avoid circular import)
+
+    # Durability mode
+    durable: bool = True  # Whether this is a durable workflow
 
     # Event log and replay state
     event_log: List[Event] = field(default_factory=list)
@@ -65,6 +68,18 @@ class WorkflowContext:
 
     # Metadata
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def is_durable(self) -> bool:
+        """
+        Check if this workflow is durable.
+
+        A workflow is durable if both the durable flag is set and
+        a storage backend is available.
+
+        Returns:
+            True if workflow is durable and has storage
+        """
+        return self.durable and self.storage is not None
 
     def should_execute_step(self, step_id: str) -> bool:
         """

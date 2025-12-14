@@ -1,67 +1,64 @@
 # PyWorkflow Examples
 
-This directory contains examples demonstrating various PyWorkflow features and use cases.
+Two paradigms for workflow execution:
 
-## Directory Structure
+## Transient Mode (`transient/`)
 
-- **functional/** - Examples using the functional decorator-based API
-- **oop/** - Examples using the object-oriented class-based API (coming soon)
-- **real_world/** - Real-world use cases and patterns (coming soon)
-
-## Getting Started
-
-### Basic Example
-
-Start with the basic workflow example to understand core concepts:
+Fast, in-memory execution without persistence.
 
 ```bash
-cd examples/functional
-python basic_workflow.py
+python examples/transient/example.py 2>/dev/null
 ```
 
-This example demonstrates:
-- Defining workflows and steps
-- Sequential execution
-- Error handling and retries
-- Using sleep for delays
-- Idempotent workflow execution
+**Characteristics:**
+- No storage required
+- Direct execution
+- `sleep()` uses `asyncio.sleep`
+- Retries work normally
+- No crash recovery
 
-## Available Examples
+**Use cases:** Scripts, CLI tools, testing, short-lived operations
 
-### Functional API
+## Durable Mode (`durable/`)
 
-#### `basic_workflow.py`
-A simple order processing workflow that demonstrates:
-- User data fetching with automatic retry
-- Data validation with fatal errors
-- Payment processing
-- Durable sleep/delays
-- Email confirmation
+Event-sourced execution with persistence and recovery.
 
-**Run it:**
+### Storage Backends
+
+**In-Memory** (testing, ephemeral):
 ```bash
-python examples/functional/basic_workflow.py
+python examples/durable/example_memory.py 2>/dev/null
 ```
 
-## Coming Soon
+**File-based** (development, single-machine):
+```bash
+python examples/durable/example_file.py 2>/dev/null
+```
 
-More examples will be added covering:
-- Parallel step execution
-- Webhooks and hooks for external events
-- Custom storage backends (Redis, PostgreSQL)
-- Complex retry strategies
-- Workflow composition
-- Error recovery patterns
-- Testing workflows
-- Production deployment patterns
+**Characteristics:**
+- Requires storage backend
+- Events recorded for each step
+- `sleep()` suspends workflow, resume with `resume(run_id)`
+- Crash recovery via event replay
+- Idempotency keys prevent duplicates
 
-## Documentation
+**Use cases:** Payment processing, order fulfillment, long-running jobs
 
-For detailed documentation, see:
-- [Main README](../README.md) - Project overview
-- [CLAUDE.md](../CLAUDE.md) - Development guide
-- [API Documentation](../docs/) - Detailed API reference
+## Quick Reference
 
-## Contributing
+```python
+from pyworkflow import workflow, step, start, configure
+from pyworkflow.storage import InMemoryStorageBackend, FileStorageBackend
 
-Have an example use case? Feel free to contribute! See the main README for contribution guidelines.
+# Transient (no storage)
+configure(default_durable=False)
+await start(my_workflow, arg)
+
+# Durable with in-memory storage
+configure(storage=InMemoryStorageBackend(), default_durable=True)
+await start(my_workflow, arg)
+
+# Durable with file storage
+configure(storage=FileStorageBackend("./data"), default_durable=True)
+await start(my_workflow, arg, idempotency_key="unique_id")
+```

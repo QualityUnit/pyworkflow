@@ -2,12 +2,12 @@
 Workflow execution engine.
 
 The executor is responsible for:
-- Starting new workflow runs (distributed via Celery)
-- Resuming existing runs (distributed via Celery)
+- Starting new workflow runs
+- Resuming existing runs
 - Managing workflow lifecycle
-- Coordinating with storage backend
+- Coordinating with storage backend and runtimes
 
-All workflows execute in distributed mode using Celery workers.
+Supports multiple runtimes (local, celery) and durability modes (durable, transient).
 """
 
 import uuid
@@ -29,26 +29,33 @@ from pyworkflow.storage.base import StorageBackend
 from pyworkflow.storage.schemas import RunStatus, WorkflowRun
 
 
-def start(
+class ConfigurationError(Exception):
+    """Configuration error for PyWorkflow."""
+
+    pass
+
+
+async def start(
     workflow_func: Callable,
     *args: Any,
-    storage_config: Optional[dict] = None,
+    runtime: Optional[str] = None,
+    durable: Optional[bool] = None,
+    storage: Optional[StorageBackend] = None,
     idempotency_key: Optional[str] = None,
     **kwargs: Any,
 ) -> str:
     """
-    Start a new workflow execution in distributed mode.
+    Start a new workflow execution.
 
-    Workflows execute across Celery workers, enabling:
-    - Horizontal scaling across multiple machines
-    - Fault tolerance through event sourcing
-    - Automatic sleep resumption via Celery Beat
-    - Zero-resource suspension
+    The runtime and durability mode can be specified per-call, or will use
+    the configured defaults.
 
     Args:
         workflow_func: Workflow function decorated with @workflow
         *args: Positional arguments for workflow
-        storage_config: Storage backend configuration (optional)
+        runtime: Runtime to use ("local", "celery", etc.) or None for default
+        durable: Whether workflow is durable (None = use workflow/config default)
+        storage: Storage backend instance (None = use configured storage)
         idempotency_key: Optional key for idempotent execution
         **kwargs: Keyword arguments for workflow
 
@@ -56,30 +63,32 @@ def start(
         run_id: Unique identifier for this workflow run
 
     Examples:
-        @workflow
-        async def my_workflow(x: int):
-            result = await my_step(x)
-            await sleep("5m")
-            return result
+        # Basic usage (uses configured defaults)
+        run_id = await start(my_workflow, 42)
 
-        # Start workflow - executes on Celery workers
-        run_id = start(my_workflow, 42)
+        # Transient workflow (no persistence)
+        run_id = await start(my_workflow, 42, durable=False)
 
-        # With idempotency
-        run_id = start(
-            my_workflow,
-            42,
+        # Durable workflow with storage
+        run_id = await start(
+            my_workflow, 42,
+            durable=True,
+            storage=InMemoryStorageBackend()
+        )
+
+        # Explicit local runtime
+        run_id = await start(my_workflow, 42, runtime="local")
+
+        # With idempotency key
+        run_id = await start(
+            my_workflow, 42,
             idempotency_key="unique-operation-id"
         )
-
-        # With custom storage (Redis)
-        run_id = start(
-            my_workflow,
-            42,
-            storage_config={"type": "redis", "host": "localhost"}
-        )
     """
-    from pyworkflow.celery.tasks import start_workflow_task
+    from pyworkflow.config import get_config
+    from pyworkflow.runtime import get_runtime, validate_runtime_durable
+
+    config = get_config()
 
     # Get workflow metadata
     workflow_meta = get_workflow_by_func(workflow_func)
@@ -91,83 +100,119 @@ def start(
 
     workflow_name = workflow_meta.name
 
-    # Serialize arguments
-    args_json = serialize_args(*args)
-    kwargs_json = serialize_kwargs(**kwargs)
+    # Resolve runtime
+    runtime_name = runtime or config.default_runtime
+    runtime_instance = get_runtime(runtime_name)
 
-    logger.info(
-        f"Starting workflow in distributed mode: {workflow_name}",
-        workflow_name=workflow_name,
-        idempotency_key=idempotency_key,
+    # Resolve durable flag (priority: call arg > decorator > config default)
+    workflow_durable = getattr(workflow_func, "__workflow_durable__", None)
+    effective_durable = (
+        durable
+        if durable is not None
+        else workflow_durable if workflow_durable is not None else config.default_durable
     )
 
-    # Submit to Celery - execution happens on workers
-    result = start_workflow_task.delay(
-        workflow_name=workflow_name,
-        args_json=args_json,
-        kwargs_json=kwargs_json,
-        storage_config=storage_config,
-        idempotency_key=idempotency_key,
-    )
+    # Validate runtime + durable combination
+    validate_runtime_durable(runtime_instance, effective_durable)
 
-    # Wait for workflow to start and get run_id
-    try:
-        run_id = result.get(timeout=30)
-    except Exception as e:
-        logger.error(
-            f"Failed to start workflow: {workflow_name}",
-            error=str(e),
-            exc_info=True,
+    # Resolve storage
+    effective_storage = storage or config.storage
+    if effective_durable and effective_storage is None:
+        raise ConfigurationError(
+            "Durable workflows require storage. Either:\n"
+            "  1. Pass storage=... to start()\n"
+            "  2. Configure globally via pyworkflow.configure(storage=...)\n"
+            "  3. Use durable=False for transient workflows"
         )
-        raise
+
+    # Check idempotency key (only for durable workflows with storage)
+    if idempotency_key and effective_durable and effective_storage:
+        existing_run = await effective_storage.get_run_by_idempotency_key(idempotency_key)
+        if existing_run:
+            if existing_run.status == RunStatus.RUNNING:
+                raise WorkflowAlreadyRunningError(existing_run.run_id)
+            logger.info(
+                f"Workflow with idempotency key '{idempotency_key}' already exists",
+                run_id=existing_run.run_id,
+                status=existing_run.status.value,
+            )
+            return existing_run.run_id
+
+    # Generate run_id
+    run_id = f"run_{uuid.uuid4().hex[:16]}"
 
     logger.info(
-        f"Workflow started in distributed mode: {workflow_name}",
+        f"Starting workflow: {workflow_name}",
         run_id=run_id,
-        task_id=result.id,
+        workflow_name=workflow_name,
+        runtime=runtime_name,
+        durable=effective_durable,
     )
 
-    return run_id
+    # Execute via runtime
+    return await runtime_instance.start_workflow(
+        workflow_func=workflow_meta.func,
+        args=args,
+        kwargs=kwargs,
+        run_id=run_id,
+        workflow_name=workflow_name,
+        storage=effective_storage,
+        durable=effective_durable,
+        idempotency_key=idempotency_key,
+        max_duration=workflow_meta.max_duration,
+        metadata=workflow_meta.metadata,
+    )
 
 
-def resume(
+async def resume(
     run_id: str,
-    storage_config: Optional[dict] = None,
-) -> None:
+    runtime: Optional[str] = None,
+    storage: Optional[StorageBackend] = None,
+) -> Any:
     """
-    Resume a suspended workflow in distributed mode.
-
-    Submits the workflow resumption to Celery workers. The workflow
-    will continue execution from where it was suspended.
+    Resume a suspended workflow.
 
     Args:
         run_id: Workflow run identifier
-        storage_config: Storage backend configuration (optional)
+        runtime: Runtime to use (None = use configured default)
+        storage: Storage backend (None = use configured storage)
+
+    Returns:
+        Workflow result (if completed) or None (if suspended again)
 
     Examples:
-        # Resume a workflow after manual intervention
-        resume("run_abc123")
+        # Resume with configured defaults
+        result = await resume("run_abc123")
 
-        # Resume with custom storage
-        resume("run_abc123", storage_config={"type": "redis"})
-
-    Note:
-        When using sleep() with Celery Beat running, workflows
-        automatically resume - manual resume() is not needed.
+        # Resume with explicit storage
+        result = await resume("run_abc123", storage=my_storage)
     """
-    from pyworkflow.celery.tasks import resume_workflow_task
+    from pyworkflow.config import get_config
+    from pyworkflow.runtime import get_runtime
 
-    logger.info(f"Resuming workflow in distributed mode: {run_id}")
+    config = get_config()
 
-    # Submit to Celery - execution happens on workers
-    resume_workflow_task.delay(
-        run_id=run_id,
-        storage_config=storage_config,
-    )
+    # Resolve runtime and storage
+    runtime_name = runtime or config.default_runtime
+    runtime_instance = get_runtime(runtime_name)
+    effective_storage = storage or config.storage
+
+    if effective_storage is None:
+        raise ConfigurationError(
+            "Cannot resume workflow without storage. "
+            "Configure storage via pyworkflow.configure(storage=...) "
+            "or pass storage=... to resume()"
+        )
 
     logger.info(
-        f"Workflow resume submitted to workers",
+        f"Resuming workflow: {run_id}",
         run_id=run_id,
+        runtime=runtime_name,
+    )
+
+    return await runtime_instance.resume_workflow(
+        run_id=run_id,
+        storage=effective_storage,
     )
 
 
@@ -214,6 +259,7 @@ async def _execute_workflow_local(
             args=args,
             kwargs=kwargs,
             event_log=event_log,
+            durable=True,  # Celery tasks are always durable
         )
 
         # Update run status to completed
@@ -268,11 +314,17 @@ async def get_workflow_run(
 
     Args:
         run_id: Workflow run identifier
-        storage: Storage backend (defaults to FileStorageBackend)
+        storage: Storage backend (defaults to configured storage or FileStorageBackend)
 
     Returns:
         WorkflowRun if found, None otherwise
     """
+    if storage is None:
+        from pyworkflow.config import get_config
+
+        config = get_config()
+        storage = config.storage
+
     if storage is None:
         from pyworkflow.storage.file import FileStorageBackend
 
@@ -290,11 +342,17 @@ async def get_workflow_events(
 
     Args:
         run_id: Workflow run identifier
-        storage: Storage backend (defaults to FileStorageBackend)
+        storage: Storage backend (defaults to configured storage or FileStorageBackend)
 
     Returns:
         List of events ordered by sequence
     """
+    if storage is None:
+        from pyworkflow.config import get_config
+
+        config = get_config()
+        storage = config.storage
+
     if storage is None:
         from pyworkflow.storage.file import FileStorageBackend
 

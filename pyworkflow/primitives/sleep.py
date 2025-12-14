@@ -62,19 +62,30 @@ async def sleep(
     Raises:
         SuspensionSignal: To pause workflow execution
     """
+    import asyncio
+
     # If not in workflow context, use regular asyncio.sleep
     if not has_current_context():
         logger.debug(
             f"Sleep called outside workflow, using asyncio.sleep for {duration}"
         )
-        import asyncio
-
         delay_seconds = _calculate_delay_seconds(duration)
         await asyncio.sleep(delay_seconds)
         return
 
-    # We're in a workflow - use durable sleep
     ctx = get_current_context()
+
+    # Transient mode: use regular asyncio.sleep
+    if not ctx.is_durable():
+        logger.debug(
+            f"Sleep in transient mode, using asyncio.sleep for {duration}",
+            run_id=ctx.run_id,
+        )
+        delay_seconds = _calculate_delay_seconds(duration)
+        await asyncio.sleep(delay_seconds)
+        return
+
+    # Durable mode: use durable sleep with event sourcing
 
     # Generate sleep ID (deterministic based on name or sequence)
     sleep_id = _generate_sleep_id(name, ctx.run_id)

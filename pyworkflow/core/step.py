@@ -82,9 +82,20 @@ def step(
                 )
                 return await func(*args, **kwargs)
 
-            # We're in a workflow - use event sourcing
             ctx = get_current_context()
 
+            # Transient mode: execute directly without event sourcing
+            # Retries are still supported via direct execution
+            if not ctx.is_durable():
+                logger.debug(
+                    f"Step {step_name} in transient mode, executing directly",
+                    run_id=ctx.run_id,
+                )
+                return await _execute_with_retries(
+                    func, args, kwargs, step_name, max_retries, retry_delay
+                )
+
+            # Durable mode: use event sourcing
             # Generate step ID (deterministic based on name + args)
             step_id = _generate_step_id(step_name, args, kwargs)
 
@@ -227,6 +238,93 @@ def step(
         return wrapper
 
     return decorator
+
+
+async def _execute_with_retries(
+    func: Callable,
+    args: tuple,
+    kwargs: dict,
+    step_name: str,
+    max_retries: int,
+    retry_delay: Union[str, int, List[int]],
+) -> Any:
+    """
+    Execute a step function with retry logic (for transient mode).
+
+    Args:
+        func: The step function to execute
+        args: Positional arguments
+        kwargs: Keyword arguments
+        step_name: Name of the step for logging
+        max_retries: Maximum number of retry attempts
+        retry_delay: Retry delay strategy
+
+    Returns:
+        Result of the function
+
+    Raises:
+        Exception: If all retries exhausted
+    """
+    import asyncio
+
+    last_error = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            return await func(*args, **kwargs)
+
+        except FatalError:
+            # Fatal errors are not retried
+            raise
+
+        except Exception as e:
+            last_error = e
+
+            if attempt < max_retries:
+                # Calculate delay
+                delay = _get_retry_delay(retry_delay, attempt)
+
+                logger.warning(
+                    f"Step {step_name} failed (attempt {attempt + 1}/{max_retries + 1}), "
+                    f"retrying in {delay}s",
+                    error=str(e),
+                )
+
+                await asyncio.sleep(delay)
+            else:
+                # All retries exhausted
+                logger.error(
+                    f"Step {step_name} failed after {max_retries + 1} attempts",
+                    error=str(e),
+                )
+
+    raise last_error
+
+
+def _get_retry_delay(retry_delay: Union[str, int, List[int]], attempt: int) -> float:
+    """
+    Calculate retry delay based on strategy.
+
+    Args:
+        retry_delay: Delay strategy ("exponential", int, or list)
+        attempt: Current attempt number (0-indexed)
+
+    Returns:
+        Delay in seconds
+    """
+    if retry_delay == "exponential":
+        # Exponential backoff: 1, 2, 4, 8, 16, ... (capped at 300s)
+        return min(2**attempt, 300)
+    elif isinstance(retry_delay, int):
+        return retry_delay
+    elif isinstance(retry_delay, list):
+        # Use custom delays, fall back to last value if out of range
+        if attempt < len(retry_delay):
+            return retry_delay[attempt]
+        return retry_delay[-1] if retry_delay else 1
+    else:
+        # Default to 1 second
+        return 1
 
 
 def _generate_step_id(step_name: str, args: tuple, kwargs: dict) -> str:

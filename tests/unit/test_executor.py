@@ -1,24 +1,31 @@
 """
 Unit tests for workflow executor.
 
-Note: These tests use local execution (start_local, resume_local) to test
-workflow logic without requiring Celery infrastructure.
+Tests use the unified start/resume API with local runtime.
 """
 
 import pytest
 
+from pyworkflow import start, resume, configure, reset_config
 from pyworkflow.core.exceptions import (
     SuspensionSignal,
     WorkflowAlreadyRunningError,
     WorkflowNotFoundError,
 )
 from pyworkflow.engine.executor import get_workflow_events, get_workflow_run
-from pyworkflow.testing import resume_local, start_local  # Local execution for tests
 from pyworkflow.primitives.sleep import sleep
 from pyworkflow.storage.file import FileStorageBackend
 from pyworkflow.storage.schemas import RunStatus
 from pyworkflow.core.step import step
 from pyworkflow.core.workflow import workflow
+
+
+@pytest.fixture(autouse=True)
+def reset_config_fixture():
+    """Reset configuration before each test."""
+    reset_config()
+    yield
+    reset_config()
 
 
 class TestWorkflowStart:
@@ -33,7 +40,7 @@ class TestWorkflowStart:
             return x * 2
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        run_id = await start_local(my_workflow, 5, storage=storage)
+        run_id = await start(my_workflow, 5, durable=True, storage=storage)
 
         # Check run was created
         assert run_id is not None
@@ -54,7 +61,7 @@ class TestWorkflowStart:
             return a + b
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        run_id = await start_local(kwargs_workflow, 10, b=20, storage=storage)
+        run_id = await start(kwargs_workflow, 10, b=20, durable=True, storage=storage)
 
         # Check result was stored
         run = await storage.get_run(run_id)
@@ -71,13 +78,13 @@ class TestWorkflowStart:
         storage = FileStorageBackend(base_path=str(tmp_path))
 
         # First execution
-        run_id1 = await start_local(
-            my_workflow, storage=storage, idempotency_key="unique-key-123"
+        run_id1 = await start(
+            my_workflow, durable=True, storage=storage, idempotency_key="unique-key-123"
         )
 
         # Second execution with same key - should return same run_id
-        run_id2 = await start_local(
-            my_workflow, storage=storage, idempotency_key="unique-key-123"
+        run_id2 = await start(
+            my_workflow, durable=True, storage=storage, idempotency_key="unique-key-123"
         )
 
         assert run_id1 == run_id2
@@ -93,7 +100,7 @@ class TestWorkflowStart:
         storage = FileStorageBackend(base_path=str(tmp_path))
 
         with pytest.raises(ValueError, match="Test failure"):
-            await start_local(failing_workflow, storage=storage)
+            await start(failing_workflow, durable=True, storage=storage)
 
         # Check that run was marked as failed
         # (We need to get the run_id from storage somehow)
@@ -109,7 +116,7 @@ class TestWorkflowStart:
             return "completed"
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        run_id = await start_local(suspending_workflow, storage=storage)
+        run_id = await start(suspending_workflow, durable=True, storage=storage)
 
         # Workflow should have suspended
         run = await storage.get_run(run_id)
@@ -129,7 +136,7 @@ class TestWorkflowStart:
             return result
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        run_id = await start_local(step_workflow, 5, storage=storage)
+        run_id = await start(step_workflow, 5, durable=True, storage=storage)
 
         # Verify completion
         run = await storage.get_run(run_id)
@@ -157,12 +164,12 @@ class TestWorkflowResume:
         storage = FileStorageBackend(base_path=str(tmp_path))
 
         # Start and suspend
-        run_id = await start_local(resumable_workflow, storage=storage)
+        run_id = await start(resumable_workflow, durable=True, storage=storage)
         run = await storage.get_run(run_id)
         assert run.status == RunStatus.SUSPENDED
 
         # Resume workflow
-        result = await resume_local(run_id, storage=storage)
+        result = await resume(run_id, storage=storage)
 
         # Should complete now
         # Note: This will still suspend because sleep hasn't actually elapsed
@@ -174,7 +181,7 @@ class TestWorkflowResume:
         storage = FileStorageBackend(base_path=str(tmp_path))
 
         with pytest.raises(WorkflowNotFoundError):
-            await resume_local("nonexistent_run_id", storage=storage)
+            await resume("nonexistent_run_id", storage=storage)
 
     @pytest.mark.asyncio
     async def test_resume_with_replay(self, tmp_path):
@@ -197,11 +204,11 @@ class TestWorkflowResume:
         storage = FileStorageBackend(base_path=str(tmp_path))
 
         # Start workflow - will execute first step and suspend
-        run_id = await start_local(replay_workflow, storage=storage)
+        run_id = await start(replay_workflow, durable=True, storage=storage)
         assert execution_count == 1
 
         # Resume - should replay first step (not execute) and suspend again
-        await resume_local(run_id, storage=storage)
+        await resume(run_id, storage=storage)
 
         # First step should have been replayed, not re-executed
         # So execution_count should still be 1
@@ -220,7 +227,7 @@ class TestWorkflowQueries:
             return "done"
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        run_id = await start_local(query_workflow, storage=storage)
+        run_id = await start(query_workflow, durable=True, storage=storage)
 
         # Query the run
         run = await get_workflow_run(run_id, storage=storage)
@@ -252,7 +259,7 @@ class TestWorkflowQueries:
             return "completed"
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        run_id = await start_local(events_workflow, storage=storage)
+        run_id = await start(events_workflow, durable=True, storage=storage)
 
         # Get events
         events = await get_workflow_events(run_id, storage=storage)
@@ -276,7 +283,7 @@ class TestWorkflowQueries:
             return "done"
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        run_id = await start_local(meta_workflow, storage=storage)
+        run_id = await start(meta_workflow, durable=True, storage=storage)
 
         # Check metadata was stored
         run = await storage.get_run(run_id)
@@ -288,20 +295,24 @@ class TestWorkflowDefaultStorage:
     """Test workflows with default storage backend."""
 
     @pytest.mark.asyncio
-    async def test_start_without_storage_param(self):
-        """Test that FileStorageBackend is used by default."""
+    async def test_start_without_storage_param(self, tmp_path):
+        """Test that configured storage is used by default."""
+        from pyworkflow.storage.memory import InMemoryStorageBackend
+
+        storage = InMemoryStorageBackend()
+        configure(storage=storage, default_durable=True)
 
         @workflow(name="default_storage_workflow")
         async def default_workflow():
             return "done"
 
-        # Start without providing storage
-        run_id = await start_local(default_workflow)
+        # Start without providing storage (uses configured default)
+        run_id = await start(default_workflow)
 
         assert run_id is not None
         assert run_id.startswith("run_")
 
-        # Default storage should have created pyworkflow_data directory
-        import os
-
-        assert os.path.exists("pyworkflow_data")
+        # Verify run was stored
+        run = await storage.get_run(run_id)
+        assert run is not None
+        assert run.status == RunStatus.COMPLETED

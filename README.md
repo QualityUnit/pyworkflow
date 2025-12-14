@@ -374,13 +374,12 @@ configure_logging(
 
 ## Testing
 
-PyWorkflow includes testing utilities for unit tests:
+PyWorkflow uses a unified API for testing with local execution:
 
 ```python
 import pytest
-from pyworkflow import workflow, step
-from pyworkflow.testing import start_local, resume_local
-from pyworkflow.storage.file import FileStorageBackend
+from pyworkflow import workflow, step, start, configure, reset_config
+from pyworkflow.storage.memory import InMemoryStorageBackend
 
 @step()
 async def my_step(x: int):
@@ -391,15 +390,22 @@ async def my_workflow(x: int):
     result = await my_step(x)
     return result + 1
 
+@pytest.fixture(autouse=True)
+def setup_storage():
+    reset_config()
+    storage = InMemoryStorageBackend()
+    configure(storage=storage, default_durable=True)
+    yield storage
+    reset_config()
+
 @pytest.mark.asyncio
-async def test_my_workflow():
-    # Use local execution for tests (no Celery required)
-    storage = FileStorageBackend()
-    run_id = await start_local(my_workflow, 5, storage=storage)
+async def test_my_workflow(setup_storage):
+    storage = setup_storage
+    run_id = await start(my_workflow, 5)
 
     # Get workflow result
     run = await storage.get_run(run_id)
-    assert run.status == "completed"
+    assert run.status.value == "completed"
 ```
 
 ---

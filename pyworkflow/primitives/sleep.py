@@ -6,6 +6,7 @@ holding resources. The workflow will suspend and can be resumed after
 the delay period.
 """
 
+import asyncio
 import hashlib
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -13,30 +14,32 @@ from typing import Optional, Union
 
 from loguru import logger
 
-from pyworkflow.core.context import get_current_context, has_current_context
-from pyworkflow.core.exceptions import SuspensionSignal
-from pyworkflow.engine.events import (
-    EventType,
-    create_sleep_completed_event,
-    create_sleep_started_event,
-)
+from pyworkflow.context import get_context, has_context
 from pyworkflow.utils.duration import parse_duration
 
 
 async def sleep(
-    duration: Union[str, int, timedelta, datetime],
+    duration: Union[str, int, float, timedelta, datetime],
     name: Optional[str] = None,
 ) -> None:
     """
     Suspend workflow execution for a specified duration.
 
-    This is a durable sleep that persists across process restarts. The workflow
-    will suspend and can be resumed after the delay period.
+    This function checks for context in two ways:
+    1. New context API (pyworkflow.context) - for ctx.run()/ctx.sleep() pattern
+    2. Old context API (pyworkflow.core.context) - for @workflow/@step pattern
+
+    Different contexts handle sleep differently:
+    - MockContext: Skips sleep (configurable)
+    - LocalContext: Durable sleep with event sourcing
+    - AWSContext: AWS native wait (no compute charges)
+
+    If called outside a workflow context, falls back to asyncio.sleep.
 
     Args:
         duration: How long to sleep:
             - str: Duration string ("5s", "2m", "1h", "3d", "1w")
-            - int: Seconds
+            - int/float: Seconds
             - timedelta: Time duration
             - datetime: Sleep until this specific time
         name: Optional name for this sleep (for debugging)
@@ -53,44 +56,66 @@ async def sleep(
         await sleep("1h")
         await sleep(timedelta(hours=1))
 
-        # Sleep until specific time
-        await sleep(datetime(2025, 1, 15, 10, 30))
-
         # Named sleep for debugging
         await sleep("5m", name="wait_for_rate_limit")
-
-    Raises:
-        SuspensionSignal: To pause workflow execution
     """
-    import asyncio
+    # Check for new context API first
+    if has_context():
+        ctx = get_context()
+        duration_seconds = _calculate_delay_seconds(duration)
 
-    # If not in workflow context, use regular asyncio.sleep
-    if not has_current_context():
         logger.debug(
-            f"Sleep called outside workflow, using asyncio.sleep for {duration}"
+            f"Sleep {duration_seconds}s via {ctx.__class__.__name__}",
+            run_id=ctx.run_id,
+            workflow_name=ctx.workflow_name,
         )
-        delay_seconds = _calculate_delay_seconds(duration)
-        await asyncio.sleep(delay_seconds)
+
+        await ctx.sleep(duration_seconds)
         return
+
+    # Check for old context API (backward compatibility)
+    from pyworkflow.core.context import has_current_context, get_current_context
+
+    if has_current_context():
+        # Use the old durable sleep implementation
+        await _durable_sleep_old_api(duration, name)
+        return
+
+    # No context available - use regular asyncio.sleep
+    duration_seconds = _calculate_delay_seconds(duration)
+    logger.debug(
+        f"Sleep called outside workflow context, using asyncio.sleep for {duration_seconds}s"
+    )
+    await asyncio.sleep(duration_seconds)
+
+
+async def _durable_sleep_old_api(
+    duration: Union[str, int, float, timedelta, datetime],
+    name: Optional[str] = None,
+) -> None:
+    """
+    Durable sleep implementation for the old context API.
+
+    This handles sleep with event sourcing when using @workflow/@step decorators.
+    """
+    from pyworkflow.core.context import get_current_context
+    from pyworkflow.core.exceptions import SuspensionSignal
+    from pyworkflow.engine.events import create_sleep_started_event
 
     ctx = get_current_context()
 
     # Transient mode: use regular asyncio.sleep
     if not ctx.is_durable():
+        delay_seconds = _calculate_delay_seconds(duration)
         logger.debug(
-            f"Sleep in transient mode, using asyncio.sleep for {duration}",
+            f"Sleep in transient mode, using asyncio.sleep for {delay_seconds}s",
             run_id=ctx.run_id,
         )
-        delay_seconds = _calculate_delay_seconds(duration)
         await asyncio.sleep(delay_seconds)
         return
 
     # Durable mode: use durable sleep with event sourcing
-
-    # Generate sleep ID (deterministic based on name or sequence)
     sleep_id = _generate_sleep_id(name, ctx.run_id)
-
-    # Calculate when sleep should complete
     resume_at = _calculate_resume_time(duration)
     delay_seconds = _calculate_delay_seconds(duration)
 
@@ -105,10 +130,8 @@ async def sleep(
 
     # Check if we're resuming and enough time has passed
     if ctx.is_replaying:
-        # During replay, we should skip past sleeps that have completed
         now = datetime.now(UTC)
         if now >= resume_at:
-            # Sleep duration has elapsed, mark as completed
             ctx.mark_sleep_completed(sleep_id)
             logger.debug(
                 f"Sleep {sleep_id} duration elapsed during resume",
@@ -150,7 +173,6 @@ async def sleep(
             resume_at=resume_at.isoformat(),
         )
     except (ImportError, Exception) as e:
-        # Celery not available or Redis not running (e.g., in tests)
         logger.debug(
             f"Could not schedule automatic resumption: {e}",
             run_id=ctx.run_id,
@@ -165,69 +187,36 @@ async def sleep(
 
 
 def _generate_sleep_id(name: Optional[str], run_id: str) -> str:
-    """
-    Generate unique sleep ID.
-
-    If name is provided, use it to create a deterministic ID.
-    Otherwise, generate a unique ID.
-
-    Args:
-        name: Optional sleep name
-        run_id: Workflow run ID
-
-    Returns:
-        Unique sleep ID
-    """
+    """Generate unique sleep ID."""
     if name:
-        # Deterministic ID based on name and run_id
         content = f"{run_id}:{name}"
         hash_hex = hashlib.sha256(content.encode()).hexdigest()[:16]
         return f"sleep_{name}_{hash_hex}"
     else:
-        # Unique ID
         return f"sleep_{uuid.uuid4().hex[:16]}"
 
 
-def _calculate_resume_time(duration: Union[str, int, timedelta, datetime]) -> datetime:
-    """
-    Calculate when the sleep should resume.
-
-    Args:
-        duration: Sleep duration
-
-    Returns:
-        UTC datetime when sleep should complete
-    """
+def _calculate_resume_time(duration: Union[str, int, float, timedelta, datetime]) -> datetime:
+    """Calculate when the sleep should resume."""
     if isinstance(duration, datetime):
-        # Sleep until specific time
         return duration
 
-    # Calculate delay seconds
     delay_seconds = _calculate_delay_seconds(duration)
-
-    # Return current time + delay
     return datetime.now(UTC) + timedelta(seconds=delay_seconds)
 
 
-def _calculate_delay_seconds(duration: Union[str, int, timedelta, datetime]) -> int:
-    """
-    Calculate delay in seconds.
-
-    Args:
-        duration: Sleep duration
-
-    Returns:
-        Delay in seconds
-    """
+def _calculate_delay_seconds(duration: Union[str, int, float, timedelta, datetime]) -> int:
+    """Calculate delay in seconds."""
     if isinstance(duration, datetime):
-        # Calculate seconds until that time
         now = datetime.now(UTC)
         if duration <= now:
-            raise ValueError(
-                f"Cannot sleep until past time: {duration} (now: {now})"
-            )
+            raise ValueError(f"Cannot sleep until past time: {duration} (now: {now})")
         delta = duration - now
         return int(delta.total_seconds())
 
-    # Use the unified parse_duration function for all other types
-    return parse_duration(duration)
+    if isinstance(duration, timedelta):
+        return int(duration.total_seconds())
+    elif isinstance(duration, str):
+        return parse_duration(duration)
+    else:
+        return int(duration)

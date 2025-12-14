@@ -45,6 +45,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+aws = [
+    "aws-durable-execution-sdk-python>=0.1.0",
+]
 dev = [
     # Testing
     "pytest>=7.4.0",

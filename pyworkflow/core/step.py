@@ -6,6 +6,11 @@ Steps are isolated, retryable units of work that:
 - Have automatic retry on failure
 - Cache results for replay
 - Run independently (can be distributed)
+
+Supports multiple runtimes:
+- Local: In-process execution with optional event sourcing
+- Celery: Distributed execution via Celery workers
+- AWS: AWS Durable Lambda Functions with automatic checkpointing
 """
 
 import functools
@@ -25,6 +30,21 @@ from pyworkflow.engine.events import (
 )
 from pyworkflow.serialization.decoder import deserialize
 from pyworkflow.serialization.encoder import serialize, serialize_args, serialize_kwargs
+
+
+def _get_aws_context() -> Optional[Any]:
+    """
+    Get the current AWS workflow context if running in AWS environment.
+
+    Returns None if not in AWS context or AWS module not available.
+    """
+    try:
+        from pyworkflow.aws.context import get_aws_context
+
+        return get_aws_context()
+    except ImportError:
+        # AWS module not installed
+        return None
 
 
 def step(
@@ -74,6 +94,15 @@ def step(
 
         @functools.wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            # Check if running in AWS Durable Lambda context
+            aws_ctx = _get_aws_context()
+            if aws_ctx is not None:
+                logger.debug(
+                    f"Step {step_name} running in AWS context, delegating to AWS SDK"
+                )
+                # Delegate to AWS context for checkpointed execution
+                return aws_ctx.execute_step(func, *args, step_name=step_name, **kwargs)
+
             # Check if we're in a workflow context
             if not has_current_context():
                 # Called outside workflow - execute directly

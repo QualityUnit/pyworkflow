@@ -58,8 +58,17 @@ from pyworkflow.core.exceptions import (
     WorkflowNotFoundError,
 )
 
-# Context access
+# Context access (old API - kept for backward compatibility)
 from pyworkflow.core.context import get_current_context, has_current_context
+
+# New context API (implicit context via contextvars)
+from pyworkflow.context import (
+    WorkflowContext,
+    LocalContext,
+    MockContext,
+    get_context,
+    has_context,
+)
 
 # Storage backends
 from pyworkflow.storage.base import StorageBackend
@@ -103,9 +112,15 @@ __all__ = [
     "WorkflowNotFoundError",
     "WorkflowAlreadyRunningError",
     "ConfigurationError",
-    # Context
+    # Context (old API)
     "get_current_context",
     "has_current_context",
+    # Context (new API)
+    "WorkflowContext",
+    "LocalContext",
+    "MockContext",
+    "get_context",
+    "has_context",
     # Storage
     "StorageBackend",
     "FileStorageBackend",

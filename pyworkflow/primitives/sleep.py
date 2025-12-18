@@ -116,8 +116,6 @@ async def _durable_sleep_old_api(
 
     # Durable mode: use durable sleep with event sourcing
     sleep_id = _generate_sleep_id(name, ctx.run_id)
-    resume_at = _calculate_resume_time(duration)
-    delay_seconds = _calculate_delay_seconds(duration)
 
     # Check if sleep has already completed (replay)
     if not ctx.should_execute_sleep(sleep_id):
@@ -128,17 +126,43 @@ async def _durable_sleep_old_api(
         )
         return
 
-    # Check if we're resuming and enough time has passed
-    if ctx.is_replaying:
+    # Check if we're resuming from this sleep (it's in pending_sleeps from event replay)
+    if sleep_id in ctx.pending_sleeps:
+        # Get the original resume_at from event replay
+        resume_at = ctx.pending_sleeps[sleep_id]
         now = datetime.now(UTC)
+
         if now >= resume_at:
+            # Sleep duration has elapsed - mark as completed and continue
             ctx.mark_sleep_completed(sleep_id)
             logger.debug(
                 f"Sleep {sleep_id} duration elapsed during resume",
                 run_id=ctx.run_id,
                 sleep_id=sleep_id,
+                resume_at=resume_at.isoformat(),
+                now=now.isoformat(),
             )
             return
+        else:
+            # Not enough time has passed - re-raise suspension
+            logger.debug(
+                f"Sleep {sleep_id} not ready yet, re-suspending",
+                run_id=ctx.run_id,
+                sleep_id=sleep_id,
+                resume_at=resume_at.isoformat(),
+                now=now.isoformat(),
+            )
+            from pyworkflow.core.exceptions import SuspensionSignal
+
+            raise SuspensionSignal(
+                reason=f"sleep:{sleep_id}",
+                resume_at=resume_at,
+                sleep_id=sleep_id,
+            )
+
+    # First time encountering this sleep - calculate resume time
+    resume_at = _calculate_resume_time(duration)
+    delay_seconds = _calculate_delay_seconds(duration)
 
     # Record sleep start event
     start_event = create_sleep_started_event(
@@ -163,16 +187,26 @@ async def _durable_sleep_old_api(
     ctx.add_pending_sleep(sleep_id, resume_at)
 
     # Schedule automatic resumption with Celery (if available)
+    # Skip if Celery not configured to avoid broker connection attempts
     try:
-        from pyworkflow.celery.tasks import schedule_workflow_resumption
+        from pyworkflow.config import get_config
 
-        schedule_workflow_resumption(ctx.run_id, resume_at)
-        logger.info(
-            f"Scheduled automatic workflow resumption",
-            run_id=ctx.run_id,
-            resume_at=resume_at.isoformat(),
-        )
-    except (ImportError, Exception) as e:
+        config = get_config()
+        if config.celery_broker:
+            from pyworkflow.celery.tasks import schedule_workflow_resumption
+
+            schedule_workflow_resumption(ctx.run_id, resume_at)
+            logger.info(
+                f"Scheduled automatic workflow resumption",
+                run_id=ctx.run_id,
+                resume_at=resume_at.isoformat(),
+            )
+        else:
+            logger.debug(
+                f"Celery broker not configured, skipping automatic resumption (use manual resume())",
+                run_id=ctx.run_id,
+            )
+    except (ImportError, AttributeError, Exception) as e:
         logger.debug(
             f"Could not schedule automatic resumption: {e}",
             run_id=ctx.run_id,
@@ -187,13 +221,36 @@ async def _durable_sleep_old_api(
 
 
 def _generate_sleep_id(name: Optional[str], run_id: str) -> str:
-    """Generate unique sleep ID."""
+    """
+    Generate deterministic sleep ID.
+
+    Uses name if provided, otherwise generates based on call location in source code.
+    This ensures the same sleep always gets the same ID during replay.
+    """
+    import inspect
+
     if name:
+        # Use provided name (deterministic)
         content = f"{run_id}:{name}"
         hash_hex = hashlib.sha256(content.encode()).hexdigest()[:16]
         return f"sleep_{name}_{hash_hex}"
     else:
-        return f"sleep_{uuid.uuid4().hex[:16]}"
+        # Generate based on the call location (file + line number)
+        # This makes it deterministic - same line always gets same ID
+        frame = inspect.currentframe()
+        try:
+            # Walk up the stack to find the caller (skip internal functions)
+            caller_frame = frame.f_back.f_back.f_back  # sleep() -> _durable_sleep_old_api() -> caller
+            filename = caller_frame.f_code.co_filename
+            lineno = caller_frame.f_lineno
+            func_name = caller_frame.f_code.co_name
+
+            # Create deterministic ID from call location
+            content = f"{filename}:{func_name}:{lineno}"
+            hash_hex = hashlib.sha256(content.encode()).hexdigest()[:16]
+            return f"sleep_{hash_hex}"
+        finally:
+            del frame  # Avoid reference cycles
 
 
 def _calculate_resume_time(duration: Union[str, int, float, timedelta, datetime]) -> datetime:

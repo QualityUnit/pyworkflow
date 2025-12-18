@@ -116,17 +116,31 @@ class LocalRuntime(Runtime):
 
         except SuspensionSignal as e:
             if durable and storage is not None:
-                # Workflow suspended (sleep or hook)
+                # Workflow suspended (sleep, hook, or retry)
                 await storage.update_run_status(
                     run_id=run_id, status=RunStatus.SUSPENDED
                 )
 
-            logger.info(
-                f"Workflow suspended: {e.reason}",
-                run_id=run_id,
-                workflow_name=workflow_name,
-                reason=e.reason,
-            )
+            # Enhanced logging for retry suspensions
+            if e.reason.startswith("retry:"):
+                step_id = e.data.get("step_id") if e.data else "unknown"
+                attempt = e.data.get("attempt") if e.data else "?"
+                resume_at = e.data.get("resume_at") if e.data else "unknown"
+                logger.info(
+                    f"Workflow suspended for step retry",
+                    run_id=run_id,
+                    workflow_name=workflow_name,
+                    step_id=step_id,
+                    next_attempt=attempt,
+                    resume_at=resume_at,
+                )
+            else:
+                logger.info(
+                    f"Workflow suspended: {e.reason}",
+                    run_id=run_id,
+                    workflow_name=workflow_name,
+                    reason=e.reason,
+                )
 
             return run_id
 

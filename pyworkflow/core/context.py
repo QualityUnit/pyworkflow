@@ -61,6 +61,18 @@ class WorkflowContext:
     # Hook results (from webhooks)
     hook_results: Dict[str, Any] = field(default_factory=dict)
 
+    # Retry state tracking (for durable mode retries with suspension)
+    retry_state: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # Structure: {
+    #   "step_xyz": {
+    #     "current_attempt": 2,
+    #     "resume_at": datetime,
+    #     "max_retries": 3,
+    #     "retry_delay": "exponential",
+    #     "last_error": "error message"
+    #   }
+    # }
+
     # Timing information
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     current_step_id: Optional[str] = None
@@ -201,6 +213,55 @@ class WorkflowContext:
     def add_pending_hook(self, hook_id: str, hook_data: Dict[str, Any]) -> None:
         """Mark a hook as pending."""
         self.pending_hooks[hook_id] = hook_data
+
+    def get_retry_state(self, step_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get retry state for a step.
+
+        Args:
+            step_id: Step identifier
+
+        Returns:
+            Retry state dictionary if exists, None otherwise
+        """
+        return self.retry_state.get(step_id)
+
+    def set_retry_state(
+        self,
+        step_id: str,
+        attempt: int,
+        resume_at: datetime,
+        max_retries: int,
+        retry_delay: Any,
+        last_error: str,
+    ) -> None:
+        """
+        Set retry state for a step.
+
+        Args:
+            step_id: Step identifier
+            attempt: Current attempt number
+            resume_at: When to resume for next retry
+            max_retries: Maximum retry attempts
+            retry_delay: Retry delay strategy
+            last_error: Last error message
+        """
+        self.retry_state[step_id] = {
+            "current_attempt": attempt,
+            "resume_at": resume_at,
+            "max_retries": max_retries,
+            "retry_delay": retry_delay,
+            "last_error": last_error,
+        }
+
+    def clear_retry_state(self, step_id: str) -> None:
+        """
+        Clear retry state for a step.
+
+        Args:
+            step_id: Step identifier
+        """
+        self.retry_state.pop(step_id, None)
 
     def __enter__(self) -> "WorkflowContext":
         """Context manager entry - set as current context."""

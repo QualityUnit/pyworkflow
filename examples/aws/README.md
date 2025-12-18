@@ -1,136 +1,113 @@
-# AWS Durable Lambda Functions Examples
+# AWS Lambda Runtime Examples
 
-This directory contains examples of PyWorkflow workflows running on AWS Lambda
-with Durable Functions support.
+**Status:** Coming Soon
 
-## Prerequisites
+## Overview
 
-Install PyWorkflow with AWS support:
+The AWS Lambda runtime enables serverless workflow execution on AWS Lambda, leveraging AWS's Durable Execution features for fault-tolerant, long-running workflows.
 
-```bash
-pip install pyworkflow[aws]
-```
+## What AWS Runtime Will Enable
 
-## Examples
+### Serverless Execution
+- Run workflows on AWS Lambda (no server management)
+- Automatic scaling based on demand
+- Pay only for actual execution time
 
-### order_workflow.py
+### AWS Durable Execution Integration
+- **Cost-free sleep**: No charges during workflow sleep
+- **Automatic checkpointing**: Steps never re-execute on retry
+- **Managed durability**: AWS handles all state persistence
+- **Parallel execution**: Built-in support for concurrent steps
 
-A simple order processing workflow demonstrating:
-- Step execution with automatic checkpointing
-- Cost-free sleep/wait operations
-- Passing data between steps
+### Use Cases
+- Serverless microservices
+- Event-driven workflows (S3, SNS, SQS triggers)
+- Cost-optimized long-running workflows
+- Auto-scaling workloads
 
-## Local Testing
+## Current Status
 
-All examples can be run locally with mock contexts:
+AWS Lambda runtime integration is planned for a future release. In the meantime:
 
-```bash
-python examples/aws/order_workflow.py
-```
+### Get Started with Local Runtime
 
-## Deploying to AWS
+Explore the [local/](../local/) examples to learn PyWorkflow fundamentals:
+- [local/durable/](../local/durable/) - Event-sourced workflows with persistence
+- [local/transient/](../local/transient/) - Fast, simple execution
 
-1. **Package your workflow with dependencies**:
-   ```bash
-   pip install pyworkflow[aws] -t package/
-   cp your_workflow.py package/
-   cd package && zip -r ../deployment.zip .
-   ```
+### What You'll Learn
 
-2. **Create Lambda function**:
-   - Runtime: Python 3.11+
-   - Enable Durable Functions in Lambda configuration
-   - Handler: `your_workflow.handler`
+The workflow and step definitions you write for LocalRuntime will work seamlessly with AWSRuntime once available. You'll only need to change the runtime configuration.
 
-3. **Invoke the workflow**:
-   ```bash
-   aws lambda invoke \
-     --function-name your-workflow \
-     --payload '{"order_id": "ORD-123"}' \
-     response.json
-   ```
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    AWS Lambda + Durable Functions               │
-│                                                                 │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │ @aws_workflow_handler                                     │   │
-│  │ @workflow                                                 │   │
-│  │ async def order_workflow(ctx, order_id):                  │   │
-│  │     validation = await validate_order(order_id)          │   │
-│  │     ctx.sleep(300)  # Free wait!                         │   │
-│  │     payment = await process_payment(...)                 │   │
-│  │     return result                                        │   │
-│  └─────────────────────────────────────────────────────────┘   │
-│                              │                                  │
-│                              ▼                                  │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │ AWS Durable Execution SDK                                │   │
-│  │ - Automatic checkpointing                                │   │
-│  │ - Replay on Lambda restart                               │   │
-│  │ - Cost-free waits                                        │   │
-│  └─────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-## Key Concepts
-
-### Steps
-
-Steps are automatically checkpointed. If your Lambda is interrupted:
-- Completed steps won't re-run
-- Results are replayed from checkpoints
-- Execution continues from last checkpoint
+## Example Preview
 
 ```python
-@step()
-async def my_step(data: str) -> dict:
-    return {"processed": data}
-```
+from pyworkflow import configure, start, step, workflow
+from pyworkflow.runtime import AWSRuntime
+from pyworkflow.context import AWSContext
 
-### Sleep/Wait
-
-Sleep operations use AWS's native wait feature:
-- No compute charges during wait
-- Lambda is suspended, not running
-- Execution resumes automatically
-
-```python
-ctx.sleep(300)  # Wait 5 minutes (no charges!)
-ctx.sleep("1h")  # Also supports duration strings
-```
-
-### Error Handling
-
-Use PyWorkflow's error types:
-
-```python
-from pyworkflow import FatalError, RetryableError
+# Configure AWS runtime
+runtime = AWSRuntime(region="us-east-1")
+configure(default_runtime=runtime)
 
 @step()
-async def my_step():
-    if permanent_failure:
-        raise FatalError("Cannot proceed")  # No retry
-    if temporary_failure:
-        raise RetryableError("Try again")   # Will retry
+async def process_data(data: dict) -> dict:
+    # This will execute on AWS Lambda with automatic checkpointing
+    return transform_data(data)
+
+@workflow(durable=True)
+async def serverless_workflow(input_data: dict) -> dict:
+    result = await process_data(input_data)
+
+    # Sleep is FREE on AWS Lambda (no charges during sleep)
+    await sleep("1h")
+
+    final = await process_data(result)
+    return final
+
+# Deploy to AWS Lambda
+# lambda_function.py:
+from pyworkflow.aws import aws_workflow_handler
+
+@aws_workflow_handler
+async def handler(event, context):
+    run_id = await start(serverless_workflow, event)
+    return {"run_id": run_id}
 ```
 
-## Testing
+## Key Features
 
-Use the mock context for local testing:
-
+### Cost-Free Sleep
+Sleep operations on AWS Lambda incur no charges:
 ```python
-from pyworkflow.aws.testing import MockDurableContext, create_test_handler
-
-def test_my_workflow():
-    mock_ctx = MockDurableContext()
-    handler = create_test_handler(my_workflow, mock_ctx)
-
-    result = handler({"input": "data"})
-
-    assert "validate" in mock_ctx.checkpoints
-    assert mock_ctx.wait_count > 0
+await sleep("24h")  # Free! No Lambda charges for 24 hours
 ```
+
+### Automatic Checkpointing
+Steps are never re-executed on retry:
+```python
+@step()
+async def expensive_computation(data):
+    # Executes once, result cached by AWS
+    return compute(data)
+```
+
+### Parallel Execution
+Built-in parallel step support:
+```python
+results = await parallel(
+    process_data(data1),
+    process_data(data2),
+    process_data(data3)
+)
+```
+
+## Stay Updated
+
+Check back here for updates, or explore the existing [local runtime examples](../local/) to get started with PyWorkflow today.
+
+## Questions?
+
+- Read [CLAUDE.md](../../CLAUDE.md) for architecture details
+- Check [examples/README.md](../README.md) for navigation
+- Explore [local/README.md](../local/README.md) to get started

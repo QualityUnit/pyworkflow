@@ -55,7 +55,8 @@ class EventReplayer:
         logger.debug(
             f"Replay complete: {len(ctx.step_results)} steps, "
             f"{len(ctx.hook_results)} hooks, "
-            f"{len(ctx.pending_sleeps)} pending sleeps",
+            f"{len(ctx.pending_sleeps)} pending sleeps, "
+            f"{len(ctx.retry_state)} pending retries",
             run_id=ctx.run_id,
         )
 
@@ -85,8 +86,11 @@ class EventReplayer:
         elif event.type == EventType.HOOK_EXPIRED:
             await self._apply_hook_expired(ctx, event)
 
+        elif event.type == EventType.STEP_RETRYING:
+            await self._apply_step_retrying(ctx, event)
+
         # Other event types don't affect replay state
-        # (workflow_started, step_started, etc. are informational)
+        # (workflow_started, step_started, step_failed, etc. are informational)
 
     async def _apply_step_completed(self, ctx: WorkflowContext, event: Event) -> None:
         """Apply step_completed event - cache the result."""
@@ -170,6 +174,40 @@ class EventReplayer:
                 f"Hook expired: {hook_id}",
                 run_id=ctx.run_id,
                 hook_id=hook_id,
+            )
+
+    async def _apply_step_retrying(self, ctx: WorkflowContext, event: Event) -> None:
+        """Apply step_retrying event - restore retry state for resumption."""
+        from datetime import datetime
+
+        step_id = event.data.get("step_id")
+        next_attempt = event.data.get("attempt")
+        resume_at_str = event.data.get("resume_at")
+        retry_after = event.data.get("retry_after")
+        max_retries = event.data.get("max_retries", 3)
+        retry_delay = event.data.get("retry_strategy", "exponential")
+        last_error = event.data.get("error", "")
+
+        if step_id and next_attempt:
+            # Parse resume_at from ISO format
+            resume_at = datetime.fromisoformat(resume_at_str) if resume_at_str else None
+
+            # Restore retry state to context
+            ctx.set_retry_state(
+                step_id=step_id,
+                attempt=next_attempt,
+                resume_at=resume_at,
+                max_retries=max_retries,
+                retry_delay=retry_delay,
+                last_error=last_error,
+            )
+
+            logger.debug(
+                f"Retry pending: {step_id}",
+                run_id=ctx.run_id,
+                step_id=step_id,
+                next_attempt=next_attempt,
+                resume_at=resume_at_str,
             )
 
 

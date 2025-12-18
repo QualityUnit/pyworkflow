@@ -137,6 +137,37 @@ def step(
                 )
                 return ctx.get_step_result(step_id)
 
+            # Check if we're resuming from a retry
+            retry_state = ctx.get_retry_state(step_id)
+            if retry_state:
+                current_attempt = retry_state["current_attempt"]
+                resume_at = retry_state.get("resume_at")
+
+                # Check if retry delay has elapsed during replay
+                if ctx.is_replaying and resume_at:
+                    from datetime import UTC, datetime
+
+                    now = datetime.now(UTC)
+                    if now < resume_at:
+                        # Not ready to retry yet - re-raise suspension
+                        logger.debug(
+                            f"Retry delay not elapsed for {step_name}, re-suspending",
+                            run_id=ctx.run_id,
+                            step_id=step_id,
+                            current_attempt=current_attempt,
+                            resume_at=resume_at.isoformat(),
+                        )
+                        from pyworkflow.core.exceptions import SuspensionSignal
+
+                        raise SuspensionSignal(
+                            reason=f"retry:{step_id}",
+                            resume_at=resume_at,
+                            step_id=step_id,
+                            attempt=current_attempt,
+                        )
+            else:
+                current_attempt = 1
+
             # Record step start event
             start_event = create_step_started_event(
                 run_id=ctx.run_id,
@@ -144,15 +175,16 @@ def step(
                 step_name=step_name,
                 args=serialize_args(*args),
                 kwargs=serialize_kwargs(**kwargs),
-                attempt=1,
+                attempt=current_attempt,
             )
             await ctx.storage.record_event(start_event)
 
             logger.info(
-                f"Executing step: {step_name}",
+                f"Executing step: {step_name} (attempt {current_attempt}/{max_retries + 1})",
                 run_id=ctx.run_id,
                 step_id=step_id,
                 step_name=step_name,
+                attempt=current_attempt,
             )
 
             try:
@@ -167,6 +199,9 @@ def step(
 
                 # Cache result for replay
                 ctx.cache_step_result(step_id, result)
+
+                # Clear retry state on success
+                ctx.clear_retry_state(step_id)
 
                 logger.info(
                     f"Step completed: {step_name}",
@@ -192,58 +227,154 @@ def step(
                     error=str(e),
                     error_type=type(e).__name__,
                     is_retryable=False,
-                    attempt=1,
+                    attempt=current_attempt,
                 )
                 await ctx.storage.record_event(failure_event)
+
+                # Clear retry state
+                ctx.clear_retry_state(step_id)
 
                 raise
 
-            except RetryableError as e:
-                # Retriable error - log and raise (will be handled by executor)
-                logger.warning(
-                    f"Step failed (retriable): {step_name}",
-                    run_id=ctx.run_id,
-                    step_id=step_id,
-                    error=str(e),
-                    retry_after=e.retry_after,
-                )
+            except (RetryableError, Exception) as e:
+                # Handle retriable errors (RetryableError or generic Exception)
+                # FatalError is already handled above
+                is_retryable_error = isinstance(e, RetryableError)
 
-                # Record failure event
-                failure_event = create_step_failed_event(
-                    run_id=ctx.run_id,
-                    step_id=step_id,
-                    error=str(e),
-                    error_type=type(e).__name__,
-                    is_retryable=True,
-                    attempt=1,
-                )
-                await ctx.storage.record_event(failure_event)
+                # Check if we have retries left
+                if current_attempt <= max_retries:
+                    # We can retry
+                    next_attempt = current_attempt + 1
 
-                raise
+                    # Calculate retry delay
+                    if is_retryable_error and e.retry_after is not None:
+                        # Use RetryableError's specified delay
+                        delay_seconds = e.get_retry_delay_seconds()
+                    else:
+                        # Use step's configured retry delay strategy
+                        delay_seconds = _get_retry_delay(retry_delay, current_attempt - 1)
 
-            except Exception as e:
-                # Unexpected error - treat as retriable by default
-                logger.error(
-                    f"Step failed (unexpected): {step_name}",
-                    run_id=ctx.run_id,
-                    step_id=step_id,
-                    error=str(e),
-                    exc_info=True,
-                )
+                    # Calculate resume time
+                    from datetime import UTC, datetime, timedelta
 
-                # Record failure event
-                failure_event = create_step_failed_event(
-                    run_id=ctx.run_id,
-                    step_id=step_id,
-                    error=str(e),
-                    error_type=type(e).__name__,
-                    is_retryable=True,
-                    attempt=1,
-                )
-                await ctx.storage.record_event(failure_event)
+                    resume_at = datetime.now(UTC) + timedelta(seconds=delay_seconds)
 
-                # Convert to RetryableError for retry handling
-                raise RetryableError(f"Step {step_name} failed: {e}") from e
+                    logger.warning(
+                        f"Step failed (retriable): {step_name}, "
+                        f"retrying in {delay_seconds}s (attempt {next_attempt}/{max_retries + 1})",
+                        run_id=ctx.run_id,
+                        step_id=step_id,
+                        error=str(e),
+                        current_attempt=current_attempt,
+                        next_attempt=next_attempt,
+                    )
+
+                    # Record STEP_FAILED event
+                    failure_event = create_step_failed_event(
+                        run_id=ctx.run_id,
+                        step_id=step_id,
+                        error=str(e),
+                        error_type=type(e).__name__,
+                        is_retryable=True,
+                        attempt=current_attempt,
+                    )
+                    await ctx.storage.record_event(failure_event)
+
+                    # Record STEP_RETRYING event
+                    from pyworkflow.engine.events import create_step_retrying_event
+
+                    retrying_event = create_step_retrying_event(
+                        run_id=ctx.run_id,
+                        step_id=step_id,
+                        attempt=next_attempt,
+                        retry_after=str(int(delay_seconds)),
+                        error=str(e),
+                    )
+                    # Add additional fields to event data
+                    retrying_event.data["resume_at"] = resume_at.isoformat()
+                    retrying_event.data["retry_strategy"] = str(retry_delay)
+                    retrying_event.data["max_retries"] = max_retries
+                    await ctx.storage.record_event(retrying_event)
+
+                    # Update retry state in context
+                    ctx.set_retry_state(
+                        step_id=step_id,
+                        attempt=next_attempt,
+                        resume_at=resume_at,
+                        max_retries=max_retries,
+                        retry_delay=retry_delay,
+                        last_error=str(e),
+                    )
+
+                    # Schedule automatic resumption with Celery (if available)
+                    # Note: This is optional - manual resume() works too
+                    # Skip if Celery not configured to avoid broker connection attempts
+                    try:
+                        # Only attempt if Celery broker is configured
+                        from pyworkflow.config import get_config
+
+                        config = get_config()
+                        if config.celery_broker:
+                            from pyworkflow.celery.tasks import schedule_workflow_resumption
+
+                            schedule_workflow_resumption(ctx.run_id, resume_at)
+                            logger.info(
+                                f"Scheduled automatic workflow resumption for retry",
+                                run_id=ctx.run_id,
+                                resume_at=resume_at.isoformat(),
+                                delay_seconds=delay_seconds,
+                            )
+                        else:
+                            logger.debug(
+                                f"Celery broker not configured, skipping automatic resumption (use manual resume())",
+                                run_id=ctx.run_id,
+                            )
+                    except (ImportError, AttributeError, Exception) as schedule_error:
+                        logger.debug(
+                            f"Could not schedule automatic resumption: {schedule_error}",
+                            run_id=ctx.run_id,
+                        )
+
+                    # Raise suspension signal to pause workflow
+                    from pyworkflow.core.exceptions import SuspensionSignal
+
+                    raise SuspensionSignal(
+                        reason=f"retry:{step_id}",
+                        resume_at=resume_at,
+                        step_id=step_id,
+                        attempt=next_attempt,
+                    )
+
+                else:
+                    # Max retries exhausted
+                    logger.error(
+                        f"Step failed after {max_retries + 1} attempts: {step_name}",
+                        run_id=ctx.run_id,
+                        step_id=step_id,
+                        error=str(e),
+                        total_attempts=current_attempt,
+                    )
+
+                    # Record final STEP_FAILED event
+                    failure_event = create_step_failed_event(
+                        run_id=ctx.run_id,
+                        step_id=step_id,
+                        error=str(e),
+                        error_type=type(e).__name__,
+                        is_retryable=True,
+                        attempt=current_attempt,
+                    )
+                    await ctx.storage.record_event(failure_event)
+
+                    ctx.clear_retry_state(step_id)
+
+                    # Convert to RetryableError if it wasn't already
+                    if not is_retryable_error:
+                        raise RetryableError(
+                            f"Step {step_name} failed after {max_retries + 1} attempts: {e}"
+                        ) from e
+                    else:
+                        raise
 
         # Register step
         register_step(

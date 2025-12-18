@@ -270,6 +270,10 @@ pyworkflow_data/
 *.db-wal
 *.db-shm
 
+# Example workflow data
+examples/local/durable/workflow_data/
+examples/local/transient/workflow_data/
+
 # Celery beat schedule
 celerybeat-schedule.db
 

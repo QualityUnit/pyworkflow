@@ -70,6 +70,14 @@ from pyworkflow.context import (
     has_context,
 )
 
+# Registry functions
+from pyworkflow.core.registry import (
+    get_step,
+    get_workflow,
+    list_steps,
+    list_workflows,
+)
+
 # Storage backends
 from pyworkflow.storage.base import StorageBackend
 from pyworkflow.storage.file import FileStorageBackend
@@ -121,6 +129,11 @@ __all__ = [
     "MockContext",
     "get_context",
     "has_context",
+    # Registry
+    "list_workflows",
+    "get_workflow",
+    "list_steps",
+    "get_step",
     # Storage
     "StorageBackend",
     "FileStorageBackend",

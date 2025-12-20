@@ -14,8 +14,8 @@ PyWorkflow includes a powerful CLI for managing workflows and monitoring runs di
   <Card title="Run Monitoring" icon="chart-line">
     Check run status, view event logs, and debug executions.
   </Card>
-  <Card title="Multiple Output Formats" icon="table">
-    Output as tables, JSON, or plain text for scripting.
+  <Card title="Worker Management" icon="server">
+    Start and manage Celery workers for distributed execution.
   </Card>
   <Card title="Flexible Configuration" icon="gear">
     Configure via CLI flags, environment variables, or config files.
@@ -38,6 +38,7 @@ These options apply to all commands:
 | Option | Environment Variable | Description |
 |--------|---------------------|-------------|
 | `--module` | `PYWORKFLOW_MODULE` | Python module to import for workflow discovery |
+| `--runtime` | `PYWORKFLOW_RUNTIME` | Execution runtime: `local` (in-process) or `celery` (distributed). Default: celery |
 | `--storage` | `PYWORKFLOW_STORAGE_BACKEND` | Storage backend: `file` or `memory` (default: file) |
 | `--storage-path` | `PYWORKFLOW_STORAGE_PATH` | Path for file storage (default: ./workflow_data) |
 | `--output` | - | Output format: `table`, `json`, or `plain` (default: table) |
@@ -56,20 +57,30 @@ The CLI searches for configuration files in the following order (walking up the 
   <Tab title="pyworkflow.toml">
     ```toml
     module = "myapp.workflows"
+    runtime = "celery"  # or "local"
 
     [storage]
     backend = "file"
     path = "./workflow_data"
+
+    [celery]
+    broker = "redis://localhost:6379/0"
+    result_backend = "redis://localhost:6379/1"
     ```
   </Tab>
   <Tab title="pyproject.toml">
     ```toml
     [tool.pyworkflow]
     module = "myapp.workflows"
+    runtime = "celery"
 
     [tool.pyworkflow.storage]
     backend = "file"
     path = "./workflow_data"
+
+    [tool.pyworkflow.celery]
+    broker = "redis://localhost:6379/0"
+    result_backend = "redis://localhost:6379/1"
     ```
   </Tab>
 </Tabs>
@@ -228,6 +239,108 @@ pyworkflow runs logs run_abc123 --filter step_completed
 - `sleep_started`, `sleep_resumed`
 - `hook_created`, `hook_received`
 
+---
+
+### Worker Commands
+
+Manage Celery workers for distributed workflow execution.
+
+#### `worker run`
+
+Start a Celery worker to process workflow tasks:
+
+```bash
+pyworkflow worker run
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--workflow` | Only process workflow orchestration tasks |
+| `--step` | Only process step execution tasks |
+| `--schedule` | Only process scheduled resumption tasks |
+| `--concurrency N` | Number of worker processes (default: auto) |
+| `--loglevel LEVEL` | Log level: `debug`, `info`, `warning`, `error` |
+| `--hostname NAME` | Custom worker hostname |
+| `--beat` | Also start Celery Beat scheduler |
+
+<Tabs>
+  <Tab title="All Queues (Default)">
+    ```bash
+    # Start a worker processing all queues
+    pyworkflow worker run
+    ```
+  </Tab>
+  <Tab title="Specialized Workers">
+    ```bash
+    # Terminal 1: Workflow orchestration
+    pyworkflow worker run --workflow
+
+    # Terminal 2: Step execution (scale this for heavy work)
+    pyworkflow worker run --step --concurrency 4
+
+    # Terminal 3: Scheduled tasks
+    pyworkflow worker run --schedule
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+  For production, run separate workers for each queue type. Scale step workers horizontally for computation-heavy workloads.
+</Tip>
+
+#### `worker status`
+
+Show status of active Celery workers:
+
+```bash
+pyworkflow worker status
+```
+
+Displays worker names, status, concurrency, active tasks, and processed task counts.
+
+#### `worker queues`
+
+Show available task queues and their configuration:
+
+```bash
+pyworkflow worker queues
+```
+
+---
+
+### Setup Command
+
+Verify and configure the PyWorkflow environment.
+
+#### `setup`
+
+Check broker connectivity and display configuration:
+
+```bash
+pyworkflow setup --check
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--broker TYPE` | Broker type: `redis` or `rabbitmq` (default: redis) |
+| `--broker-url URL` | Full broker URL (overrides --broker defaults) |
+| `--check` | Only check if environment is ready |
+
+**Examples:**
+
+```bash
+# Check Redis broker (default)
+pyworkflow setup --check
+
+# Check RabbitMQ broker
+pyworkflow setup --broker rabbitmq --check
+
+# Check custom broker URL
+pyworkflow setup --broker-url redis://myredis:6379/0 --check
+```
+
 ## Output Formats
 
 Control output format with the `--output` flag:
@@ -343,6 +456,39 @@ Commands become simpler:
 pyworkflow workflows list
 pyworkflow workflows run my_workflow --arg foo=bar
 ```
+
+### Distributed Workflow Execution
+
+Complete example of running workflows on Celery workers:
+
+```bash
+# 1. Setup and verify environment
+pyworkflow setup --check
+
+# 2. Start Redis (if not running)
+docker run -d -p 6379:6379 redis:7-alpine
+
+# 3. Start workers (in separate terminals)
+pyworkflow worker run --workflow      # Workflow orchestration
+pyworkflow worker run --step          # Step execution
+pyworkflow worker run --schedule      # Sleep resumption
+
+# Or start all-in-one worker
+pyworkflow worker run
+
+# 4. Run a workflow (dispatched to Celery)
+pyworkflow --module myapp.workflows workflows run my_workflow \
+    --arg user_id=123
+
+# 5. Monitor execution
+pyworkflow runs list
+pyworkflow runs status run_abc123
+pyworkflow runs logs run_abc123
+```
+
+<Tip>
+  Use `--runtime local` to run workflows in-process without Celery for testing or simple scripts.
+</Tip>
 
 ## Next Steps
 

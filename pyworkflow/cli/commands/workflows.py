@@ -198,6 +198,7 @@ async def run_workflow(
     module = ctx.obj["module"]
     config = ctx.obj["config"]
     output = ctx.obj["output"]
+    runtime_name = ctx.obj.get("runtime", "celery")
     storage_type = ctx.obj["storage_type"]
     storage_path = ctx.obj["storage_path"]
 
@@ -245,13 +246,20 @@ async def run_workflow(
 
     # Execute workflow
     print_info(f"Starting workflow: {workflow_name}")
+    print_info(f"Runtime: {runtime_name}")
     if kwargs:
         print_info(f"Arguments: {json.dumps(kwargs, indent=2)}")
+
+    # Celery runtime requires durable mode
+    if runtime_name == "celery" and not durable:
+        print_error("Celery runtime requires durable mode. Use --durable or --runtime local")
+        raise click.Abort()
 
     try:
         run_id = await pyworkflow.start(
             workflow_meta.func,
             **kwargs,
+            runtime=runtime_name,
             durable=durable,
             storage=storage,
             idempotency_key=idempotency_key,
@@ -259,14 +267,19 @@ async def run_workflow(
 
         # Format output
         if output == "json":
-            format_json({"run_id": run_id, "workflow_name": workflow_name})
+            format_json({"run_id": run_id, "workflow_name": workflow_name, "runtime": runtime_name})
         else:
             print_success(f"Workflow started successfully")
             print_info(f"Run ID: {run_id}")
+            print_info(f"Runtime: {runtime_name}")
 
             if durable:
                 print_info(f"\nCheck status with: pyworkflow runs status {run_id}")
                 print_info(f"View logs with: pyworkflow runs logs {run_id}")
+
+            if runtime_name == "celery":
+                print_info(f"\nNote: Workflow dispatched to Celery workers.")
+                print_info(f"Ensure workers are running: pyworkflow worker run")
 
     except Exception as e:
         print_error(f"Failed to start workflow: {e}")

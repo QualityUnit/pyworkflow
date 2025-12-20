@@ -18,6 +18,13 @@ from loguru import logger
     help="Python module to import for workflow discovery",
 )
 @click.option(
+    "--runtime",
+    type=click.Choice(["local", "celery"], case_sensitive=False),
+    envvar="PYWORKFLOW_RUNTIME",
+    default="celery",
+    help="Execution runtime: local (in-process) or celery (distributed workers). Default: celery",
+)
+@click.option(
     "--storage",
     type=click.Choice(["file", "memory"], case_sensitive=False),
     envvar="PYWORKFLOW_STORAGE_BACKEND",
@@ -44,6 +51,7 @@ from loguru import logger
 def main(
     ctx: click.Context,
     module: Optional[str],
+    runtime: str,
     storage: Optional[str],
     storage_path: Optional[str],
     output: str,
@@ -91,6 +99,7 @@ def main(
     # Store configuration in context for subcommands
     ctx.ensure_object(dict)
     ctx.obj["module"] = module
+    ctx.obj["runtime"] = runtime
     ctx.obj["storage_type"] = storage
     ctx.obj["storage_path"] = storage_path
     ctx.obj["output"] = output
@@ -101,9 +110,13 @@ def main(
 # Import and register commands
 from pyworkflow.cli.commands.workflows import workflows
 from pyworkflow.cli.commands.runs import runs
+from pyworkflow.cli.commands.worker import worker
+from pyworkflow.cli.commands.setup import setup
 
 main.add_command(workflows)
 main.add_command(runs)
+main.add_command(worker)
+main.add_command(setup)
 
 
 # Export main for entry point

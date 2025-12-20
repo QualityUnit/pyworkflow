@@ -90,6 +90,15 @@ def _register_builtin_runtimes() -> None:
 
     register_runtime("local", LocalRuntime)
 
+    # Register Celery runtime (lazy import to avoid circular deps)
+    try:
+        from pyworkflow.runtime.celery import CeleryRuntime
+
+        register_runtime("celery", CeleryRuntime)
+    except ImportError:
+        # Celery not installed, skip registration
+        pass
+
 
 # Auto-register on import
 _register_builtin_runtimes()

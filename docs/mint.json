@@ -58,6 +58,12 @@
         "concepts/events",
         "concepts/sleep"
       ]
+    },
+    {
+      "group": "Guides",
+      "pages": [
+        "guides/cli"
+      ]
     }
   ],
   "footerSocials": {

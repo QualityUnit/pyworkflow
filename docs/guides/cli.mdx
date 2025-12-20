@@ -1,0 +1,362 @@
+---
+title: 'Command Line Interface'
+description: 'Manage workflows and runs from the terminal with the PyWorkflow CLI'
+---
+
+## Overview
+
+PyWorkflow includes a powerful CLI for managing workflows and monitoring runs directly from your terminal. The CLI provides commands to list, inspect, and execute workflows, as well as monitor their execution status and event logs.
+
+<CardGroup cols={2}>
+  <Card title="Workflow Management" icon="diagram-project">
+    List, inspect, and run workflows from the command line.
+  </Card>
+  <Card title="Run Monitoring" icon="chart-line">
+    Check run status, view event logs, and debug executions.
+  </Card>
+  <Card title="Multiple Output Formats" icon="table">
+    Output as tables, JSON, or plain text for scripting.
+  </Card>
+  <Card title="Flexible Configuration" icon="gear">
+    Configure via CLI flags, environment variables, or config files.
+  </Card>
+</CardGroup>
+
+## Installation
+
+The CLI is included with PyWorkflow and available as the `pyworkflow` command:
+
+```bash
+pip install pyworkflow
+pyworkflow --version
+```
+
+## Global Options
+
+These options apply to all commands:
+
+| Option | Environment Variable | Description |
+|--------|---------------------|-------------|
+| `--module` | `PYWORKFLOW_MODULE` | Python module to import for workflow discovery |
+| `--storage` | `PYWORKFLOW_STORAGE_BACKEND` | Storage backend: `file` or `memory` (default: file) |
+| `--storage-path` | `PYWORKFLOW_STORAGE_PATH` | Path for file storage (default: ./workflow_data) |
+| `--output` | - | Output format: `table`, `json`, or `plain` (default: table) |
+| `--verbose`, `-v` | - | Enable verbose logging |
+| `--version` | - | Show version information |
+
+## Configuration
+
+The CLI searches for configuration files in the following order (walking up the directory tree):
+
+1. `pyworkflow.toml`
+2. `.pyworkflow.toml`
+3. `pyproject.toml` (under `[tool.pyworkflow]` section)
+
+<Tabs>
+  <Tab title="pyworkflow.toml">
+    ```toml
+    module = "myapp.workflows"
+
+    [storage]
+    backend = "file"
+    path = "./workflow_data"
+    ```
+  </Tab>
+  <Tab title="pyproject.toml">
+    ```toml
+    [tool.pyworkflow]
+    module = "myapp.workflows"
+
+    [tool.pyworkflow.storage]
+    backend = "file"
+    path = "./workflow_data"
+    ```
+  </Tab>
+</Tabs>
+
+**Priority Resolution:**
+1. CLI flags (highest)
+2. Environment variables
+3. Config file
+4. Defaults (lowest)
+
+## Commands
+
+### Workflow Commands
+
+Manage and execute registered workflows.
+
+#### `workflows list`
+
+List all registered workflows:
+
+```bash
+pyworkflow --module myapp.workflows workflows list
+```
+
+**Output Formats:**
+- `table` (default): Shows Name, Max Duration, and Metadata columns
+- `json`: Array of workflow objects
+- `plain`: Simple list of workflow names
+
+#### `workflows info`
+
+Show detailed information about a specific workflow:
+
+```bash
+pyworkflow --module myapp.workflows workflows info my_workflow
+```
+
+**Arguments:**
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `WORKFLOW_NAME` | Yes | Name of the workflow to inspect |
+
+**Output includes:** Name, max duration, function details, module path, and docstring.
+
+#### `workflows run`
+
+Execute a workflow with optional arguments:
+
+```bash
+pyworkflow --module myapp.workflows workflows run my_workflow \
+    --arg user_id=123 --arg amount=50.00
+```
+
+**Arguments:**
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `WORKFLOW_NAME` | Yes | Name of the workflow to run |
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--arg key=value` | Workflow argument (repeatable, supports JSON values) |
+| `--args-json '{...}'` | Workflow arguments as JSON object |
+| `--durable/--no-durable` | Run in durable mode (default: durable) |
+| `--idempotency-key` | Idempotency key for the execution |
+
+<Tabs>
+  <Tab title="Key-Value Arguments">
+    ```bash
+    pyworkflow workflows run order_process \
+        --arg order_id=12345 \
+        --arg amount=99.99 \
+        --arg items='["item1", "item2"]'
+    ```
+  </Tab>
+  <Tab title="JSON Arguments">
+    ```bash
+    pyworkflow workflows run order_process \
+        --args-json '{"order_id": 12345, "amount": 99.99, "items": ["item1", "item2"]}'
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+  Use `--no-durable` for quick, transient executions that don't need persistence. Use `--idempotency-key` to prevent duplicate executions.
+</Tip>
+
+---
+
+### Run Commands
+
+Monitor and debug workflow runs.
+
+#### `runs list`
+
+List workflow runs with optional filtering:
+
+```bash
+pyworkflow runs list --workflow my_workflow --status completed --limit 10
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--workflow` | Filter by workflow name |
+| `--status` | Filter by status: `pending`, `running`, `suspended`, `completed`, `failed`, `cancelled` |
+| `--limit` | Maximum runs to display (default: 20) |
+
+**Output Formats:**
+- `table` (default): Shows Run ID, Workflow, Status (color-coded), Started time, and Duration
+- `json`: Array of run objects with full details
+- `plain`: Simple list of Run IDs
+
+#### `runs status`
+
+Show detailed status of a specific run:
+
+```bash
+pyworkflow runs status run_abc123def456
+```
+
+**Arguments:**
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `RUN_ID` | Yes | Workflow run identifier |
+
+**Output includes:**
+- Run ID, Workflow name, Status
+- Created, Started, Completed timestamps
+- Duration
+- Input arguments
+- Result (if completed)
+- Error message (if failed)
+
+#### `runs logs`
+
+View the execution event log for a run:
+
+```bash
+pyworkflow runs logs run_abc123 --filter step_completed
+```
+
+**Arguments:**
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `RUN_ID` | Yes | Workflow run identifier |
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--filter` | Filter events by type (case-insensitive substring match) |
+
+**Event Types:**
+- `workflow_started`, `workflow_completed`, `workflow_failed`
+- `step_started`, `step_completed`, `step_failed`
+- `sleep_started`, `sleep_resumed`
+- `hook_created`, `hook_received`
+
+## Output Formats
+
+Control output format with the `--output` flag:
+
+<Tabs>
+  <Tab title="Table (Default)">
+    ```bash
+    pyworkflow runs list
+    ```
+    ```
+    ┏━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━┓
+    ┃ Run ID         ┃ Workflow    ┃ Status    ┃ Started     ┃ Duration ┃
+    ┡━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━┩
+    │ run_abc123...  │ onboarding  │ completed │ 10:30:45    │ 1.2s     │
+    │ run_def456...  │ payment     │ running   │ 10:31:02    │ 0.5s     │
+    └────────────────┴─────────────┴───────────┴─────────────┴──────────┘
+    ```
+  </Tab>
+  <Tab title="JSON">
+    ```bash
+    pyworkflow --output json runs list
+    ```
+    ```json
+    [
+      {
+        "run_id": "run_abc123...",
+        "workflow": "onboarding",
+        "status": "completed",
+        "started_at": "2025-01-15T10:30:45Z",
+        "duration": 1.2
+      }
+    ]
+    ```
+  </Tab>
+  <Tab title="Plain">
+    ```bash
+    pyworkflow --output plain runs list
+    ```
+    ```
+    run_abc123...
+    run_def456...
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+  Use `--output json` for scripting and automation. Use `--output plain` for simple lists suitable for piping to other commands.
+</Tip>
+
+## Examples
+
+### Complete Workflow Lifecycle
+
+```bash
+# 1. List available workflows
+pyworkflow --module myapp.workflows workflows list
+
+# 2. Get details about a workflow
+pyworkflow --module myapp.workflows workflows info onboarding_workflow
+
+# 3. Run the workflow
+pyworkflow --module myapp.workflows workflows run onboarding_workflow \
+    --arg user_id=user_123
+
+# Output: Workflow started: run_abc123def456
+
+# 4. Check the status
+pyworkflow runs status run_abc123def456
+
+# 5. View the event log
+pyworkflow runs logs run_abc123def456
+```
+
+### Debugging Failed Runs
+
+```bash
+# Find failed runs
+pyworkflow runs list --status failed
+
+# Check error details (verbose mode for full traceback)
+pyworkflow --verbose runs status run_xyz789
+
+# View events leading to failure
+pyworkflow runs logs run_xyz789 --filter failed
+```
+
+### Scripting with JSON Output
+
+```bash
+# Get failed run IDs for batch processing
+pyworkflow --output json runs list --status failed | jq -r '.[].run_id'
+
+# Export workflow list
+pyworkflow --output json workflows list > workflows.json
+```
+
+### Using Config File
+
+With a `pyworkflow.toml` in your project:
+
+```toml
+module = "myapp.workflows"
+
+[storage]
+backend = "file"
+path = "./data/workflows"
+```
+
+Commands become simpler:
+
+```bash
+# No --module needed
+pyworkflow workflows list
+pyworkflow workflows run my_workflow --arg foo=bar
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get started with PyWorkflow basics.
+  </Card>
+  <Card title="Workflows" icon="diagram-project" href="/concepts/workflows">
+    Learn about workflow concepts and patterns.
+  </Card>
+  <Card title="Events" icon="timeline" href="/concepts/events">
+    Understand event sourcing and replay.
+  </Card>
+  <Card title="Deployment" icon="server" href="/guides/deployment">
+    Deploy workflows to production.
+  </Card>
+</CardGroup>

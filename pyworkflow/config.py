@@ -3,6 +3,11 @@ PyWorkflow configuration system.
 
 Provides global configuration for runtime, storage, and default settings.
 
+Configuration is loaded in this priority order:
+1. Values set via pyworkflow.configure() (highest priority)
+2. Values from pyworkflow.config.yaml in current directory
+3. Default values
+
 Usage:
     >>> import pyworkflow
     >>> pyworkflow.configure(
@@ -13,10 +18,54 @@ Usage:
 """
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Optional
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
     from pyworkflow.storage.base import StorageBackend
+
+
+def _load_yaml_config() -> Dict[str, Any]:
+    """
+    Load configuration from pyworkflow.config.yaml in current directory.
+
+    Returns:
+        Configuration dictionary, empty dict if file not found
+    """
+    config_path = Path.cwd() / "pyworkflow.config.yaml"
+    if not config_path.exists():
+        return {}
+
+    try:
+        import yaml
+
+        with open(config_path) as f:
+            config = yaml.safe_load(f) or {}
+            return config
+    except ImportError:
+        return {}
+    except Exception:
+        return {}
+
+
+def _create_storage_from_config(storage_config: Dict[str, Any]) -> Optional["StorageBackend"]:
+    """Create a storage backend from config dictionary."""
+    if not storage_config:
+        return None
+
+    backend = storage_config.get("backend", "file")
+    path = storage_config.get("path", "./workflow_data")
+
+    if backend == "file":
+        from pyworkflow.storage.file import FileStorageBackend
+
+        return FileStorageBackend(base_path=path)
+    elif backend == "memory":
+        from pyworkflow.storage.memory import InMemoryStorageBackend
+
+        return InMemoryStorageBackend()
+
+    return None
 
 
 @dataclass
@@ -44,8 +93,35 @@ class PyWorkflowConfig:
     aws_region: Optional[str] = None
 
 
+def _config_from_yaml() -> PyWorkflowConfig:
+    """Create a PyWorkflowConfig from YAML file settings."""
+    yaml_config = _load_yaml_config()
+
+    if not yaml_config:
+        return PyWorkflowConfig()
+
+    # Map YAML keys to config attributes
+    runtime = yaml_config.get("runtime", "local")
+    durable = runtime == "celery"  # Celery runtime defaults to durable
+
+    # Create storage from config
+    storage = _create_storage_from_config(yaml_config.get("storage", {}))
+
+    # Get celery broker
+    celery_config = yaml_config.get("celery", {})
+    celery_broker = celery_config.get("broker")
+
+    return PyWorkflowConfig(
+        default_runtime=runtime,
+        default_durable=durable,
+        storage=storage,
+        celery_broker=celery_broker,
+    )
+
+
 # Global singleton
 _config: Optional[PyWorkflowConfig] = None
+_config_loaded_from_yaml: bool = False
 
 
 def configure(**kwargs: Any) -> None:
@@ -88,14 +164,17 @@ def get_config() -> PyWorkflowConfig:
     """
     Get the current configuration.
 
-    Creates a default configuration if not yet configured.
+    If not yet configured, loads from pyworkflow.config.yaml if present,
+    otherwise creates default configuration.
 
     Returns:
         Current PyWorkflowConfig instance
     """
-    global _config
+    global _config, _config_loaded_from_yaml
     if _config is None:
-        _config = PyWorkflowConfig()
+        # Try to load from YAML config file first
+        _config = _config_from_yaml()
+        _config_loaded_from_yaml = True
     return _config
 
 
@@ -105,5 +184,6 @@ def reset_config() -> None:
 
     Primarily used for testing.
     """
-    global _config
+    global _config, _config_loaded_from_yaml
     _config = None
+    _config_loaded_from_yaml = False

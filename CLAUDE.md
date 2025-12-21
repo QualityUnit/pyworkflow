@@ -146,10 +146,10 @@ class MyStep(Step):
 ### 3. Context Pattern
 
 ```python
-from pyworkflow.core.context import get_current_context
+from pyworkflow.context import get_context
 
 def some_function():
-    ctx = get_current_context()
+    ctx = get_context()
     print(ctx.run_id, ctx.workflow_name)
 ```
 

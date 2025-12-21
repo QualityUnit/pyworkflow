@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, Optional
 
 from loguru import logger
 
-from pyworkflow.core.context import WorkflowContext, set_current_context
+from pyworkflow.context import LocalContext, set_context, reset_context
 from pyworkflow.core.exceptions import SuspensionSignal
 from pyworkflow.core.registry import register_workflow
 from pyworkflow.engine.events import (
@@ -139,25 +139,21 @@ async def execute_workflow_with_context(
     # Determine if we're actually durable (need both flag and storage)
     is_durable = durable and storage is not None
 
-    # Create workflow context
-    ctx = WorkflowContext(
+    # Create workflow context using new LocalContext
+    ctx = LocalContext(
         run_id=run_id,
         workflow_name=workflow_name,
         storage=storage,
         event_log=event_log or [],
-        started_at=datetime.now(UTC),
         durable=is_durable,
     )
 
-    # Set as current context
-    set_current_context(ctx)
+    # Set as current context using new API
+    token = set_context(ctx)
 
     try:
-        # Replay events if resuming (durable mode only)
-        if is_durable and event_log:
-            from pyworkflow.engine.replay import replay_events
-
-            await replay_events(ctx, event_log)
+        # Note: Event replay is handled by LocalContext in its constructor
+        # when event_log is provided
 
         logger.info(
             f"Executing workflow: {workflow_name}",
@@ -219,5 +215,5 @@ async def execute_workflow_with_context(
         raise
 
     finally:
-        # Clear context
-        set_current_context(None)
+        # Clear context using new API
+        reset_context(token)

@@ -20,7 +20,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 from loguru import logger
 
-from pyworkflow.core.context import get_current_context, has_current_context
+from pyworkflow.context import get_context, has_context
 from pyworkflow.core.exceptions import FatalError, RetryableError
 from pyworkflow.core.registry import register_step
 from pyworkflow.engine.events import (
@@ -104,18 +104,18 @@ def step(
                 return aws_ctx.execute_step(func, *args, step_name=step_name, **kwargs)
 
             # Check if we're in a workflow context
-            if not has_current_context():
+            if not has_context():
                 # Called outside workflow - execute directly
                 logger.debug(
                     f"Step {step_name} called outside workflow, executing directly"
                 )
                 return await func(*args, **kwargs)
 
-            ctx = get_current_context()
+            ctx = get_context()
 
             # Transient mode: execute directly without event sourcing
             # Retries are still supported via direct execution
-            if not ctx.is_durable():
+            if not ctx.is_durable:
                 logger.debug(
                     f"Step {step_name} in transient mode, executing directly",
                     run_id=ctx.run_id,
@@ -306,36 +306,8 @@ def step(
                         last_error=str(e),
                     )
 
-                    # Schedule automatic resumption with Celery (if available)
-                    # Note: This is optional - manual resume() works too
-                    # Skip if Celery not configured to avoid broker connection attempts
-                    try:
-                        # Only attempt if Celery broker is configured
-                        from pyworkflow.config import get_config
-
-                        config = get_config()
-                        if config.celery_broker:
-                            from pyworkflow.celery.tasks import schedule_workflow_resumption
-
-                            schedule_workflow_resumption(ctx.run_id, resume_at)
-                            logger.info(
-                                f"Scheduled automatic workflow resumption for retry",
-                                run_id=ctx.run_id,
-                                resume_at=resume_at.isoformat(),
-                                delay_seconds=delay_seconds,
-                            )
-                        else:
-                            logger.debug(
-                                f"Celery broker not configured, skipping automatic resumption (use manual resume())",
-                                run_id=ctx.run_id,
-                            )
-                    except (ImportError, AttributeError, Exception) as schedule_error:
-                        logger.debug(
-                            f"Could not schedule automatic resumption: {schedule_error}",
-                            run_id=ctx.run_id,
-                        )
-
                     # Raise suspension signal to pause workflow
+                    # Note: The workflow-level exception handler will schedule automatic resumption
                     from pyworkflow.core.exceptions import SuspensionSignal
 
                     raise SuspensionSignal(

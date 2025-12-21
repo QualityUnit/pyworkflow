@@ -47,49 +47,162 @@ These options apply to all commands:
 
 ## Configuration
 
-The CLI searches for configuration files in the following order (walking up the directory tree):
+### Configuration File
+
+Create a `pyworkflow.config.yaml` file in your project directory:
+
+```yaml
+# pyworkflow.config.yaml
+module: myapp.workflows
+
+runtime: celery  # or "local"
+
+storage:
+  backend: file
+  path: ./workflow_data
+
+celery:
+  broker: redis://localhost:6379/0
+  result_backend: redis://localhost:6379/1
+```
+
+<Note>
+  The YAML config file is the **recommended** approach. Place it in your working directory
+  and both the CLI and your Python code will automatically use it.
+</Note>
+
+### Alternative Config Formats
+
+PyWorkflow also supports TOML configuration files (searched in order, walking up the directory tree):
 
 1. `pyworkflow.toml`
 2. `.pyworkflow.toml`
 3. `pyproject.toml` (under `[tool.pyworkflow]` section)
 
+<Accordion title="TOML Configuration Examples">
+  <Tabs>
+    <Tab title="pyworkflow.toml">
+      ```toml
+      module = "myapp.workflows"
+      runtime = "celery"
+
+      [storage]
+      backend = "file"
+      path = "./workflow_data"
+
+      [celery]
+      broker = "redis://localhost:6379/0"
+      result_backend = "redis://localhost:6379/1"
+      ```
+    </Tab>
+    <Tab title="pyproject.toml">
+      ```toml
+      [tool.pyworkflow]
+      module = "myapp.workflows"
+      runtime = "celery"
+
+      [tool.pyworkflow.storage]
+      backend = "file"
+      path = "./workflow_data"
+
+      [tool.pyworkflow.celery]
+      broker = "redis://localhost:6379/0"
+      result_backend = "redis://localhost:6379/1"
+      ```
+    </Tab>
+  </Tabs>
+</Accordion>
+
+### Priority Resolution
+
+Configuration values are resolved in this order (highest to lowest priority):
+
+| Priority | Source | Example |
+|----------|--------|---------|
+| 1 (highest) | CLI flags | `--module myapp.workflows` |
+| 2 | Environment variables | `PYWORKFLOW_MODULE=myapp.workflows` |
+| 3 | Config file | `pyworkflow.config.yaml` |
+| 4 (lowest) | Defaults | `runtime: local`, `durable: false` |
+
+---
+
+## Workflow Discovery
+
+When you run `pyworkflow worker run` or other CLI commands, PyWorkflow needs to discover
+and import your workflow modules. This happens in the following priority order:
+
+### Discovery Priority
+
+| Priority | Source | Example |
+|----------|--------|---------|
+| 1 (highest) | `--module` flag | `pyworkflow --module myapp.workflows worker run` |
+| 2 | `PYWORKFLOW_DISCOVER` env var | `PYWORKFLOW_DISCOVER=myapp.workflows pyworkflow worker run` |
+| 3 (lowest) | `pyworkflow.config.yaml` | `module: myapp.workflows` in config file |
+
+### How Discovery Works
+
+1. **Module Import**: PyWorkflow imports the specified Python module(s)
+2. **Decorator Registration**: When the module loads, `@workflow` and `@step` decorators
+   automatically register functions in the global registry
+3. **Project Root Detection**: PyWorkflow automatically finds your project root (by looking
+   for `pyproject.toml`, `setup.py`, or `.git`) and adds it to the Python path
+
 <Tabs>
-  <Tab title="pyworkflow.toml">
-    ```toml
-    module = "myapp.workflows"
-    runtime = "celery"  # or "local"
+  <Tab title="Using Config File (Recommended)">
+    ```bash
+    # Create pyworkflow.config.yaml in your project
+    cd myproject/
+    cat > pyworkflow.config.yaml << EOF
+    module: myapp.workflows
+    runtime: celery
+    storage:
+      backend: file
+      path: ./workflow_data
+    celery:
+      broker: redis://localhost:6379/0
+    EOF
 
-    [storage]
-    backend = "file"
-    path = "./workflow_data"
-
-    [celery]
-    broker = "redis://localhost:6379/0"
-    result_backend = "redis://localhost:6379/1"
+    # Now just run - config is auto-detected
+    pyworkflow worker run
     ```
   </Tab>
-  <Tab title="pyproject.toml">
-    ```toml
-    [tool.pyworkflow]
-    module = "myapp.workflows"
-    runtime = "celery"
+  <Tab title="Using --module Flag">
+    ```bash
+    pyworkflow --module myapp.workflows worker run
+    ```
+  </Tab>
+  <Tab title="Using Environment Variable">
+    ```bash
+    export PYWORKFLOW_DISCOVER=myapp.workflows
+    pyworkflow worker run
 
-    [tool.pyworkflow.storage]
-    backend = "file"
-    path = "./workflow_data"
-
-    [tool.pyworkflow.celery]
-    broker = "redis://localhost:6379/0"
-    result_backend = "redis://localhost:6379/1"
+    # Or inline
+    PYWORKFLOW_DISCOVER=myapp.workflows pyworkflow worker run
     ```
   </Tab>
 </Tabs>
 
-**Priority Resolution:**
-1. CLI flags (highest)
-2. Environment variables
-3. Config file
-4. Defaults (lowest)
+### Multiple Modules
+
+You can discover workflows from multiple modules:
+
+<Tabs>
+  <Tab title="Config File">
+    ```yaml
+    # pyworkflow.config.yaml
+    modules:
+      - myapp.workflows
+      - myapp.tasks
+      - myapp.handlers
+    ```
+  </Tab>
+  <Tab title="Environment Variable">
+    ```bash
+    # Comma-separated list
+    PYWORKFLOW_DISCOVER=myapp.workflows,myapp.tasks pyworkflow worker run
+    ```
+  </Tab>
+</Tabs>
 
 ## Commands
 

@@ -67,6 +67,12 @@ def worker() -> None:
     is_flag=True,
     help="Also start Celery Beat scheduler for periodic tasks",
 )
+@click.option(
+    "--pool",
+    type=click.Choice(["prefork", "solo", "eventlet", "gevent"], case_sensitive=False),
+    default=None,
+    help="Worker pool type. Use 'solo' for debugging with breakpoints",
+)
 @click.pass_context
 def run_worker(
     ctx: click.Context,
@@ -77,6 +83,7 @@ def run_worker(
     loglevel: str,
     hostname: Optional[str],
     beat: bool,
+    pool: Optional[str],
 ) -> None:
     """
     Start a Celery worker for processing workflows.
@@ -104,9 +111,21 @@ def run_worker(
         # Start with custom log level
         pyworkflow worker run --loglevel debug
     """
-    # Get config
+    # Get config from CLI context (TOML config)
     config = ctx.obj.get("config", {})
     module = ctx.obj.get("module")
+
+    # Also try to load YAML config if it exists
+    from pyworkflow.cli.utils.discovery import _load_yaml_config
+
+    yaml_config = _load_yaml_config()
+    if yaml_config:
+        # Merge YAML config (lower priority) with TOML config (higher priority)
+        merged_config = {**yaml_config, **config}
+        # For nested dicts like 'celery', merge them too
+        if "celery" in yaml_config and "celery" not in config:
+            merged_config["celery"] = yaml_config["celery"]
+        config = merged_config
 
     # Determine queues to process
     queues = []
@@ -137,10 +156,6 @@ def run_worker(
         os.getenv("PYWORKFLOW_CELERY_RESULT_BACKEND", "redis://localhost:6379/1"),
     )
 
-    # Set environment for workflow discovery
-    if module:
-        os.environ["PYWORKFLOW_DISCOVER"] = module
-
     print_info("Starting Celery worker...")
     print_info(f"Broker: {broker_url}")
     print_info(f"Queues: {', '.join(queues)}")
@@ -148,15 +163,48 @@ def run_worker(
     if concurrency:
         print_info(f"Concurrency: {concurrency}")
 
+    if pool:
+        print_info(f"Pool: {pool}")
+
     try:
-        # Import and configure Celery app
-        from pyworkflow.celery.app import create_celery_app, discover_workflows
+        # Discover workflows using CLI discovery (reads from --module, env var, or YAML config)
+        from pyworkflow.cli.utils.discovery import discover_workflows
+
+        discover_workflows(module, config)
+
+        # Import and configure Celery app (after discovery so workflows are registered)
+        from pyworkflow.celery.app import create_celery_app
 
         # Create or get Celery app with configured broker
         app = create_celery_app(
             broker_url=broker_url,
             result_backend=result_backend,
         )
+
+        # Log discovered workflows and steps
+        from pyworkflow import list_workflows, list_steps
+
+        workflows = list_workflows()
+        steps = list_steps()
+
+        if workflows:
+            print_info(f"Registered {len(workflows)} workflow(s):")
+            for name in sorted(workflows.keys()):
+                print_info(f"  - {name}")
+        else:
+            print_warning("No workflows registered!")
+            print_warning("Specify workflows using one of:")
+            print_warning("  1. --module flag: pyworkflow --module myapp.workflows worker run")
+            print_warning("  2. Environment: PYWORKFLOW_DISCOVER=myapp.workflows pyworkflow worker run")
+            print_warning("  3. Config file: Create pyworkflow.config.yaml with 'module: myapp.workflows'")
+            print_info("")
+
+        if steps:
+            print_info(f"Registered {len(steps)} step(s):")
+            for name in sorted(steps.keys()):
+                print_info(f"  - {name}")
+
+        print_info("")
 
         # Configure worker arguments
         worker_args = [
@@ -173,6 +221,9 @@ def run_worker(
 
         if beat:
             worker_args.append("--beat")
+
+        if pool:
+            worker_args.append(f"--pool={pool}")
 
         print_success("Worker starting...")
         print_info("Press Ctrl+C to stop")

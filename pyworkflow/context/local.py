@@ -77,12 +77,18 @@ class LocalContext(WorkflowContext):
         # Execution state
         self._step_results: Dict[str, Any] = {}
         self._completed_sleeps: Set[str] = set()
+        self._pending_sleeps: Dict[str, Any] = {}
         self._hook_results: Dict[str, Any] = {}
+        self._pending_hooks: Dict[str, Any] = {}
         self._step_counter = 0
+        self._retry_states: Dict[str, Dict[str, Any]] = {}
+        self._is_replaying = False
 
         # Replay state if resuming
         if event_log:
+            self._is_replaying = True
             self._replay_events(event_log)
+            self._is_replaying = False
 
     def _replay_events(self, events: List[Any]) -> None:
         """Replay events to restore state."""
@@ -104,9 +110,166 @@ class LocalContext(WorkflowContext):
                 payload = deserialize(event.data.get("payload"))
                 self._hook_results[hook_id] = payload
 
+            elif event.type == EventType.STEP_RETRYING:
+                step_id = event.data.get("step_id")
+                self._retry_states[step_id] = {
+                    "step_id": step_id,
+                    "current_attempt": event.data.get("attempt", 1),
+                    "resume_at": event.data.get("resume_at"),
+                    "max_retries": event.data.get("max_retries", 3),
+                    "retry_delay": event.data.get("retry_strategy", "exponential"),
+                    "last_error": event.data.get("error", ""),
+                }
+
     @property
     def is_durable(self) -> bool:
         return self._durable
+
+    @property
+    def storage(self) -> Optional[Any]:
+        """Get the storage backend."""
+        return self._storage
+
+    @property
+    def is_replaying(self) -> bool:
+        """Check if currently replaying events."""
+        return self._is_replaying
+
+    @is_replaying.setter
+    def is_replaying(self, value: bool) -> None:
+        """Set replay mode."""
+        self._is_replaying = value
+
+    # =========================================================================
+    # Step result caching (for @step decorator compatibility)
+    # =========================================================================
+
+    def should_execute_step(self, step_id: str) -> bool:
+        """Check if a step should be executed (not already cached)."""
+        return step_id not in self._step_results
+
+    def get_step_result(self, step_id: str) -> Any:
+        """Get cached step result."""
+        return self._step_results.get(step_id)
+
+    def cache_step_result(self, step_id: str, result: Any) -> None:
+        """Cache a step result."""
+        self._step_results[step_id] = result
+
+    # =========================================================================
+    # Retry state management (for @step decorator compatibility)
+    # =========================================================================
+
+    def get_retry_state(self, step_id: str) -> Optional[Dict[str, Any]]:
+        """Get retry state for a step."""
+        return self._retry_states.get(step_id)
+
+    def set_retry_state(
+        self,
+        step_id: str,
+        attempt: int,
+        resume_at: Any,
+        max_retries: int,
+        retry_delay: Any,
+        last_error: str,
+    ) -> None:
+        """Set retry state for a step."""
+        self._retry_states[step_id] = {
+            "step_id": step_id,
+            "current_attempt": attempt,
+            "resume_at": resume_at,
+            "max_retries": max_retries,
+            "retry_delay": retry_delay,
+            "last_error": last_error,
+        }
+
+    def clear_retry_state(self, step_id: str) -> None:
+        """Clear retry state for a step."""
+        self._retry_states.pop(step_id, None)
+
+    # =========================================================================
+    # Sleep state management (for @step decorator and EventReplayer compatibility)
+    # =========================================================================
+
+    @property
+    def pending_sleeps(self) -> Dict[str, Any]:
+        """Get pending sleeps (sleep_id -> resume_at)."""
+        return self._pending_sleeps
+
+    def add_pending_sleep(self, sleep_id: str, resume_at: Any) -> None:
+        """Add a pending sleep."""
+        self._pending_sleeps[sleep_id] = resume_at
+
+    def mark_sleep_completed(self, sleep_id: str) -> None:
+        """Mark a sleep as completed."""
+        self._completed_sleeps.add(sleep_id)
+
+    def should_execute_sleep(self, sleep_id: str) -> bool:
+        """Check if a sleep should be executed (not already completed)."""
+        return sleep_id not in self._completed_sleeps
+
+    def is_sleep_completed(self, sleep_id: str) -> bool:
+        """Check if a sleep has been completed."""
+        return sleep_id in self._completed_sleeps
+
+    @property
+    def completed_sleeps(self) -> Set[str]:
+        """Get the set of completed sleep IDs."""
+        return self._completed_sleeps
+
+    # =========================================================================
+    # Hook state management (for EventReplayer compatibility)
+    # =========================================================================
+
+    @property
+    def pending_hooks(self) -> Dict[str, Any]:
+        """Get pending hooks."""
+        return self._pending_hooks
+
+    def add_pending_hook(self, hook_id: str, data: Any) -> None:
+        """Add a pending hook."""
+        self._pending_hooks[hook_id] = data
+
+    def cache_hook_result(self, hook_id: str, payload: Any) -> None:
+        """Cache a hook result."""
+        self._hook_results[hook_id] = payload
+
+    def has_hook_result(self, hook_id: str) -> bool:
+        """Check if a hook result exists."""
+        return hook_id in self._hook_results
+
+    def get_hook_result(self, hook_id: str) -> Any:
+        """Get a cached hook result."""
+        return self._hook_results.get(hook_id)
+
+    # =========================================================================
+    # Event log access (for EventReplayer compatibility)
+    # =========================================================================
+
+    @property
+    def event_log(self) -> List[Any]:
+        """Get the event log."""
+        return self._event_log
+
+    @event_log.setter
+    def event_log(self, events: List[Any]) -> None:
+        """Set the event log."""
+        self._event_log = events
+
+    @property
+    def step_results(self) -> Dict[str, Any]:
+        """Get step results."""
+        return self._step_results
+
+    @property
+    def hook_results(self) -> Dict[str, Any]:
+        """Get hook results."""
+        return self._hook_results
+
+    @property
+    def retry_state(self) -> Dict[str, Dict[str, Any]]:
+        """Get retry states."""
+        return self._retry_states
 
     # =========================================================================
     # Step execution

@@ -4,7 +4,7 @@ Unit tests for @workflow decorator and workflow execution.
 
 import pytest
 
-from pyworkflow.core.context import WorkflowContext, get_current_context, set_current_context
+from pyworkflow.context import LocalContext, get_context, set_context, has_context
 from pyworkflow.core.workflow import execute_workflow_with_context, workflow
 from pyworkflow.storage.file import FileStorageBackend
 
@@ -97,7 +97,7 @@ class TestWorkflowExecution:
 
         @workflow()
         async def context_workflow(value: str):
-            ctx = get_current_context()
+            ctx = get_context()
             assert ctx.run_id == "test_run_123"
             assert ctx.workflow_name == "test_workflow"
             return f"processed: {value}"
@@ -137,9 +137,7 @@ class TestWorkflowExecution:
         )
 
         # Context should be cleared
-        from pyworkflow.core.context import has_current_context
-
-        assert not has_current_context()
+        assert not has_context()
 
     @pytest.mark.asyncio
     async def test_workflow_exception_handling(self, tmp_path):
@@ -162,9 +160,7 @@ class TestWorkflowExecution:
             )
 
         # Context should still be cleared after exception
-        from pyworkflow.core.context import has_current_context
-
-        assert not has_current_context()
+        assert not has_context()
 
     @pytest.mark.asyncio
     async def test_workflow_event_recording(self, tmp_path):
@@ -196,37 +192,43 @@ class TestWorkflowExecution:
 
     @pytest.mark.asyncio
     async def test_workflow_with_nested_context(self, tmp_path):
-        """Test workflow execution doesn't interfere with existing context."""
+        """Test workflow execution restores previous context."""
+        from pyworkflow.context import reset_context
 
         # Set up an initial context
-        initial_ctx = WorkflowContext(
+        initial_storage = FileStorageBackend(base_path=str(tmp_path / "initial"))
+        initial_ctx = LocalContext(
             run_id="initial_run",
             workflow_name="initial_workflow",
-            storage=FileStorageBackend(base_path=str(tmp_path)),
+            storage=initial_storage,
         )
-        set_current_context(initial_ctx)
+        initial_token = set_context(initial_ctx)
 
-        @workflow()
-        async def nested_workflow():
-            ctx = get_current_context()
-            # This should be the new context
-            assert ctx.run_id == "nested_run"
-            return "nested"
+        try:
+            @workflow()
+            async def nested_workflow():
+                ctx = get_context()
+                # This should be the new context
+                assert ctx.run_id == "nested_run"
+                return "nested"
 
-        storage = FileStorageBackend(base_path=str(tmp_path))
+            storage = FileStorageBackend(base_path=str(tmp_path / "nested"))
 
-        result = await execute_workflow_with_context(
-            workflow_func=nested_workflow,
-            run_id="nested_run",
-            workflow_name="nested_test",
-            storage=storage,
-            args=(),
-            kwargs={},
-        )
+            result = await execute_workflow_with_context(
+                workflow_func=nested_workflow,
+                run_id="nested_run",
+                workflow_name="nested_test",
+                storage=storage,
+                args=(),
+                kwargs={},
+            )
 
-        assert result == "nested"
+            assert result == "nested"
 
-        # After execution, context should be cleared (not restored to initial)
-        from pyworkflow.core.context import has_current_context
-
-        assert not has_current_context()
+            # After execution, context should be restored to initial
+            # (token-based reset restores previous context)
+            assert has_context()
+            ctx = get_context()
+            assert ctx.run_id == "initial_run"
+        finally:
+            reset_context(initial_token)

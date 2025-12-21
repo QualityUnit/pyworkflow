@@ -1,0 +1,25 @@
+# PyWorkflow Configuration for Celery Durable Examples
+#
+# This file configures the pyworkflow CLI when running from this directory.
+# Simply run: pyworkflow worker run
+#
+# Priority order:
+#   1. --module CLI argument
+#   2. PYWORKFLOW_DISCOVER environment variable
+#   3. This config file (pyworkflow.config.yaml)
+
+# Module containing workflow definitions
+module: examples.celery.durable
+
+# Runtime configuration
+runtime: celery
+
+# Storage backend configuration
+storage:
+  backend: file
+  path: ./workflow_data
+
+# Celery broker and result backend
+celery:
+  broker: redis://localhost:6379/0
+  result_backend: redis://localhost:6379/1

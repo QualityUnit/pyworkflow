@@ -1,6 +1,6 @@
 """Configuration file loading utilities."""
 
-import toml
+import tomllib
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -42,7 +42,8 @@ def find_config_file() -> Optional[Path]:
         pyproject = path / "pyproject.toml"
         if pyproject.exists():
             try:
-                data = toml.load(pyproject)
+                with open(pyproject, "rb") as f:
+                    data = tomllib.load(f)
                 if "tool" in data and "pyworkflow" in data["tool"]:
                     logger.debug(f"Found pyworkflow config in pyproject.toml: {pyproject}")
                     return pyproject
@@ -74,7 +75,8 @@ def load_config() -> Dict[str, Any]:
         return {}
 
     try:
-        data = toml.load(config_path)
+        with open(config_path, "rb") as f:
+            data = tomllib.load(f)
         logger.info(f"Loaded configuration from: {config_path}")
 
         # Handle pyproject.toml format

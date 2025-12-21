@@ -58,16 +58,15 @@ from pyworkflow.core.exceptions import (
     WorkflowNotFoundError,
 )
 
-# Context access (old API - kept for backward compatibility)
-from pyworkflow.core.context import get_current_context, has_current_context
-
-# New context API (implicit context via contextvars)
+# Context API (new unified context via contextvars)
 from pyworkflow.context import (
     WorkflowContext,
     LocalContext,
     MockContext,
     get_context,
     has_context,
+    set_context,
+    reset_context,
 )
 
 # Registry functions
@@ -120,15 +119,14 @@ __all__ = [
     "WorkflowNotFoundError",
     "WorkflowAlreadyRunningError",
     "ConfigurationError",
-    # Context (old API)
-    "get_current_context",
-    "has_current_context",
-    # Context (new API)
+    # Context API
     "WorkflowContext",
     "LocalContext",
     "MockContext",
     "get_context",
     "has_context",
+    "set_context",
+    "reset_context",
     # Registry
     "list_workflows",
     "get_workflow",

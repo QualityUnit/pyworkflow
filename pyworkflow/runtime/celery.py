@@ -92,9 +92,10 @@ class CeleryRuntime(Runtime):
         storage_class_name = storage.__class__.__name__
 
         if storage_class_name == "FileStorageBackend":
+            base_path = getattr(storage, "base_path", None)
             return {
                 "type": "file",
-                "base_path": getattr(storage, "base_path", None),
+                "base_path": str(base_path) if base_path else None,
             }
         elif storage_class_name == "RedisStorageBackend":
             return {
@@ -160,6 +161,7 @@ class CeleryRuntime(Runtime):
             workflow_name=workflow_name,
             args_json=args_json,
             kwargs_json=kwargs_json,
+            run_id=run_id,
             storage_config=storage_config,
             idempotency_key=idempotency_key,
         )

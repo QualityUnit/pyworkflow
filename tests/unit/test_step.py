@@ -4,8 +4,8 @@ Unit tests for @step decorator and step execution.
 
 import pytest
 
-from pyworkflow.core.context import WorkflowContext, set_current_context
-from pyworkflow.core.exceptions import FatalError, RetryableError
+from pyworkflow.context import LocalContext, set_context
+from pyworkflow.core.exceptions import FatalError, RetryableError, SuspensionSignal
 from pyworkflow.core.step import _generate_step_id, step
 from pyworkflow.engine.events import EventType
 from pyworkflow.storage.file import FileStorageBackend
@@ -105,18 +105,18 @@ class TestStepExecution:
 
         # Create context
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,
         )
-        set_current_context(ctx)
+        set_context(ctx)
 
         try:
             result = await context_step("test")
             assert result == "processed: test"
         finally:
-            set_current_context(None)
+            set_context(None)
 
     @pytest.mark.asyncio
     async def test_step_caches_result(self, tmp_path):
@@ -130,12 +130,12 @@ class TestStepExecution:
             return "result"
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,
         )
-        set_current_context(ctx)
+        set_context(ctx)
 
         try:
             # First call - should execute
@@ -151,7 +151,7 @@ class TestStepExecution:
             assert ctx.step_results[step_id] == "result"
 
         finally:
-            set_current_context(None)
+            set_context(None)
 
     @pytest.mark.asyncio
     async def test_step_uses_cached_result_on_replay(self, tmp_path):
@@ -165,7 +165,7 @@ class TestStepExecution:
             return "original"
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,
@@ -175,7 +175,7 @@ class TestStepExecution:
         step_id = _generate_step_id("cached_step", (), {})
         ctx.cache_step_result(step_id, "cached_value")
 
-        set_current_context(ctx)
+        set_context(ctx)
 
         try:
             # Should return cached value without executing
@@ -184,7 +184,7 @@ class TestStepExecution:
             assert call_count == 0  # Should not have been called
 
         finally:
-            set_current_context(None)
+            set_context(None)
 
     @pytest.mark.asyncio
     async def test_step_records_events(self, tmp_path):
@@ -195,12 +195,12 @@ class TestStepExecution:
             return "done"
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,
         )
-        set_current_context(ctx)
+        set_context(ctx)
 
         try:
             await event_step()
@@ -214,7 +214,7 @@ class TestStepExecution:
             assert EventType.STEP_COMPLETED in event_types
 
         finally:
-            set_current_context(None)
+            set_context(None)
 
 
 class TestStepErrorHandling:
@@ -229,12 +229,12 @@ class TestStepErrorHandling:
             raise FatalError("Critical failure")
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,
         )
-        set_current_context(ctx)
+        set_context(ctx)
 
         try:
             with pytest.raises(FatalError, match="Critical failure"):
@@ -251,26 +251,27 @@ class TestStepErrorHandling:
             assert failure_events[0].data["is_retryable"] is False
 
         finally:
-            set_current_context(None)
+            set_context(None)
 
     @pytest.mark.asyncio
     async def test_step_retryable_error(self, tmp_path):
-        """Test that RetryableError is recorded and raised."""
+        """Test that RetryableError triggers retry scheduling (SuspensionSignal)."""
 
         @step()
         async def retryable_step():
             raise RetryableError("Temporary failure")
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,
         )
-        set_current_context(ctx)
+        set_context(ctx)
 
         try:
-            with pytest.raises(RetryableError, match="Temporary failure"):
+            # In durable mode, retryable errors trigger SuspensionSignal for retry scheduling
+            with pytest.raises(SuspensionSignal):
                 await retryable_step()
 
             # Check that failure event was recorded
@@ -280,26 +281,27 @@ class TestStepErrorHandling:
             assert failure_events[0].data["is_retryable"] is True
 
         finally:
-            set_current_context(None)
+            set_context(None)
 
     @pytest.mark.asyncio
     async def test_step_unexpected_error_converted_to_retryable(self, tmp_path):
-        """Test that unexpected errors are converted to RetryableError."""
+        """Test that unexpected errors trigger retry scheduling (SuspensionSignal)."""
 
         @step()
         async def unexpected_error_step():
             raise ValueError("Unexpected")
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,
         )
-        set_current_context(ctx)
+        set_context(ctx)
 
         try:
-            with pytest.raises(RetryableError):
+            # Unexpected errors are treated as retryable and trigger SuspensionSignal
+            with pytest.raises(SuspensionSignal):
                 await unexpected_error_step()
 
             # Check that failure event was recorded as retryable
@@ -309,7 +311,7 @@ class TestStepErrorHandling:
             assert failure_events[0].data["is_retryable"] is True
 
         finally:
-            set_current_context(None)
+            set_context(None)
 
 
 class TestStepIDGeneration:

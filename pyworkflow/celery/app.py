@@ -6,6 +6,10 @@ This module configures Celery for:
 - Automatic retry with exponential backoff
 - Scheduled task execution (sleep resumption)
 - Result persistence
+
+Note: With Python 3.13, you may see "BufferError: Existing exports of data"
+warnings in Celery logs. This is a known compatibility issue between Python 3.13's
+garbage collector and Celery's saferepr module. It does not affect functionality.
 """
 
 import os

@@ -62,6 +62,7 @@
     {
       "group": "Guides",
       "pages": [
+        "guides/configuration",
         "guides/cli"
       ]
     }

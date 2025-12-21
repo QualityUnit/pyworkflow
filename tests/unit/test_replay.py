@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from pyworkflow.core.context import WorkflowContext
+from pyworkflow.context import LocalContext
 from pyworkflow.engine.events import (
     Event,
     EventType,
@@ -30,7 +30,7 @@ class TestEventReplayer:
     async def test_replay_empty_events(self, tmp_path):
         """Test replaying with no events."""
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,
@@ -48,7 +48,7 @@ class TestEventReplayer:
     async def test_replay_step_completed(self, tmp_path):
         """Test replaying step.completed events."""
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,
@@ -84,7 +84,7 @@ class TestEventReplayer:
     async def test_replay_multiple_steps(self, tmp_path):
         """Test replaying multiple step events."""
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,
@@ -118,7 +118,7 @@ class TestEventReplayer:
     async def test_replay_sleep_events(self, tmp_path):
         """Test replaying sleep events."""
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,
@@ -150,7 +150,7 @@ class TestEventReplayer:
     async def test_replay_pending_sleep(self, tmp_path):
         """Test replaying sleep that hasn't completed."""
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,
@@ -181,7 +181,7 @@ class TestEventReplayer:
     async def test_replay_hook_events(self, tmp_path):
         """Test replaying hook events."""
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,
@@ -216,7 +216,7 @@ class TestEventReplayer:
     async def test_replay_expired_hook(self, tmp_path):
         """Test replaying an expired hook."""
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,
@@ -250,7 +250,7 @@ class TestEventReplayer:
     async def test_replay_events_in_order(self, tmp_path):
         """Test that events are replayed in sequence order."""
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,
@@ -280,7 +280,7 @@ class TestEventReplayer:
     async def test_replay_sets_replaying_flag(self, tmp_path):
         """Test that replay sets and clears is_replaying flag."""
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,
@@ -309,7 +309,7 @@ class TestReplayPublicAPI:
     async def test_replay_events_function(self, tmp_path):
         """Test the replay_events public function."""
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,
@@ -337,7 +337,7 @@ class TestReplayIntegration:
     async def test_replay_full_workflow(self, tmp_path):
         """Test replaying a complete workflow event log."""
         storage = FileStorageBackend(base_path=str(tmp_path))
-        ctx = WorkflowContext(
+        ctx = LocalContext(
             run_id="test_run",
             workflow_name="test_workflow",
             storage=storage,

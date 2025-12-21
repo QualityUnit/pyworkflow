@@ -173,16 +173,14 @@ assert run_id == run_id_2  # True - same workflow
 Inside a workflow, you can access the execution context:
 
 ```python
-from pyworkflow import workflow
-from pyworkflow.core.context import get_current_context
+from pyworkflow import workflow, get_context
 
 @workflow()
 async def my_workflow():
-    ctx = get_current_context()
+    ctx = get_context()
 
     print(f"Run ID: {ctx.run_id}")
     print(f"Workflow: {ctx.workflow_name}")
-    print(f"Started at: {ctx.started_at}")
 
     # Access step results from replay
     previous_result = ctx.step_results.get("step_id")

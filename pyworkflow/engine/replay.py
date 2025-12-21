@@ -9,7 +9,7 @@ from typing import List
 
 from loguru import logger
 
-from pyworkflow.core.context import WorkflowContext
+from pyworkflow.context import LocalContext
 from pyworkflow.engine.events import Event, EventType
 
 
@@ -23,7 +23,7 @@ class EventReplayer:
     - Sleep completion status
     """
 
-    async def replay(self, ctx: WorkflowContext, events: List[Event]) -> None:
+    async def replay(self, ctx: LocalContext, events: List[Event]) -> None:
         """
         Replay events to restore workflow state.
 
@@ -60,7 +60,7 @@ class EventReplayer:
             run_id=ctx.run_id,
         )
 
-    async def _apply_event(self, ctx: WorkflowContext, event: Event) -> None:
+    async def _apply_event(self, ctx: LocalContext, event: Event) -> None:
         """
         Apply a single event to the context.
 
@@ -92,7 +92,7 @@ class EventReplayer:
         # Other event types don't affect replay state
         # (workflow_started, step_started, step_failed, etc. are informational)
 
-    async def _apply_step_completed(self, ctx: WorkflowContext, event: Event) -> None:
+    async def _apply_step_completed(self, ctx: LocalContext, event: Event) -> None:
         """Apply step_completed event - cache the result."""
         from pyworkflow.serialization.decoder import deserialize
 
@@ -109,7 +109,7 @@ class EventReplayer:
                 step_id=step_id,
             )
 
-    async def _apply_sleep_started(self, ctx: WorkflowContext, event: Event) -> None:
+    async def _apply_sleep_started(self, ctx: LocalContext, event: Event) -> None:
         """Apply sleep_started event - mark sleep as pending."""
         from datetime import datetime
 
@@ -127,7 +127,7 @@ class EventReplayer:
                 resume_at=resume_at_str,
             )
 
-    async def _apply_sleep_completed(self, ctx: WorkflowContext, event: Event) -> None:
+    async def _apply_sleep_completed(self, ctx: LocalContext, event: Event) -> None:
         """Apply sleep_completed event - mark sleep as done."""
         sleep_id = event.data.get("sleep_id")
 
@@ -139,7 +139,7 @@ class EventReplayer:
                 sleep_id=sleep_id,
             )
 
-    async def _apply_hook_created(self, ctx: WorkflowContext, event: Event) -> None:
+    async def _apply_hook_created(self, ctx: LocalContext, event: Event) -> None:
         """Apply hook_created event - mark hook as pending."""
         hook_id = event.data.get("hook_id")
 
@@ -151,7 +151,7 @@ class EventReplayer:
                 hook_id=hook_id,
             )
 
-    async def _apply_hook_received(self, ctx: WorkflowContext, event: Event) -> None:
+    async def _apply_hook_received(self, ctx: LocalContext, event: Event) -> None:
         """Apply hook_received event - cache the payload."""
         hook_id = event.data.get("hook_id")
         payload = event.data.get("payload")
@@ -164,7 +164,7 @@ class EventReplayer:
                 hook_id=hook_id,
             )
 
-    async def _apply_hook_expired(self, ctx: WorkflowContext, event: Event) -> None:
+    async def _apply_hook_expired(self, ctx: LocalContext, event: Event) -> None:
         """Apply hook_expired event - remove from pending."""
         hook_id = event.data.get("hook_id")
 
@@ -176,7 +176,7 @@ class EventReplayer:
                 hook_id=hook_id,
             )
 
-    async def _apply_step_retrying(self, ctx: WorkflowContext, event: Event) -> None:
+    async def _apply_step_retrying(self, ctx: LocalContext, event: Event) -> None:
         """Apply step_retrying event - restore retry state for resumption."""
         from datetime import datetime
 
@@ -215,7 +215,7 @@ class EventReplayer:
 _replayer = EventReplayer()
 
 
-async def replay_events(ctx: WorkflowContext, events: List[Event]) -> None:
+async def replay_events(ctx: LocalContext, events: List[Event]) -> None:
     """
     Replay events to restore workflow state.
 

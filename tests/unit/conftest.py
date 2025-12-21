@@ -30,12 +30,12 @@ def reset_global_registry():
 @pytest.fixture(autouse=True)
 def reset_workflow_context():
     """Ensure no workflow context leaks between tests."""
-    from pyworkflow.core.context import set_current_context
+    from pyworkflow.context import set_context
 
     # Clear any existing context before test
-    set_current_context(None)
+    set_context(None)
 
     yield
 
     # Clear context after test
-    set_current_context(None)
+    set_context(None)

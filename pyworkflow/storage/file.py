@@ -90,11 +90,21 @@ class FileStorageBackend(StorageBackend):
         if not run_file.exists():
             return None
 
-        def _read() -> dict:
-            return json.loads(run_file.read_text())
+        lock_file = self.locks_dir / f"{run_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _read() -> Optional[dict]:
+            with lock:
+                if not run_file.exists():
+                    return None
+                content = run_file.read_text()
+                if not content.strip():
+                    # File exists but is empty (race condition) - treat as not found
+                    return None
+                return json.loads(content)
 
         data = await asyncio.to_thread(_read)
-        return WorkflowRun.from_dict(data)
+        return WorkflowRun.from_dict(data) if data else None
 
     async def get_run_by_idempotency_key(self, key: str) -> Optional[WorkflowRun]:
         """Retrieve a workflow run by idempotency key."""

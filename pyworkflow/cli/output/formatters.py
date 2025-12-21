@@ -12,6 +12,7 @@ from rich.tree import Tree
 from rich import box
 
 console = Console()
+error_console = Console(stderr=True)
 
 
 def format_table(
@@ -227,8 +228,8 @@ def print_success(message: str) -> None:
 
 
 def print_error(message: str) -> None:
-    """Print error message."""
-    console.print(f"[red]✗[/red] {message}", err=True)
+    """Print error message to stderr."""
+    error_console.print(f"[red]✗[/red] {message}")
 
 
 def print_warning(message: str) -> None:

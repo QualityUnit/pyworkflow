@@ -56,7 +56,8 @@
         "concepts/workflows",
         "concepts/steps",
         "concepts/events",
-        "concepts/sleep"
+        "concepts/sleep",
+        "concepts/fault-tolerance"
       ]
     },
     {

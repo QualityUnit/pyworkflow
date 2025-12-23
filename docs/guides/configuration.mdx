@@ -309,6 +309,57 @@ else:
 
 ---
 
+## Fault Tolerance Settings
+
+Configure auto recovery behavior for workflows that experience worker crashes.
+
+<Tabs>
+  <Tab title="Config File">
+    ```yaml
+    # pyworkflow.config.yaml
+
+    recovery:
+      recover_on_worker_loss: true
+      max_recovery_attempts: 5
+    ```
+  </Tab>
+  <Tab title="Programmatic">
+    ```python
+    import pyworkflow
+
+    pyworkflow.configure(
+        default_recover_on_worker_loss=True,
+        default_max_recovery_attempts=5,
+    )
+    ```
+  </Tab>
+  <Tab title="Per-Workflow">
+    ```python
+    from pyworkflow import workflow
+
+    @workflow(
+        recover_on_worker_loss=True,
+        max_recovery_attempts=3,
+    )
+    async def resilient_workflow():
+        pass
+    ```
+  </Tab>
+</Tabs>
+
+### Recovery Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `recover_on_worker_loss` | `bool` | `True` (durable) | Enable automatic recovery when a worker crashes |
+| `max_recovery_attempts` | `int` | `3` | Maximum number of recovery attempts before marking as failed |
+
+<Note>
+  For durable workflows, recovery replays events to restore state. For transient workflows, recovery restarts from the beginning. See [Fault Tolerance](/concepts/fault-tolerance) for details.
+</Note>
+
+---
+
 ## Reading Current Configuration
 
 Access the current configuration programmatically:

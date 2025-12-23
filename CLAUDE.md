@@ -288,6 +288,60 @@ raise RetryableError("Temporary failure")
 raise RetryableError("Rate limited", retry_after="60s")
 ```
 
+### Auto Recovery and Fault Tolerance
+
+PyWorkflow automatically recovers workflows from worker crashes using event replay.
+
+**Worker Loss Detection:**
+- Celery detects worker loss via `WorkerLostError`
+- Task is requeued; new worker detects `RUNNING` or `INTERRUPTED` status
+- Recovery is triggered if `recover_on_worker_loss=True`
+
+**Recovery Flow:**
+1. Detect workflow in `RUNNING`/`INTERRUPTED` status on task start
+2. Check `recovery_attempts < max_recovery_attempts`
+3. Record `WORKFLOW_INTERRUPTED` event
+4. Complete any pending sleeps (mark `SLEEP_COMPLETED`)
+5. Replay event log to restore cached step results
+6. Continue execution from the last checkpoint
+
+**Key Functions (`pyworkflow/celery/tasks.py`):**
+- `_handle_workflow_recovery()` - Authorize and initiate recovery (lines 239-318)
+- `_recover_workflow_on_worker()` - Execute recovery with event replay (lines 321-428)
+- `_complete_pending_sleeps()` - Mark pending sleeps as completed (lines 684-731)
+
+**Configuration Priority:**
+1. `@workflow()` decorator parameters (highest)
+2. `pyworkflow.configure()` global settings
+3. Defaults: `True` for durable workflows, `False` for transient
+
+**Configuration:**
+```python
+# Per-workflow
+@workflow(
+    recover_on_worker_loss=True,   # Enable recovery
+    max_recovery_attempts=5,        # Max attempts before failure
+)
+async def my_workflow():
+    pass
+
+# Global default
+pyworkflow.configure(
+    default_recover_on_worker_loss=True,
+    default_max_recovery_attempts=3,
+)
+```
+
+**Durable vs Transient Recovery:**
+- **Durable**: Events are replayed, execution resumes from last checkpoint
+- **Transient**: No events recorded, workflow restarts from the beginning
+
+**New Event Type:**
+- `WORKFLOW_INTERRUPTED` - Recorded when worker crash is detected
+
+**New Run Status:**
+- `INTERRUPTED` - Workflow awaiting recovery after worker crash
+
 ### Celery Integration
 
 **Two Queue System:**

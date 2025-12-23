@@ -149,24 +149,31 @@ assert run_id == run_id_2  # True - same workflow
 │   RUNNING   │  Workflow is executing
 └──────┬──────┘
        │
-       ├────────────────┐
+       ├────────────────┬────────────────┐
+       │                │                │
+       ▼                ▼                ▼
+┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+│  SUSPENDED  │  │ INTERRUPTED │  │   FAILED    │
+│             │  │(worker crash)│  │             │
+└──────┬──────┘  └──────┬──────┘  └─────────────┘
        │                │
+       │ (sleep ends)   │ (auto recovery)
        ▼                ▼
 ┌─────────────┐  ┌─────────────┐
-│  SUSPENDED  │  │   FAILED    │  Error occurred
-└──────┬──────┘  └─────────────┘
-       │
-       │ (sleep ends / webhook received)
-       ▼
-┌─────────────┐
-│   RUNNING   │  Resumed execution
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│  COMPLETED  │  Workflow finished successfully
-└─────────────┘
+│   RUNNING   │  │   RUNNING   │  Recovered
+└──────┬──────┘  └──────┬──────┘
+       │                │
+       └────────┬───────┘
+                │
+                ▼
+         ┌─────────────┐
+         │  COMPLETED  │  Workflow finished successfully
+         └─────────────┘
 ```
+
+<Note>
+  When a worker crashes, the workflow enters `INTERRUPTED` status and automatically recovers on another worker. See [Fault Tolerance](/concepts/fault-tolerance) for details.
+</Note>
 
 ## Workflow Context
 
@@ -224,6 +231,10 @@ async def my_workflow():
   <Accordion title="Set appropriate timeouts">
     Use `max_duration` to prevent workflows from running indefinitely. Consider the longest possible execution path.
   </Accordion>
+
+  <Accordion title="Configure fault tolerance">
+    Enable `recover_on_worker_loss` for critical workflows to ensure automatic recovery from worker crashes. See [Fault Tolerance](/concepts/fault-tolerance) for configuration options.
+  </Accordion>
 </AccordionGroup>
 
 ## Next Steps
@@ -234,5 +245,11 @@ async def my_workflow():
   </Card>
   <Card title="Sleep" icon="clock" href="/concepts/sleep">
     Pause workflows for any duration without consuming resources.
+  </Card>
+  <Card title="Fault Tolerance" icon="shield-check" href="/concepts/fault-tolerance">
+    Configure auto recovery from worker crashes.
+  </Card>
+  <Card title="Events" icon="timeline" href="/concepts/events">
+    Understand the event sourcing model.
   </Card>
 </CardGroup>

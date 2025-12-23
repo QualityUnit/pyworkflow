@@ -14,6 +14,7 @@ PyWorkflow is a workflow orchestration framework that enables you to build compl
 
 - **Distributed by Default**: All workflows execute across Celery workers for horizontal scaling
 - **Durable Execution**: Event sourcing ensures workflows can recover from any failure
+- **Auto Recovery**: Automatic workflow resumption after worker crashes with event replay
 - **Time Travel**: Sleep for minutes, hours, or days with automatic resumption
 - **Fault Tolerant**: Automatic retries with configurable backoff strategies
 - **Zero-Resource Suspension**: Workflows suspend without holding resources during sleep
@@ -323,6 +324,47 @@ async def process_payment(amount: float):
 - `retry_delay="fixed"` - Fixed delay between retries (default: 60s)
 - `retry_delay="exponential"` - Exponential backoff (1s, 2s, 4s, 8s, ...)
 - `retry_delay="5s"` - Custom fixed delay
+
+### Auto Recovery
+
+Workflows automatically recover from worker crashes:
+
+```python
+from pyworkflow import workflow, step, sleep
+
+@workflow(
+    recover_on_worker_loss=True,    # Enable recovery (default for durable)
+    max_recovery_attempts=5,         # Max recovery attempts
+)
+async def resilient_workflow(data_id: str):
+    data = await fetch_data(data_id)    # Completed steps are skipped on recovery
+    await sleep("10m")                   # Sleep state is preserved
+    return await process_data(data)      # Continues from here after crash
+```
+
+**What happens on worker crash:**
+1. Celery detects worker loss, requeues task
+2. New worker picks up the task
+3. Events are replayed to restore state
+4. Workflow resumes from last checkpoint
+
+Configure globally:
+```python
+import pyworkflow
+
+pyworkflow.configure(
+    default_recover_on_worker_loss=True,
+    default_max_recovery_attempts=3,
+)
+```
+
+Or via config file:
+```yaml
+# pyworkflow.config.yaml
+recovery:
+  recover_on_worker_loss: true
+  max_recovery_attempts: 3
+```
 
 ### Idempotency
 

@@ -89,6 +89,9 @@ class EventReplayer:
         elif event.type == EventType.STEP_RETRYING:
             await self._apply_step_retrying(ctx, event)
 
+        elif event.type == EventType.WORKFLOW_INTERRUPTED:
+            await self._apply_workflow_interrupted(ctx, event)
+
         # Other event types don't affect replay state
         # (workflow_started, step_started, step_failed, etc. are informational)
 
@@ -209,6 +212,26 @@ class EventReplayer:
                 next_attempt=next_attempt,
                 resume_at=resume_at_str,
             )
+
+    async def _apply_workflow_interrupted(self, ctx: LocalContext, event: Event) -> None:
+        """
+        Apply workflow_interrupted event - log the interruption.
+
+        This event is informational for the replay - it doesn't change state
+        since the workflow will continue from the last completed step.
+        The event records that an interruption occurred for auditing purposes.
+        """
+        reason = event.data.get("reason", "unknown")
+        recovery_attempt = event.data.get("recovery_attempt", 0)
+        last_event_sequence = event.data.get("last_event_sequence")
+
+        logger.info(
+            f"Workflow was interrupted: {reason}",
+            run_id=ctx.run_id,
+            reason=reason,
+            recovery_attempt=recovery_attempt,
+            last_event_sequence=last_event_sequence,
+        )
 
 
 # Singleton instance

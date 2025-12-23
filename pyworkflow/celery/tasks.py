@@ -6,6 +6,7 @@ These tasks enable:
 - Automatic retry with exponential backoff
 - Scheduled sleep resumption
 - Workflow orchestration
+- Fault tolerance with automatic recovery on worker failures
 """
 
 import asyncio
@@ -14,13 +15,17 @@ from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
 from celery import Task
+from celery.exceptions import WorkerLostError
 from loguru import logger
 
 from pyworkflow.celery.app import celery_app
 from pyworkflow.core.exceptions import FatalError, RetryableError, SuspensionSignal
 from pyworkflow.core.registry import get_workflow, get_workflow_by_func
 from pyworkflow.core.workflow import execute_workflow_with_context
-from pyworkflow.engine.events import create_workflow_started_event
+from pyworkflow.engine.events import (
+    create_workflow_started_event,
+    create_workflow_interrupted_event,
+)
 from pyworkflow.serialization.decoder import deserialize_args, deserialize_kwargs
 from pyworkflow.serialization.encoder import serialize_args, serialize_kwargs
 from pyworkflow.storage.base import StorageBackend
@@ -37,13 +42,30 @@ class WorkflowTask(Task):
     retry_jitter = True
 
     def on_failure(self, exc, task_id, args, kwargs, einfo):
-        """Handle task failure."""
-        logger.error(
-            f"Task {self.name} failed",
-            task_id=task_id,
-            error=str(exc),
-            traceback=einfo.traceback,
-        )
+        """
+        Handle task failure.
+
+        Detects worker loss and handles recovery appropriately:
+        - WorkerLostError: Infrastructure failure, may trigger recovery
+        - Other exceptions: Application failure
+        """
+        is_worker_loss = isinstance(exc, WorkerLostError)
+
+        if is_worker_loss:
+            logger.warning(
+                f"Task {self.name} interrupted due to worker loss",
+                task_id=task_id,
+                error=str(exc),
+            )
+            # Note: Recovery is handled when the task is requeued and picked up
+            # by another worker. See _handle_workflow_recovery() for logic.
+        else:
+            logger.error(
+                f"Task {self.name} failed",
+                task_id=task_id,
+                error=str(exc),
+                traceback=einfo.traceback if einfo else None,
+            )
 
     def on_retry(self, exc, task_id, args, kwargs, einfo):
         """Handle task retry."""
@@ -214,6 +236,198 @@ def start_workflow_task(
     return result_run_id
 
 
+async def _handle_workflow_recovery(
+    run: WorkflowRun,
+    storage: StorageBackend,
+    worker_id: Optional[str] = None,
+) -> bool:
+    """
+    Handle workflow recovery from worker failure.
+
+    Called when a workflow is found in RUNNING status but we're starting fresh.
+    This indicates a previous worker crashed.
+
+    Args:
+        run: Existing workflow run record
+        storage: Storage backend
+        worker_id: ID of the current worker
+
+    Returns:
+        True if recovery should proceed, False if max attempts exceeded
+    """
+    # Check if recovery is enabled for this workflow
+    if not run.recover_on_worker_loss:
+        logger.warning(
+            f"Workflow recovery disabled, marking as failed",
+            run_id=run.run_id,
+            workflow_name=run.workflow_name,
+        )
+        await storage.update_run_status(
+            run_id=run.run_id,
+            status=RunStatus.FAILED,
+            error="Worker lost and recovery is disabled",
+        )
+        return False
+
+    # Check recovery attempt limit
+    new_attempts = run.recovery_attempts + 1
+    if new_attempts > run.max_recovery_attempts:
+        logger.error(
+            f"Workflow exceeded max recovery attempts",
+            run_id=run.run_id,
+            workflow_name=run.workflow_name,
+            recovery_attempts=run.recovery_attempts,
+            max_recovery_attempts=run.max_recovery_attempts,
+        )
+        await storage.update_run_status(
+            run_id=run.run_id,
+            status=RunStatus.FAILED,
+            error=f"Exceeded max recovery attempts ({run.max_recovery_attempts})",
+        )
+        return False
+
+    # Get last event sequence
+    events = await storage.get_events(run.run_id)
+    last_event_sequence = max((e.sequence or 0 for e in events), default=0) if events else None
+
+    # Record interruption event
+    interrupted_event = create_workflow_interrupted_event(
+        run_id=run.run_id,
+        reason="worker_lost",
+        worker_id=worker_id,
+        last_event_sequence=last_event_sequence,
+        error="Worker process terminated unexpectedly",
+        recovery_attempt=new_attempts,
+        recoverable=True,
+    )
+    await storage.record_event(interrupted_event)
+
+    # Update recovery attempts counter
+    # Note: We need to update the run record with the new recovery_attempts count
+    run.recovery_attempts = new_attempts
+    await storage.update_run_recovery_attempts(run.run_id, new_attempts)
+
+    logger.info(
+        f"Workflow recovery initiated",
+        run_id=run.run_id,
+        workflow_name=run.workflow_name,
+        recovery_attempt=new_attempts,
+        max_recovery_attempts=run.max_recovery_attempts,
+    )
+
+    return True
+
+
+async def _recover_workflow_on_worker(
+    run: WorkflowRun,
+    workflow_meta,
+    storage: StorageBackend,
+    storage_config: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    Recover a workflow after worker failure.
+
+    This is similar to resuming a suspended workflow, but specifically handles
+    the recovery scenario after a worker crash.
+
+    Args:
+        run: Existing workflow run record
+        workflow_meta: Workflow metadata
+        storage: Storage backend
+        storage_config: Storage configuration for child tasks
+
+    Returns:
+        Workflow run ID
+    """
+    run_id = run.run_id
+    workflow_name = run.workflow_name
+
+    logger.info(
+        f"Recovering workflow execution: {workflow_name}",
+        run_id=run_id,
+        workflow_name=workflow_name,
+        recovery_attempt=run.recovery_attempts,
+    )
+
+    # Update status to RUNNING (from RUNNING or INTERRUPTED)
+    await storage.update_run_status(run_id=run_id, status=RunStatus.RUNNING)
+
+    # Load event log for replay
+    events = await storage.get_events(run_id)
+
+    # Complete any pending sleeps (mark them as done before resuming)
+    events = await _complete_pending_sleeps(run_id, events, storage)
+
+    # Deserialize arguments
+    args = deserialize_args(run.input_args)
+    kwargs = deserialize_kwargs(run.input_kwargs)
+
+    # Execute workflow with event replay
+    try:
+        result = await execute_workflow_with_context(
+            workflow_func=workflow_meta.func,
+            run_id=run_id,
+            workflow_name=workflow_name,
+            storage=storage,
+            args=args,
+            kwargs=kwargs,
+            event_log=events,
+        )
+
+        # Update run status to completed
+        await storage.update_run_status(
+            run_id=run_id, status=RunStatus.COMPLETED, result=serialize_args(result)
+        )
+
+        logger.info(
+            f"Workflow recovered and completed: {workflow_name}",
+            run_id=run_id,
+            workflow_name=workflow_name,
+            recovery_attempt=run.recovery_attempts,
+        )
+
+        return run_id
+
+    except SuspensionSignal as e:
+        # Workflow suspended again
+        await storage.update_run_status(run_id=run_id, status=RunStatus.SUSPENDED)
+
+        logger.info(
+            f"Recovered workflow suspended: {e.reason}",
+            run_id=run_id,
+            workflow_name=workflow_name,
+            reason=e.reason,
+        )
+
+        # Schedule automatic resumption if we have a resume_at time
+        resume_at = e.data.get("resume_at") if e.data else None
+        if resume_at:
+            schedule_workflow_resumption(run_id, resume_at, storage_config=storage_config)
+            logger.info(
+                f"Scheduled automatic workflow resumption",
+                run_id=run_id,
+                resume_at=resume_at.isoformat(),
+            )
+
+        return run_id
+
+    except Exception as e:
+        # Workflow failed during recovery
+        await storage.update_run_status(
+            run_id=run_id, status=RunStatus.FAILED, error=str(e)
+        )
+
+        logger.error(
+            f"Workflow failed during recovery: {workflow_name}",
+            run_id=run_id,
+            workflow_name=workflow_name,
+            error=str(e),
+            exc_info=True,
+        )
+
+        raise
+
+
 async def _start_workflow_on_worker(
     workflow_meta,
     args: tuple,
@@ -227,6 +441,7 @@ async def _start_workflow_on_worker(
     Internal function to start workflow on Celery worker.
 
     This mirrors the logic from testing.py but runs on workers.
+    Handles recovery scenarios when picking up a task from a crashed worker.
 
     Args:
         workflow_meta: Workflow metadata
@@ -238,31 +453,102 @@ async def _start_workflow_on_worker(
         run_id: Pre-generated run ID (if None, generates a new one)
     """
     from pyworkflow.core.exceptions import WorkflowAlreadyRunningError
+    from pyworkflow.config import get_config
 
     workflow_name = workflow_meta.name
+    config = get_config()
 
     # Check idempotency key
     if idempotency_key:
         existing_run = await storage.get_run_by_idempotency_key(idempotency_key)
         if existing_run:
+            # Check if this is a recovery scenario (workflow was RUNNING but worker crashed)
             if existing_run.status == RunStatus.RUNNING:
-                raise WorkflowAlreadyRunningError(existing_run.run_id)
-            logger.info(
-                f"Workflow with idempotency key '{idempotency_key}' already exists",
-                run_id=existing_run.run_id,
-                status=existing_run.status.value,
-            )
-            return existing_run.run_id
+                # This is a recovery scenario - worker crashed while running
+                can_recover = await _handle_workflow_recovery(
+                    run=existing_run,
+                    storage=storage,
+                    worker_id=None,  # TODO: Get actual worker ID from Celery
+                )
+                if can_recover:
+                    # Continue with recovery - resume workflow from last checkpoint
+                    return await _recover_workflow_on_worker(
+                        run=existing_run,
+                        workflow_meta=workflow_meta,
+                        storage=storage,
+                        storage_config=storage_config,
+                    )
+                else:
+                    # Recovery disabled or max attempts exceeded
+                    return existing_run.run_id
+            elif existing_run.status == RunStatus.INTERRUPTED:
+                # Previous recovery attempt also failed, try again
+                can_recover = await _handle_workflow_recovery(
+                    run=existing_run,
+                    storage=storage,
+                    worker_id=None,
+                )
+                if can_recover:
+                    return await _recover_workflow_on_worker(
+                        run=existing_run,
+                        workflow_meta=workflow_meta,
+                        storage=storage,
+                        storage_config=storage_config,
+                    )
+                else:
+                    return existing_run.run_id
+            else:
+                # Workflow already completed/failed/etc
+                logger.info(
+                    f"Workflow with idempotency key '{idempotency_key}' already exists",
+                    run_id=existing_run.run_id,
+                    status=existing_run.status.value,
+                )
+                return existing_run.run_id
 
     # Use provided run_id or generate a new one
     if run_id is None:
         run_id = f"run_{uuid.uuid4().hex[:16]}"
+
+    # Check if run already exists (recovery scenario without idempotency key)
+    existing_run = await storage.get_run(run_id)
+    if existing_run and existing_run.status == RunStatus.RUNNING:
+        # This is a recovery scenario
+        can_recover = await _handle_workflow_recovery(
+            run=existing_run,
+            storage=storage,
+            worker_id=None,
+        )
+        if can_recover:
+            return await _recover_workflow_on_worker(
+                run=existing_run,
+                workflow_meta=workflow_meta,
+                storage=storage,
+                storage_config=storage_config,
+            )
+        else:
+            return existing_run.run_id
 
     logger.info(
         f"Starting workflow execution on worker: {workflow_name}",
         run_id=run_id,
         workflow_name=workflow_name,
     )
+
+    # Determine recovery settings
+    # Priority: workflow decorator > global config > defaults based on durable mode
+    recover_on_worker_loss = getattr(workflow_meta.func, '__workflow_recover_on_worker_loss__', None)
+    max_recovery_attempts = getattr(workflow_meta.func, '__workflow_max_recovery_attempts__', None)
+    is_durable = getattr(workflow_meta.func, '__workflow_durable__', True)
+
+    if recover_on_worker_loss is None:
+        recover_on_worker_loss = config.default_recover_on_worker_loss
+        if recover_on_worker_loss is None:
+            # Default: True for durable, False for transient
+            recover_on_worker_loss = is_durable if is_durable is not None else True
+
+    if max_recovery_attempts is None:
+        max_recovery_attempts = config.default_max_recovery_attempts
 
     # Create workflow run record
     run = WorkflowRun(
@@ -276,6 +562,9 @@ async def _start_workflow_on_worker(
         idempotency_key=idempotency_key,
         max_duration=workflow_meta.max_duration,
         metadata=workflow_meta.metadata,
+        recovery_attempts=0,
+        max_recovery_attempts=max_recovery_attempts,
+        recover_on_worker_loss=recover_on_worker_loss,
     )
 
     await storage.create_run(run)

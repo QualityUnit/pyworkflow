@@ -77,6 +77,8 @@ class PyWorkflowConfig:
         default_runtime: Default runtime to use ("local", "celery", etc.)
         default_durable: Whether workflows are durable by default
         default_retries: Default number of retries for steps
+        default_recover_on_worker_loss: Whether to auto-recover on worker failure
+        default_max_recovery_attempts: Default max recovery attempts on worker failure
         storage: Storage backend instance for durable workflows
         celery_broker: Celery broker URL (for celery runtime)
         aws_region: AWS region (for lambda runtimes)
@@ -86,6 +88,10 @@ class PyWorkflowConfig:
     default_runtime: str = "local"
     default_durable: bool = False
     default_retries: int = 3
+
+    # Fault tolerance defaults
+    default_recover_on_worker_loss: Optional[bool] = None  # None = True for durable, False for transient
+    default_max_recovery_attempts: int = 3
 
     # Infrastructure (app-level only)
     storage: Optional["StorageBackend"] = None
@@ -132,6 +138,9 @@ def configure(**kwargs: Any) -> None:
         default_runtime: Default runtime ("local", "celery", "lambda", "durable-lambda")
         default_durable: Whether workflows are durable by default
         default_retries: Default number of retries for steps
+        default_recover_on_worker_loss: Whether to auto-recover on worker failure
+            (None = True for durable, False for transient)
+        default_max_recovery_attempts: Max recovery attempts on worker failure
         storage: Storage backend instance
         celery_broker: Celery broker URL
         aws_region: AWS region

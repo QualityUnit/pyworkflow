@@ -35,7 +35,7 @@ dependencies = [
 
     # CLI dependencies
     "click>=8.0.0",
-    "rich>=13.0.0",
+    "inquirerpy>=0.3.4; python_version < '4.0'",
 
     # Storage backends
     "redis>=5.0.0",
@@ -192,6 +192,8 @@ module = [
     "redis.*",
     "asyncpg.*",
     "aiosqlite.*",
+    "InquirerPy.*",
+    "prompt_toolkit.*",
 ]
 ignore_missing_imports = true
 

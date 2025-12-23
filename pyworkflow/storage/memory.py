@@ -87,6 +87,18 @@ class InMemoryStorageBackend(StorageBackend):
                 if status == RunStatus.COMPLETED or status == RunStatus.FAILED:
                     run.completed_at = datetime.now(UTC)
 
+    async def update_run_recovery_attempts(
+        self,
+        run_id: str,
+        recovery_attempts: int,
+    ) -> None:
+        """Update the recovery attempts counter for a workflow run."""
+        with self._lock:
+            run = self._runs.get(run_id)
+            if run:
+                run.recovery_attempts = recovery_attempts
+                run.updated_at = datetime.now(UTC)
+
     async def list_runs(
         self,
         workflow_name: Optional[str] = None,

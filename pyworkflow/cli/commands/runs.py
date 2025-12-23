@@ -15,6 +15,7 @@ from pyworkflow.cli.output.formatters import (
     format_plain,
     format_key_value,
     format_status,
+    format_event_type,
     print_success,
     print_error,
     print_info,
@@ -123,7 +124,7 @@ async def list_runs(
             run_ids = [run.run_id for run in runs_list]
             format_plain(run_ids)
 
-        else:  # table
+        else:  # table (displays as list)
             data = [
                 {
                     "Run ID": run.run_id,
@@ -325,7 +326,7 @@ async def run_logs(
             lines = [f"{event.sequence}: {event.type.value}" for event in events]
             format_plain(lines)
 
-        else:  # table
+        else:  # table (displays as list)
             data = [
                 {
                     "Seq": event.sequence or "-",

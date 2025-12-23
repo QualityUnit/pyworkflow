@@ -3,16 +3,15 @@
 import asyncio
 import inspect
 import json
+import sys
+import threading
+import time
 import click
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, get_type_hints
 
-from rich.console import Console
-from rich.live import Live
-from rich.panel import Panel
-from rich.prompt import Prompt, IntPrompt, Confirm
-from rich.table import Table
-from rich.text import Text
+from InquirerPy import inquirer
+from InquirerPy.separator import Separator
 
 import pyworkflow
 from pyworkflow import RunStatus
@@ -24,18 +23,50 @@ from pyworkflow.cli.output.formatters import (
     format_json,
     format_plain,
     format_key_value,
+    format_event_type,
+    format_status,
     print_success,
     print_error,
     print_info,
     print_warning,
+    print_breadcrumb,
+    clear_line,
+    move_cursor_up,
+    hide_cursor,
+    show_cursor,
+)
+from pyworkflow.cli.output.styles import (
+    PYWORKFLOW_STYLE,
+    SPINNER_FRAMES,
+    SYMBOLS,
+    Colors,
+    RESET,
+    BOLD,
+    DIM,
 )
 
-console = Console()
+
+def _build_workflow_choices(workflows_dict: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Build choices list for workflow selection."""
+    choices = []
+    for name, meta in workflows_dict.items():
+        description = ""
+        if meta.original_func.__doc__:
+            # Get first line of docstring
+            description = meta.original_func.__doc__.strip().split("\n")[0][:50]
+
+        if description:
+            display_name = f"{name} - {description}"
+        else:
+            display_name = name
+
+        choices.append({"name": display_name, "value": name})
+    return choices
 
 
 def _select_workflow(workflows_dict: Dict[str, Any]) -> Optional[str]:
     """
-    Display an interactive workflow selection menu.
+    Display an interactive workflow selection menu using InquirerPy (sync version).
 
     Args:
         workflows_dict: Dictionary of workflow name -> WorkflowMetadata
@@ -47,40 +78,52 @@ def _select_workflow(workflows_dict: Dict[str, Any]) -> Optional[str]:
         print_error("No workflows registered")
         return None
 
-    workflow_names = list(workflows_dict.keys())
+    choices = _build_workflow_choices(workflows_dict)
 
-    # Display selection table
-    table = Table(title="Select a Workflow", show_header=True, header_style="bold cyan")
-    table.add_column("#", style="dim", width=4)
-    table.add_column("Workflow Name", style="green")
-    table.add_column("Description", style="dim")
+    try:
+        result = inquirer.select(
+            message="Select workflow",
+            choices=choices,
+            style=PYWORKFLOW_STYLE,
+            pointer=SYMBOLS["pointer"],
+            qmark="?",
+            amark=SYMBOLS["success"],
+        ).execute()
+        return result
+    except KeyboardInterrupt:
+        print(f"\n{DIM}Cancelled{RESET}")
+        return None
 
-    for idx, name in enumerate(workflow_names, 1):
-        meta = workflows_dict[name]
-        description = ""
-        if meta.original_func.__doc__:
-            # Get first line of docstring
-            description = meta.original_func.__doc__.strip().split("\n")[0][:60]
-        table.add_row(str(idx), name, description or "-")
 
-    console.print(table)
-    console.print()
+async def _select_workflow_async(workflows_dict: Dict[str, Any]) -> Optional[str]:
+    """
+    Display an interactive workflow selection menu using InquirerPy (async version).
 
-    # Prompt for selection
-    while True:
-        try:
-            choice = IntPrompt.ask(
-                "Enter workflow number",
-                default=1,
-                show_default=True,
-            )
-            if 1 <= choice <= len(workflow_names):
-                return workflow_names[choice - 1]
-            else:
-                print_error(f"Please enter a number between 1 and {len(workflow_names)}")
-        except KeyboardInterrupt:
-            console.print("\n[dim]Cancelled[/dim]")
-            return None
+    Args:
+        workflows_dict: Dictionary of workflow name -> WorkflowMetadata
+
+    Returns:
+        Selected workflow name or None if cancelled
+    """
+    if not workflows_dict:
+        print_error("No workflows registered")
+        return None
+
+    choices = _build_workflow_choices(workflows_dict)
+
+    try:
+        result = await inquirer.select(
+            message="Select workflow",
+            choices=choices,
+            style=PYWORKFLOW_STYLE,
+            pointer=SYMBOLS["pointer"],
+            qmark="?",
+            amark=SYMBOLS["success"],
+        ).execute_async()
+        return result
+    except KeyboardInterrupt:
+        print(f"\n{DIM}Cancelled{RESET}")
+        return None
 
 
 def _get_workflow_parameters(func: Any) -> List[Dict[str, Any]]:
@@ -162,7 +205,7 @@ def _parse_value(value_str: str, type_hint: Any) -> Any:
 
 def _prompt_for_arguments(params: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Interactively prompt user for workflow argument values.
+    Interactively prompt user for workflow argument values using InquirerPy (sync).
 
     Args:
         params: List of parameter info dicts
@@ -172,9 +215,6 @@ def _prompt_for_arguments(params: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     if not params:
         return {}
-
-    console.print("\n[bold cyan]Workflow Arguments[/bold cyan]")
-    console.print("[dim]Enter values for each argument (press Enter for default)[/dim]\n")
 
     kwargs = {}
 
@@ -187,171 +227,557 @@ def _prompt_for_arguments(params: List[Dict[str, Any]]) -> Dict[str, Any]:
 
         type_name = _get_type_name(type_hint)
 
-        # Build prompt string
+        # Build instruction text
         if required:
-            prompt_text = f"[green]{name}[/green] [dim]({type_name})[/dim]"
+            instruction = f"({type_name})"
         else:
             default_display = repr(default) if default is not None else "None"
-            prompt_text = f"[green]{name}[/green] [dim]({type_name}, default={default_display})[/dim]"
+            instruction = f"({type_name}, default={default_display})"
 
-        # Handle boolean type specially
-        if type_hint is bool or (hasattr(type_hint, "__name__") and type_hint.__name__ == "bool"):
-            if has_default:
-                value = Confirm.ask(prompt_text, default=default)
-            else:
-                value = Confirm.ask(prompt_text, default=False)
-            kwargs[name] = value
-        else:
-            # Standard text prompt
-            if has_default and default is not None:
-                default_str = json.dumps(default) if not isinstance(default, str) else default
-                value_str = Prompt.ask(prompt_text, default=default_str)
-            else:
-                value_str = Prompt.ask(prompt_text, default="" if not required else None)
+        try:
+            # Handle boolean type with confirm prompt
+            if type_hint is bool or (hasattr(type_hint, "__name__") and type_hint.__name__ == "bool"):
+                default_val = default if has_default else False
+                value = inquirer.confirm(
+                    message=name,
+                    default=default_val,
+                    style=PYWORKFLOW_STYLE,
+                    qmark="?",
+                    amark=SYMBOLS["success"],
+                    instruction=instruction,
+                ).execute()
+                kwargs[name] = value
 
-            if value_str == "" and has_default:
-                kwargs[name] = default
-            elif value_str == "" and not required:
-                # Skip optional params with no input
-                continue
-            elif value_str is not None:
-                kwargs[name] = _parse_value(value_str, type_hint)
+            # Handle int type with number prompt
+            elif type_hint is int or (hasattr(type_hint, "__name__") and type_hint.__name__ == "int"):
+                # InquirerPy number prompt needs a valid number or None, not empty string
+                default_val = default if has_default and default is not None else None
+                value_str = inquirer.number(
+                    message=name,
+                    default=default_val,
+                    style=PYWORKFLOW_STYLE,
+                    qmark="?",
+                    amark=SYMBOLS["success"],
+                    instruction=instruction,
+                    float_allowed=False,
+                ).execute()
+                if value_str is not None:
+                    kwargs[name] = int(value_str)
+                elif has_default:
+                    kwargs[name] = default
+
+            # Handle float type with number prompt
+            elif type_hint is float or (hasattr(type_hint, "__name__") and type_hint.__name__ == "float"):
+                # InquirerPy number prompt needs a valid number or None, not empty string
+                default_val = default if has_default and default is not None else None
+                value_str = inquirer.number(
+                    message=name,
+                    default=default_val,
+                    style=PYWORKFLOW_STYLE,
+                    qmark="?",
+                    amark=SYMBOLS["success"],
+                    instruction=instruction,
+                    float_allowed=True,
+                ).execute()
+                if value_str is not None:
+                    kwargs[name] = float(value_str)
+                elif has_default:
+                    kwargs[name] = default
+
+            # Handle string/other types with text prompt
+            else:
+                if has_default and default is not None:
+                    default_str = json.dumps(default) if not isinstance(default, str) else default
+                else:
+                    default_str = ""
+
+                value_str = inquirer.text(
+                    message=name,
+                    default=default_str,
+                    style=PYWORKFLOW_STYLE,
+                    qmark="?",
+                    amark=SYMBOLS["success"],
+                    instruction=instruction,
+                    mandatory=required,
+                ).execute()
+
+                if value_str == "" and has_default:
+                    kwargs[name] = default
+                elif value_str == "" and not required:
+                    # Skip optional params with no input
+                    continue
+                elif value_str is not None:
+                    kwargs[name] = _parse_value(value_str, type_hint)
+
+        except KeyboardInterrupt:
+            print(f"\n{DIM}Cancelled{RESET}")
+            raise click.Abort()
 
     return kwargs
 
 
-def _format_event_type(event_type: str) -> Text:
-    """Format event type with appropriate color."""
-    colors = {
-        "workflow_started": "blue",
-        "workflow_completed": "green",
-        "workflow_failed": "red",
-        "step_started": "cyan",
-        "step_completed": "green",
-        "step_failed": "red",
-        "step_retrying": "yellow",
-        "sleep_started": "magenta",
-        "sleep_completed": "magenta",
-        "hook_created": "yellow",
-        "hook_received": "green",
-    }
-    color = colors.get(event_type, "white")
-    return Text(event_type, style=color)
+async def _prompt_for_arguments_async(params: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Interactively prompt user for workflow argument values using InquirerPy (async).
+
+    Args:
+        params: List of parameter info dicts
+
+    Returns:
+        Dictionary of argument name -> value
+    """
+    if not params:
+        return {}
+
+    kwargs = {}
+
+    for param in params:
+        name = param["name"]
+        type_hint = param["type"]
+        has_default = param["has_default"]
+        default = param["default"]
+        required = param["required"]
+
+        type_name = _get_type_name(type_hint)
+
+        # Build instruction text
+        if required:
+            instruction = f"({type_name})"
+        else:
+            default_display = repr(default) if default is not None else "None"
+            instruction = f"({type_name}, default={default_display})"
+
+        try:
+            # Handle boolean type with confirm prompt
+            if type_hint is bool or (hasattr(type_hint, "__name__") and type_hint.__name__ == "bool"):
+                default_val = default if has_default else False
+                value = await inquirer.confirm(
+                    message=name,
+                    default=default_val,
+                    style=PYWORKFLOW_STYLE,
+                    qmark="?",
+                    amark=SYMBOLS["success"],
+                    instruction=instruction,
+                ).execute_async()
+                kwargs[name] = value
+
+            # Handle int type with number prompt
+            elif type_hint is int or (hasattr(type_hint, "__name__") and type_hint.__name__ == "int"):
+                # InquirerPy number prompt needs a valid number or None, not empty string
+                default_val = default if has_default and default is not None else None
+                value_str = await inquirer.number(
+                    message=name,
+                    default=default_val,
+                    style=PYWORKFLOW_STYLE,
+                    qmark="?",
+                    amark=SYMBOLS["success"],
+                    instruction=instruction,
+                    float_allowed=False,
+                ).execute_async()
+                if value_str is not None:
+                    kwargs[name] = int(value_str)
+                elif has_default:
+                    kwargs[name] = default
+
+            # Handle float type with number prompt
+            elif type_hint is float or (hasattr(type_hint, "__name__") and type_hint.__name__ == "float"):
+                # InquirerPy number prompt needs a valid number or None, not empty string
+                default_val = default if has_default and default is not None else None
+                value_str = await inquirer.number(
+                    message=name,
+                    default=default_val,
+                    style=PYWORKFLOW_STYLE,
+                    qmark="?",
+                    amark=SYMBOLS["success"],
+                    instruction=instruction,
+                    float_allowed=True,
+                ).execute_async()
+                if value_str is not None:
+                    kwargs[name] = float(value_str)
+                elif has_default:
+                    kwargs[name] = default
+
+            # Handle string/other types with text prompt
+            else:
+                if has_default and default is not None:
+                    default_str = json.dumps(default) if not isinstance(default, str) else default
+                else:
+                    default_str = ""
+
+                value_str = await inquirer.text(
+                    message=name,
+                    default=default_str,
+                    style=PYWORKFLOW_STYLE,
+                    qmark="?",
+                    amark=SYMBOLS["success"],
+                    instruction=instruction,
+                    mandatory=required,
+                ).execute_async()
+
+                if value_str == "" and has_default:
+                    kwargs[name] = default
+                elif value_str == "" and not required:
+                    # Skip optional params with no input
+                    continue
+                elif value_str is not None:
+                    kwargs[name] = _parse_value(value_str, type_hint)
+
+        except KeyboardInterrupt:
+            print(f"\n{DIM}Cancelled{RESET}")
+            raise click.Abort()
+
+    return kwargs
 
 
-def _format_status(status: RunStatus) -> Text:
-    """Format run status with appropriate color."""
-    colors = {
-        RunStatus.PENDING: "dim",
-        RunStatus.RUNNING: "blue",
-        RunStatus.SUSPENDED: "yellow",
-        RunStatus.COMPLETED: "green",
-        RunStatus.FAILED: "red",
-        RunStatus.CANCELLED: "dim",
-    }
-    color = colors.get(status, "white")
-    return Text(status.value.upper(), style=f"bold {color}")
+class SpinnerDisplay:
+    """ANSI-based spinner display for watch mode."""
 
+    def __init__(self, message: str = "Running", detail_mode: bool = False):
+        self.message = message
+        self.running = False
+        self.frame_index = 0
+        self.thread: Optional[threading.Thread] = None
+        self.events: List[Any] = []
+        self.status: RunStatus = RunStatus.RUNNING
+        self.elapsed: float = 0.0
+        self.lines_printed = 0
+        self.detail_mode = detail_mode
+        self._lock = threading.Lock()
+        self._setup_keyboard_listener()
 
-def _build_watch_display(
-    workflow_name: str,
-    run_id: str,
-    status: RunStatus,
-    events: List[Any],
-    start_time: datetime,
-) -> Panel:
-    """Build the display panel for watch mode."""
-    # Calculate elapsed time
-    elapsed = (datetime.now() - start_time).total_seconds()
-    elapsed_str = f"{int(elapsed // 60)}m {int(elapsed % 60)}s" if elapsed >= 60 else f"{elapsed:.1f}s"
+    def _setup_keyboard_listener(self) -> None:
+        """Setup keyboard listener for Ctrl+O toggle."""
+        self._original_settings = None
+        self._stdin_fd = None
+        self._keyboard_active = False
 
-    # Build header
-    header = Table.grid(padding=(0, 2))
-    header.add_column()
-    header.add_column()
-    header.add_column()
-    header.add_column()
+        try:
+            import termios
 
-    status_text = _format_status(status)
-    header.add_row(
-        Text("Workflow: ", style="dim") + Text(workflow_name, style="bold"),
-        Text("Status: ", style="dim") + status_text,
-        Text("Elapsed: ", style="dim") + Text(elapsed_str),
-        Text("Events: ", style="dim") + Text(str(len(events))),
-    )
+            self._stdin_fd = sys.stdin.fileno()
+            self._original_settings = termios.tcgetattr(self._stdin_fd)
 
-    # Build events table (show last 10 events)
-    events_table = Table(
-        show_header=True,
-        header_style="bold dim",
-        box=None,
-        padding=(0, 1),
-        expand=True,
-    )
-    events_table.add_column("Time", style="dim", width=12)
-    events_table.add_column("Event", width=20)
-    events_table.add_column("Details", ratio=1)
+            # Set up non-canonical mode with echo disabled
+            new_settings = termios.tcgetattr(self._stdin_fd)
+            # Disable canonical mode (ICANON) and echo (ECHO)
+            new_settings[3] = new_settings[3] & ~(termios.ICANON | termios.ECHO)
+            # Set minimum characters to read to 0 (non-blocking)
+            new_settings[6][termios.VMIN] = 0
+            new_settings[6][termios.VTIME] = 0
+            termios.tcsetattr(self._stdin_fd, termios.TCSANOW, new_settings)
+            self._keyboard_active = True
+        except Exception:
+            # Not a terminal or termios not available
+            pass
 
-    # Show most recent events (last 10)
-    recent_events = events[-10:] if len(events) > 10 else events
-    for event in recent_events:
-        time_str = event.timestamp.strftime("%H:%M:%S") if event.timestamp else "-"
-        event_type = _format_event_type(event.type.value)
+    def _check_keyboard(self) -> None:
+        """Check for keyboard input (Ctrl+O)."""
+        if not self._keyboard_active:
+            return
 
-        # Extract key details from event data
-        details = ""
+        try:
+            import select
+
+            # Check if input is available (non-blocking)
+            if select.select([sys.stdin], [], [], 0)[0]:
+                char = sys.stdin.read(1)
+                if char:
+                    # Ctrl+O is ASCII 15
+                    if ord(char) == 15:
+                        with self._lock:
+                            self.detail_mode = not self.detail_mode
+        except Exception:
+            pass
+
+    def _restore_terminal(self) -> None:
+        """Restore original terminal settings."""
+        if self._original_settings and self._stdin_fd is not None:
+            try:
+                import termios
+                termios.tcsetattr(self._stdin_fd, termios.TCSADRAIN, self._original_settings)
+            except Exception:
+                pass
+            self._keyboard_active = False
+
+    def _format_step_call(self, event_data: Dict[str, Any]) -> str:
+        """Format step call with arguments like: step_name(arg1, arg2, ...)"""
+        step_name = event_data.get("step_name", "unknown")
+
+        # Collect arguments
+        args_parts = []
+
+        # Check for args (positional)
+        if "args" in event_data and event_data["args"]:
+            args = event_data["args"]
+            if isinstance(args, (list, tuple)):
+                for arg in args:
+                    arg_str = self._format_value_short(arg)
+                    args_parts.append(arg_str)
+            else:
+                args_parts.append(self._format_value_short(args))
+
+        # Check for kwargs
+        if "kwargs" in event_data and event_data["kwargs"]:
+            kwargs = event_data["kwargs"]
+            if isinstance(kwargs, dict):
+                for k, v in kwargs.items():
+                    val_str = self._format_value_short(v)
+                    args_parts.append(f"{k}={val_str}")
+
+        # Build the call signature (show all args, values are already shortened)
+        if args_parts:
+            args_str = ", ".join(args_parts)
+            return f"{step_name}({args_str})"
+        else:
+            return f"{step_name}()"
+
+    def _format_value_short(self, value: Any) -> str:
+        """Format a value for short display."""
+        if value is None:
+            return "None"
+        if isinstance(value, str):
+            if len(value) > 15:
+                return f'"{value[:12]}..."'
+            return f'"{value}"'
+        if isinstance(value, (int, float, bool)):
+            return str(value)
+        if isinstance(value, dict):
+            return "{...}"
+        if isinstance(value, (list, tuple)):
+            return "[...]"
+        return str(value)[:15]
+
+    def _format_value_full(self, value: Any) -> str:
+        """Format a value for full display (no truncation)."""
+        if value is None:
+            return "None"
+        if isinstance(value, str):
+            return f'"{value}"'
+        if isinstance(value, (int, float, bool)):
+            return str(value)
+        if isinstance(value, (dict, list, tuple)):
+            return json.dumps(value, default=str)
+        return str(value)
+
+    def _format_step_call_full(self, event_data: Dict[str, Any]) -> str:
+        """Format step call with full arguments (no truncation)."""
+        step_name = event_data.get("step_name", "unknown")
+
+        # Collect arguments
+        args_parts = []
+
+        # Check for args (positional)
+        if "args" in event_data and event_data["args"]:
+            args = event_data["args"]
+            if isinstance(args, (list, tuple)):
+                for arg in args:
+                    arg_str = self._format_value_full(arg)
+                    args_parts.append(arg_str)
+            else:
+                args_parts.append(self._format_value_full(args))
+
+        # Check for kwargs
+        if "kwargs" in event_data and event_data["kwargs"]:
+            kwargs = event_data["kwargs"]
+            if isinstance(kwargs, dict):
+                for k, v in kwargs.items():
+                    val_str = self._format_value_full(v)
+                    args_parts.append(f"{k}={val_str}")
+
+        # Build the call signature (no truncation)
+        if args_parts:
+            args_str = ", ".join(args_parts)
+            return f"{step_name}({args_str})"
+        else:
+            return f"{step_name}()"
+
+    def _format_event_detail(self, event: Any) -> List[str]:
+        """Format event with full details for detail mode (no truncation)."""
+        lines = []
+        time_str = event.timestamp.strftime("%H:%M:%S.%f")[:-3] if event.timestamp else "--:--:--"
+        event_type = format_event_type(event.type.value)
+
+        # Main event line
+        lines.append(f"  {DIM}{time_str}{RESET} {event_type}")
+
         if event.data:
+            # Show step call signature for step events (full arguments)
             if "step_name" in event.data:
-                details = f"step: {event.data['step_name']}"
-            elif "step_id" in event.data:
-                details = f"step_id: {event.data['step_id'][:20]}..."
-            elif "sleep_id" in event.data:
-                details = f"sleep: {event.data['sleep_id']}"
-            elif "error" in event.data:
-                details = f"error: {event.data['error'][:40]}..."
-            elif "result" in event.data:
-                result_str = str(event.data["result"])[:40]
-                details = f"result: {result_str}..."
+                step_call = self._format_step_call_full(event.data)
+                lines.append(f"           {Colors.CYAN}{step_call}{RESET}")
 
-        events_table.add_row(time_str, event_type, details)
+            # Show result if present (for completed events) - no truncation
+            if "result" in event.data:
+                result = event.data["result"]
+                result_str = json.dumps(result, default=str, indent=2) if not isinstance(result, str) else result
+                # Handle multi-line results with proper indentation
+                result_lines = result_str.split("\n")
+                if len(result_lines) == 1:
+                    lines.append(f"           {Colors.GREEN}result:{RESET} {result_str}")
+                else:
+                    lines.append(f"           {Colors.GREEN}result:{RESET}")
+                    for rline in result_lines:
+                        lines.append(f"             {rline}")
 
-    # Combine into a layout
-    layout = Table.grid(expand=True)
-    layout.add_row(header)
-    layout.add_row(Text(""))  # Spacer
-    layout.add_row(events_table)
+            # Show error if present - no truncation
+            if "error" in event.data:
+                error_str = str(event.data["error"])
+                error_lines = error_str.split("\n")
+                if len(error_lines) == 1:
+                    lines.append(f"           {Colors.RED}error:{RESET} {error_str}")
+                else:
+                    lines.append(f"           {Colors.RED}error:{RESET}")
+                    for eline in error_lines:
+                        lines.append(f"             {eline}")
 
-    # Add footer based on status
-    if status == RunStatus.SUSPENDED:
-        layout.add_row(Text(""))
-        layout.add_row(Text("Workflow suspended (waiting for sleep/hook)...", style="dim italic"))
-    elif status == RunStatus.RUNNING:
-        layout.add_row(Text(""))
-        layout.add_row(Text("Workflow running...", style="dim italic"))
+            # Show other relevant fields - no truncation
+            for key, value in event.data.items():
+                if key in ("step_name", "result", "error", "args", "kwargs"):
+                    continue  # Already shown or handled
+                value_str = str(value)
+                lines.append(f"           {DIM}{key}:{RESET} {value_str}")
 
-    return Panel(
-        layout,
-        title=f"[bold]Workflow Run: {run_id}[/bold]",
-        border_style="blue" if status == RunStatus.RUNNING else (
-            "green" if status == RunStatus.COMPLETED else (
-                "red" if status == RunStatus.FAILED else "yellow"
+        return lines
+
+    def _format_event_compact(self, event: Any) -> List[str]:
+        """Format event in compact mode."""
+        lines = []
+        time_str = event.timestamp.strftime("%H:%M:%S") if event.timestamp else "--:--:--"
+        event_type = format_event_type(event.type.value)
+
+        # Main event line
+        lines.append(f"  {DIM}{time_str}{RESET} {event_type}")
+
+        # Show step call signature for step events
+        if event.data and "step_name" in event.data:
+            step_call = self._format_step_call(event.data)
+            lines.append(f"           {Colors.CYAN}{step_call}{RESET}")
+
+        return lines
+
+    def _get_terminal_height(self) -> int:
+        """Get terminal height."""
+        try:
+            import shutil
+            return shutil.get_terminal_size().lines
+        except Exception:
+            return 24  # Default
+
+    def _render(self) -> None:
+        """Render current state."""
+        with self._lock:
+            # Clear previous output
+            if self.lines_printed > 0:
+                for _ in range(self.lines_printed):
+                    move_cursor_up(1)
+                    clear_line()
+
+            lines = []
+
+            # Spinner line with status
+            frame = SPINNER_FRAMES[self.frame_index]
+            status_color = Colors.BLUE if self.status == RunStatus.RUNNING else (
+                Colors.GREEN if self.status == RunStatus.COMPLETED else (
+                    Colors.RED if self.status == RunStatus.FAILED else Colors.YELLOW
+                )
             )
-        ),
-    )
+            elapsed_str = f"{self.elapsed:.1f}s"
+            event_count = len(self.events)
+            mode_indicator = f" {Colors.PRIMARY}[DETAIL]{RESET}" if self.detail_mode else ""
+            lines.append(f"{status_color}{frame}{RESET} {self.message} ({elapsed_str}) {DIM}[{event_count} events]{RESET}{mode_indicator}")
+            lines.append("")
+
+            # Events section - show ALL events
+            if self.events:
+                lines.append(f"{DIM}Events:{RESET}")
+
+                # Calculate available lines for events
+                terminal_height = self._get_terminal_height()
+                header_lines = 4  # spinner + blank + "Events:" + footer
+                max_event_lines = max(terminal_height - header_lines - 2, 10)
+
+                # Format all events
+                all_event_lines = []
+                for event in self.events:
+                    if self.detail_mode:
+                        all_event_lines.extend(self._format_event_detail(event))
+                    else:
+                        all_event_lines.extend(self._format_event_compact(event))
+
+                # If too many lines, show the most recent ones
+                if len(all_event_lines) > max_event_lines:
+                    # Show indicator that there are more events
+                    hidden_count = len(all_event_lines) - max_event_lines + 1
+                    lines.append(f"  {DIM}... ({hidden_count} earlier lines){RESET}")
+                    all_event_lines = all_event_lines[-max_event_lines + 1:]
+
+                lines.extend(all_event_lines)
+                lines.append("")
+
+            # Footer with keyboard hints
+            lines.append(f"{DIM}Ctrl+O: toggle details | Ctrl+C: stop watching{RESET}")
+
+            # Print all lines
+            for line in lines:
+                print(line)
+            self.lines_printed = len(lines)
+
+            # Advance spinner
+            self.frame_index = (self.frame_index + 1) % len(SPINNER_FRAMES)
+
+    def _spin(self) -> None:
+        """Background thread for spinner animation."""
+        while self.running:
+            self._check_keyboard()
+            self._render()
+            time.sleep(0.1)
+
+    def start(self) -> None:
+        """Start the spinner."""
+        hide_cursor()
+        self.running = True
+        self.thread = threading.Thread(target=self._spin, daemon=True)
+        self.thread.start()
+
+    def stop(self) -> None:
+        """Stop the spinner."""
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=0.5)
+
+        # Restore terminal settings
+        self._restore_terminal()
+
+        show_cursor()
+        # Final render
+        self._render()
+
+    def update(
+        self,
+        events: Optional[List[Any]] = None,
+        status: Optional[RunStatus] = None,
+        elapsed: Optional[float] = None,
+    ) -> None:
+        """Update spinner state."""
+        with self._lock:
+            if events is not None:
+                self.events = events
+            if status is not None:
+                self.status = status
+            if elapsed is not None:
+                self.elapsed = elapsed
 
 
 async def _watch_workflow(
     run_id: str,
     workflow_name: str,
     storage: Any,
-    poll_interval: float = 1.0,
+    poll_interval: float = 0.5,
     max_wait_for_start: float = 30.0,
+    debug: bool = False,
 ) -> RunStatus:
     """
-    Watch a workflow execution in real-time.
-
-    Polls for events and status, displaying updates until the workflow
-    completes, fails, or is cancelled.
+    Watch a workflow execution with ANSI spinner display.
 
     Args:
         run_id: Workflow run ID
@@ -359,6 +785,7 @@ async def _watch_workflow(
         storage: Storage backend
         poll_interval: Seconds between polls
         max_wait_for_start: Max seconds to wait for run to be created
+        debug: Start in detail mode (show args, results, errors)
 
     Returns:
         Final workflow status
@@ -381,22 +808,27 @@ async def _watch_workflow(
         if run is None:
             elapsed = (datetime.now() - wait_start).total_seconds()
             if elapsed > max_wait_for_start:
-                print_error(f"Timeout waiting for workflow run to be created")
+                print_error("Timeout waiting for workflow run to be created")
                 print_info("Make sure Celery workers are running: pyworkflow worker run")
                 return RunStatus.FAILED
             # Show waiting message
-            console.print(f"[dim]Waiting for worker to start workflow... ({elapsed:.0f}s)[/dim]", end="\r")
+            print(f"{DIM}Waiting for worker to start workflow... ({elapsed:.0f}s){RESET}", end="\r")
             await asyncio.sleep(poll_interval)
 
-    # Clear the waiting line
-    console.print(" " * 60, end="\r")
+    # Clear waiting line
+    clear_line()
 
-    with Live(console=console, refresh_per_second=2) as live:
+    # Create spinner display
+    spinner = SpinnerDisplay(message=f"Running workflow: {workflow_name}", detail_mode=debug)
+    spinner.start()
+
+    try:
         while True:
             try:
                 # Fetch current status
                 run = await pyworkflow.get_workflow_run(run_id, storage=storage)
                 if not run:
+                    spinner.stop()
                     print_error(f"Workflow run '{run_id}' not found")
                     return RunStatus.FAILED
 
@@ -414,31 +846,30 @@ async def _watch_workflow(
                 # Sort events by sequence
                 all_events.sort(key=lambda e: e.sequence or 0)
 
-                # Update display
-                panel = _build_watch_display(
-                    workflow_name=workflow_name,
-                    run_id=run_id,
-                    status=status,
-                    events=all_events,
-                    start_time=start_time,
-                )
-                live.update(panel)
+                # Calculate elapsed time
+                elapsed = (datetime.now() - start_time).total_seconds()
+
+                # Update spinner
+                spinner.update(events=all_events, status=status, elapsed=elapsed)
 
                 # Check if workflow is done
                 if status in terminal_statuses:
-                    # Give a moment for final display
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.3)  # Brief pause for final update
+                    spinner.stop()
                     return status
 
                 # Wait before next poll
                 await asyncio.sleep(poll_interval)
 
             except KeyboardInterrupt:
-                console.print("\n[dim]Watch interrupted[/dim]")
+                spinner.stop()
+                print(f"\n{DIM}Watch interrupted{RESET}")
                 return RunStatus.RUNNING
-            except Exception as e:
-                console.print(f"\n[red]Error watching workflow: {e}[/red]")
-                return RunStatus.FAILED
+
+    except Exception as e:
+        spinner.stop()
+        print(f"\n{Colors.RED}Error watching workflow: {e}{RESET}")
+        return RunStatus.FAILED
 
 
 @click.group(name="workflows")
@@ -492,7 +923,7 @@ def list_workflows_cmd(ctx: click.Context) -> None:
         names = list(workflows_dict.keys())
         format_plain(names)
 
-    else:  # table
+    else:  # table (now displays as list)
         data = [
             {
                 "Name": name,
@@ -588,6 +1019,12 @@ def workflow_info(ctx: click.Context, workflow_name: str) -> None:
     default=False,
     help="Don't wait for workflow completion (just start and exit)",
 )
+@click.option(
+    "--debug",
+    is_flag=True,
+    default=False,
+    help="Show detailed event output (args, results, errors)",
+)
 @click.pass_context
 @async_command
 async def run_workflow(
@@ -598,6 +1035,7 @@ async def run_workflow(
     durable: bool,
     idempotency_key: Optional[str],
     no_wait: bool,
+    debug: bool,
 ) -> None:
     """
     Execute a workflow and watch its progress.
@@ -652,7 +1090,10 @@ async def run_workflow(
             print_error("No workflows registered")
             raise click.Abort()
 
-        workflow_name = _select_workflow(workflows_dict)
+        # Show breadcrumb for step 1
+        print_breadcrumb(["workflow", "arguments"], 0)
+
+        workflow_name = await _select_workflow_async(workflows_dict)
         if not workflow_name:
             raise click.Abort()
 
@@ -696,9 +1137,12 @@ async def run_workflow(
     if not kwargs and not arg and not args_json:
         params = _get_workflow_parameters(workflow_meta.original_func)
         if params:
-            prompted_kwargs = _prompt_for_arguments(params)
+            # Show breadcrumb for step 2
+            print_breadcrumb(["workflow", "arguments"], 1)
+
+            prompted_kwargs = await _prompt_for_arguments_async(params)
             kwargs.update(prompted_kwargs)
-            console.print()  # Add spacing after prompts
+            print()  # Add spacing after prompts
 
     # Create storage backend
     storage = create_storage(storage_type, storage_path, config)
@@ -745,8 +1189,8 @@ async def run_workflow(
             return
 
         # Watch mode (default) - poll and display events until completion
-        console.print(f"[dim]Started workflow run: {run_id}[/dim]")
-        console.print(f"[dim]Watching for events... (Ctrl+C to stop watching)[/dim]\n")
+        print(f"{DIM}Started workflow run: {run_id}{RESET}")
+        print(f"{DIM}Watching for events... (Ctrl+C to stop watching){RESET}\n")
 
         # Wait a moment for initial events to be recorded
         await asyncio.sleep(0.5)
@@ -756,26 +1200,27 @@ async def run_workflow(
             run_id=run_id,
             workflow_name=workflow_name,
             storage=storage,
-            poll_interval=1.0,
+            poll_interval=0.5,
+            debug=debug,
         )
 
         # Print final summary
-        console.print()
+        print()
         if final_status == RunStatus.COMPLETED:
-            print_success(f"Workflow completed successfully")
+            print_success("Workflow completed successfully")
             # Fetch and show result
             run = await pyworkflow.get_workflow_run(run_id, storage=storage)
             if run and run.result:
                 try:
                     result = json.loads(run.result)
-                    console.print(f"[dim]Result:[/dim] {json.dumps(result, indent=2)}")
+                    print(f"{DIM}Result:{RESET} {json.dumps(result, indent=2)}")
                 except json.JSONDecodeError:
-                    console.print(f"[dim]Result:[/dim] {run.result}")
+                    print(f"{DIM}Result:{RESET} {run.result}")
         elif final_status == RunStatus.FAILED:
             print_error("Workflow failed")
             run = await pyworkflow.get_workflow_run(run_id, storage=storage)
             if run and run.error:
-                console.print(f"[red]Error:[/red] {run.error}")
+                print(f"{Colors.RED}Error:{RESET} {run.error}")
             raise click.Abort()
         elif final_status == RunStatus.CANCELLED:
             print_warning("Workflow was cancelled")

@@ -85,6 +85,23 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
+    async def update_run_recovery_attempts(
+        self,
+        run_id: str,
+        recovery_attempts: int,
+    ) -> None:
+        """
+        Update the recovery attempts counter for a workflow run.
+
+        Called when a workflow is being recovered after a worker failure.
+
+        Args:
+            run_id: Workflow run identifier
+            recovery_attempts: New recovery attempts count
+        """
+        pass
+
+    @abstractmethod
     async def list_runs(
         self,
         workflow_name: Optional[str] = None,

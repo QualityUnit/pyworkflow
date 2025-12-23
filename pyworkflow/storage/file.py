@@ -154,6 +154,29 @@ class FileStorageBackend(StorageBackend):
 
         await asyncio.to_thread(_update)
 
+    async def update_run_recovery_attempts(
+        self,
+        run_id: str,
+        recovery_attempts: int,
+    ) -> None:
+        """Update the recovery attempts counter for a workflow run."""
+        run_file = self.runs_dir / f"{run_id}.json"
+
+        if not run_file.exists():
+            raise ValueError(f"Workflow run {run_id} not found")
+
+        lock_file = self.locks_dir / f"{run_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _update() -> None:
+            with lock:
+                data = json.loads(run_file.read_text())
+                data["recovery_attempts"] = recovery_attempts
+                data["updated_at"] = datetime.now(UTC).isoformat()
+                run_file.write_text(json.dumps(data, indent=2))
+
+        await asyncio.to_thread(_update)
+
     async def list_runs(
         self,
         workflow_name: Optional[str] = None,

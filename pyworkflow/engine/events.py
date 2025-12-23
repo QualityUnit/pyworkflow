@@ -19,6 +19,7 @@ class EventType(Enum):
     WORKFLOW_STARTED = "workflow.started"
     WORKFLOW_COMPLETED = "workflow.completed"
     WORKFLOW_FAILED = "workflow.failed"
+    WORKFLOW_INTERRUPTED = "workflow.interrupted"  # Infrastructure failure (worker loss)
     WORKFLOW_CANCELLED = "workflow.cancelled"
     WORKFLOW_PAUSED = "workflow.paused"
     WORKFLOW_RESUMED = "workflow.resumed"
@@ -107,6 +108,47 @@ def create_workflow_failed_event(
             "error": error,
             "error_type": error_type,
             "traceback": traceback,
+        },
+    )
+
+
+def create_workflow_interrupted_event(
+    run_id: str,
+    reason: str,
+    worker_id: Optional[str] = None,
+    last_event_sequence: Optional[int] = None,
+    error: Optional[str] = None,
+    recovery_attempt: int = 1,
+    recoverable: bool = True,
+) -> Event:
+    """
+    Create a workflow interrupted event.
+
+    This event is recorded when a workflow is interrupted due to infrastructure
+    failures (e.g., worker crash, timeout, signal) rather than application errors.
+
+    Args:
+        run_id: The workflow run ID
+        reason: Interruption reason (e.g., "worker_lost", "timeout", "signal")
+        worker_id: ID of the worker that was handling the task
+        last_event_sequence: Sequence number of the last recorded event
+        error: Optional error message
+        recovery_attempt: Current recovery attempt number
+        recoverable: Whether the workflow can be recovered
+
+    Returns:
+        Event: The workflow interrupted event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.WORKFLOW_INTERRUPTED,
+        data={
+            "reason": reason,
+            "worker_id": worker_id,
+            "last_event_sequence": last_event_sequence,
+            "error": error,
+            "recovery_attempt": recovery_attempt,
+            "recoverable": recoverable,
         },
     )
 

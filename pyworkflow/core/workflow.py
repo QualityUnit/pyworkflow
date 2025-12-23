@@ -32,6 +32,8 @@ def workflow(
     durable: Optional[bool] = None,
     max_duration: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
+    recover_on_worker_loss: Optional[bool] = None,
+    max_recovery_attempts: Optional[int] = None,
 ) -> Callable:
     """
     Decorator to mark async functions as workflows.
@@ -45,6 +47,9 @@ def workflow(
         durable: Whether workflow is durable (None = use configured default)
         max_duration: Optional max duration (e.g., "1h", "30m")
         metadata: Optional metadata dictionary
+        recover_on_worker_loss: Whether to auto-recover on worker failure
+            (None = True for durable, False for transient)
+        max_recovery_attempts: Max recovery attempts on worker failure (default: 3)
 
     Returns:
         Decorated workflow function
@@ -67,6 +72,13 @@ def workflow(
         @workflow
         async def simple_workflow():
             result = await my_step()
+            return result
+
+    Example (fault tolerant):
+        @workflow(durable=True, recover_on_worker_loss=True, max_recovery_attempts=5)
+        async def critical_workflow():
+            # Will auto-recover if worker crashes
+            result = await important_step()
             return result
     """
 
@@ -94,6 +106,8 @@ def workflow(
         wrapper.__workflow_durable__ = durable  # None = use config default
         wrapper.__workflow_max_duration__ = max_duration
         wrapper.__workflow_metadata__ = metadata or {}
+        wrapper.__workflow_recover_on_worker_loss__ = recover_on_worker_loss  # None = use config default
+        wrapper.__workflow_max_recovery_attempts__ = max_recovery_attempts  # None = use config default
 
         return wrapper
 

@@ -364,9 +364,7 @@ async def _execute_child_workflow_on_worker(
 
         # Update status to COMPLETED
         serialized_result = serialize(result)
-        await storage.update_run_status(
-            child_run_id, RunStatus.COMPLETED, result=serialized_result
-        )
+        await storage.update_run_status(child_run_id, RunStatus.COMPLETED, result=serialized_result)
 
         # Record completion in parent's log
         completion_event = create_child_workflow_completed_event(
@@ -385,9 +383,7 @@ async def _execute_child_workflow_on_worker(
 
         # If parent is waiting, trigger resumption
         if wait_for_completion:
-            await _trigger_parent_resumption_celery(
-                parent_run_id, storage, storage_config
-            )
+            await _trigger_parent_resumption_celery(parent_run_id, storage, storage_config)
 
     except SuspensionSignal as e:
         # Child workflow suspended (e.g., sleep, hook)
@@ -409,9 +405,7 @@ async def _execute_child_workflow_on_worker(
         error_msg = str(e)
         error_type = type(e).__name__
 
-        await storage.update_run_status(
-            child_run_id, RunStatus.FAILED, error=error_msg
-        )
+        await storage.update_run_status(child_run_id, RunStatus.FAILED, error=error_msg)
 
         # Record failure in parent's log
         failure_event = create_child_workflow_failed_event(
@@ -432,9 +426,7 @@ async def _execute_child_workflow_on_worker(
 
         # If parent is waiting, trigger resumption (will raise error on replay)
         if wait_for_completion:
-            await _trigger_parent_resumption_celery(
-                parent_run_id, storage, storage_config
-            )
+            await _trigger_parent_resumption_celery(parent_run_id, storage, storage_config)
 
 
 async def _trigger_parent_resumption_celery(
@@ -454,9 +446,7 @@ async def _trigger_parent_resumption_celery(
             parent_run_id=parent_run_id,
         )
         # Schedule immediate resumption via Celery
-        schedule_workflow_resumption(
-            parent_run_id, datetime.now(UTC), storage_config
-        )
+        schedule_workflow_resumption(parent_run_id, datetime.now(UTC), storage_config)
 
 
 async def _handle_workflow_recovery(

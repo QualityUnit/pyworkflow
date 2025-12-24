@@ -601,7 +601,9 @@ async def list_children(
                     "Workflow": child.workflow_name,
                     "Status": child.status.value,
                     "Depth": child.nesting_depth,
-                    "Started": child.started_at.strftime("%Y-%m-%d %H:%M:%S") if child.started_at else "-",
+                    "Started": child.started_at.strftime("%Y-%m-%d %H:%M:%S")
+                    if child.started_at
+                    else "-",
                     "Duration": _calc_duration(child),
                 }
                 for child in children

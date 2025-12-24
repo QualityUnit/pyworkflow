@@ -215,6 +215,7 @@ async def demo_max_nesting_depth():
         @workflow(durable=True)
         async def level_2() -> dict:
             print("  [Level2] Starting...")
+
             # Level 2 -> Level 3
             @workflow(durable=True)
             async def level_3() -> dict:
@@ -231,7 +232,9 @@ async def demo_max_nesting_depth():
     run = await get_workflow_run(run_id)
 
     print(f"\nResult: {run.result}")
-    print("\nNote: Max nesting depth is 3 levels (root=0, child=1, grandchild=2, great-grandchild=3)")
+    print(
+        "\nNote: Max nesting depth is 3 levels (root=0, child=1, grandchild=2, great-grandchild=3)"
+    )
 
 
 async def main():

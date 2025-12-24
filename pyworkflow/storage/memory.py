@@ -305,9 +305,7 @@ class InMemoryStorageBackend(StorageBackend):
     ) -> list[WorkflowRun]:
         """Get all child workflow runs for a parent workflow."""
         with self._lock:
-            children = [
-                run for run in self._runs.values() if run.parent_run_id == parent_run_id
-            ]
+            children = [run for run in self._runs.values() if run.parent_run_id == parent_run_id]
 
             if status:
                 children = [c for c in children if c.status == status]

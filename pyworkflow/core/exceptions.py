@@ -305,9 +305,7 @@ class ChildWorkflowFailedError(ChildWorkflowError):
         error: str,
         error_type: str,
     ) -> None:
-        super().__init__(
-            f"Child workflow '{child_workflow_name}' ({child_run_id}) failed: {error}"
-        )
+        super().__init__(f"Child workflow '{child_workflow_name}' ({child_run_id}) failed: {error}")
         self.child_run_id = child_run_id
         self.child_workflow_name = child_workflow_name
         self.error = error

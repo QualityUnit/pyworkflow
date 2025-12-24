@@ -48,7 +48,9 @@ async def do_work(name: str, duration: float = 0.1) -> dict:
     return {"name": name, "completed": True}
 
 
-@step(name="patterns_demo_failing_step", max_retries=0)  # No retries so failure propagates immediately
+@step(
+    name="patterns_demo_failing_step", max_retries=0
+)  # No retries so failure propagates immediately
 async def failing_step() -> dict:
     """A step that always fails."""
     raise ValueError("This step always fails!")

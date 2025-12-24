@@ -120,8 +120,7 @@ class ChildWorkflowHandle:
 
             if timeout is not None and elapsed >= timeout:
                 raise TimeoutError(
-                    f"Child workflow {self.child_run_id} did not complete "
-                    f"within {timeout}s"
+                    f"Child workflow {self.child_run_id} did not complete within {timeout}s"
                 )
 
             await asyncio.sleep(poll_interval)

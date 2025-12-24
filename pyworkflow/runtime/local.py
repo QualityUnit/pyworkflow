@@ -563,9 +563,7 @@ class LocalRuntime(Runtime):
             error_msg = str(e)
             error_type = type(e).__name__
 
-            await storage.update_run_status(
-                child_run_id, RunStatus.FAILED, error=error_msg
-            )
+            await storage.update_run_status(child_run_id, RunStatus.FAILED, error=error_msg)
 
             # Record failure in parent's log
             failure_event = create_child_workflow_failed_event(

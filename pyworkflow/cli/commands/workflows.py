@@ -106,7 +106,7 @@ async def _select_workflow_async(workflows_dict: dict[str, Any]) -> str | None:
     choices = _build_workflow_choices(workflows_dict)
 
     try:
-        result = await inquirer.select(
+        result = await inquirer.select(  # type: ignore[func-returns-value]
             message="Select workflow",
             choices=choices,
             style=PYWORKFLOW_STYLE,
@@ -329,7 +329,7 @@ async def _prompt_for_arguments_async(params: list[dict[str, Any]]) -> dict[str,
     if not params:
         return {}
 
-    kwargs = {}
+    kwargs: dict[str, Any] = {}
 
     for param in params:
         name = param["name"]
@@ -353,7 +353,7 @@ async def _prompt_for_arguments_async(params: list[dict[str, Any]]) -> dict[str,
                 hasattr(type_hint, "__name__") and type_hint.__name__ == "bool"
             ):
                 default_val = default if has_default else False
-                value = await inquirer.confirm(
+                value = await inquirer.confirm(  # type: ignore[func-returns-value]
                     message=name,
                     default=default_val,
                     style=PYWORKFLOW_STYLE,
@@ -369,7 +369,7 @@ async def _prompt_for_arguments_async(params: list[dict[str, Any]]) -> dict[str,
             ):
                 # InquirerPy number prompt needs a valid number or None, not empty string
                 default_val = default if has_default and default is not None else None
-                value_str = await inquirer.number(
+                value_str = await inquirer.number(  # type: ignore[func-returns-value]
                     message=name,
                     default=default_val,
                     style=PYWORKFLOW_STYLE,
@@ -389,7 +389,7 @@ async def _prompt_for_arguments_async(params: list[dict[str, Any]]) -> dict[str,
             ):
                 # InquirerPy number prompt needs a valid number or None, not empty string
                 default_val = default if has_default and default is not None else None
-                value_str = await inquirer.number(
+                value_str = await inquirer.number(  # type: ignore[func-returns-value]
                     message=name,
                     default=default_val,
                     style=PYWORKFLOW_STYLE,
@@ -410,7 +410,7 @@ async def _prompt_for_arguments_async(params: list[dict[str, Any]]) -> dict[str,
                 else:
                     default_str = ""
 
-                value_str = await inquirer.text(
+                value_str = await inquirer.text(  # type: ignore[func-returns-value]
                     message=name,
                     default=default_str,
                     style=PYWORKFLOW_STYLE,

@@ -93,6 +93,27 @@ class Runtime(ABC):
         """
         pass
 
+    async def schedule_resume(
+        self,
+        run_id: str,
+        storage: "StorageBackend",
+    ) -> None:
+        """
+        Schedule a workflow to be resumed immediately.
+
+        This is called by resume_hook() after recording the hook event.
+        Each runtime implements this differently:
+        - CeleryRuntime: Schedules an async Celery task
+        - LocalRuntime: No-op (workflow resumes on next execution/poll)
+
+        Args:
+            run_id: The run_id of the workflow to resume
+            storage: Storage backend
+        """
+        # Default implementation: no-op
+        # Subclasses override if they support async scheduling
+        pass
+
     @property
     @abstractmethod
     def name(self) -> str:

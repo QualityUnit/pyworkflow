@@ -198,6 +198,36 @@ class CeleryRuntime(Runtime):
         # Return None since the actual result will be available asynchronously
         return None
 
+    async def schedule_resume(
+        self,
+        run_id: str,
+        storage: "StorageBackend",
+    ) -> None:
+        """
+        Schedule immediate workflow resumption via Celery task.
+
+        This is called by resume_hook() to trigger workflow resumption
+        after a hook event is received.
+        """
+        from pyworkflow.celery.tasks import resume_workflow_task
+
+        logger.info(
+            f"Scheduling workflow resume via Celery: {run_id}",
+            run_id=run_id,
+        )
+
+        storage_config = self._get_storage_config(storage)
+
+        resume_workflow_task.apply_async(
+            args=[run_id],
+            kwargs={"storage_config": storage_config},
+        )
+
+        logger.info(
+            f"Workflow resume scheduled: {run_id}",
+            run_id=run_id,
+        )
+
     async def schedule_wake(
         self,
         run_id: str,

@@ -308,6 +308,48 @@ class StorageBackend(ABC):
         """
         pass
 
+    # Cancellation Flag Operations
+
+    @abstractmethod
+    async def set_cancellation_flag(self, run_id: str) -> None:
+        """
+        Set a cancellation flag for a workflow run.
+
+        This flag is checked by running workflows to detect cancellation
+        requests. It's used when we can't directly interrupt a running
+        workflow (e.g., Celery workers).
+
+        Args:
+            run_id: Workflow run identifier
+        """
+        pass
+
+    @abstractmethod
+    async def check_cancellation_flag(self, run_id: str) -> bool:
+        """
+        Check if a cancellation flag is set for a workflow run.
+
+        Args:
+            run_id: Workflow run identifier
+
+        Returns:
+            True if cancellation is requested, False otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def clear_cancellation_flag(self, run_id: str) -> None:
+        """
+        Clear the cancellation flag for a workflow run.
+
+        Called after cancellation has been processed or if cancellation
+        is no longer needed.
+
+        Args:
+            run_id: Workflow run identifier
+        """
+        pass
+
     # Lifecycle
 
     async def connect(self) -> None:

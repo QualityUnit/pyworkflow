@@ -23,7 +23,11 @@ from pyworkflow.core.exceptions import (
 )
 from pyworkflow.core.registry import get_workflow, get_workflow_by_func
 from pyworkflow.core.workflow import execute_workflow_with_context
-from pyworkflow.engine.events import create_workflow_started_event
+from pyworkflow.engine.events import (
+    create_cancellation_requested_event,
+    create_workflow_cancelled_event,
+    create_workflow_started_event,
+)
 from pyworkflow.serialization.encoder import serialize_args, serialize_kwargs
 from pyworkflow.storage.base import StorageBackend
 from pyworkflow.storage.schemas import RunStatus, WorkflowRun
@@ -359,3 +363,163 @@ async def get_workflow_events(
         storage = FileStorageBackend()
 
     return await storage.get_events(run_id)
+
+
+async def cancel_workflow(
+    run_id: str,
+    reason: Optional[str] = None,
+    wait: bool = False,
+    timeout: Optional[float] = None,
+    storage: Optional[StorageBackend] = None,
+) -> bool:
+    """
+    Request cancellation of a workflow.
+
+    Cancellation is graceful - running workflows will be cancelled at the next
+    interruptible point (before a step, during sleep, etc.). The workflow can
+    catch CancellationError to perform cleanup operations.
+
+    For suspended workflows (sleeping or waiting for hook), the status is
+    immediately updated to CANCELLED and a cancellation flag is set for when
+    the workflow resumes.
+
+    For running workflows, a cancellation flag is set that will be detected
+    at the next cancellation check point.
+
+    Note:
+        Cancellation does NOT interrupt a step that is already executing.
+        If a step takes a long time, cancellation will only be detected after
+        the step completes. For long-running steps that need mid-execution
+        cancellation, call ``ctx.check_cancellation()`` periodically within
+        the step function.
+
+    Args:
+        run_id: Workflow run identifier
+        reason: Optional reason for cancellation
+        wait: If True, wait for workflow to reach terminal status
+        timeout: Maximum seconds to wait (only used if wait=True)
+        storage: Storage backend (defaults to configured storage)
+
+    Returns:
+        True if cancellation was initiated, False if workflow is already terminal
+
+    Raises:
+        WorkflowNotFoundError: If workflow run doesn't exist
+        TimeoutError: If wait=True and timeout is exceeded
+
+    Examples:
+        # Request cancellation
+        cancelled = await cancel_workflow("run_abc123")
+
+        # Request with reason
+        cancelled = await cancel_workflow(
+            "run_abc123",
+            reason="User requested cancellation"
+        )
+
+        # Wait for cancellation to complete
+        cancelled = await cancel_workflow(
+            "run_abc123",
+            wait=True,
+            timeout=30
+        )
+    """
+    import asyncio
+
+    # Resolve storage
+    if storage is None:
+        from pyworkflow.config import get_config
+
+        config = get_config()
+        storage = config.storage
+
+    if storage is None:
+        from pyworkflow.storage.file import FileStorageBackend
+
+        storage = FileStorageBackend()
+
+    # Get workflow run
+    run = await storage.get_run(run_id)
+    if run is None:
+        raise WorkflowNotFoundError(run_id)
+
+    # Check if already in terminal state
+    terminal_statuses = {
+        RunStatus.COMPLETED,
+        RunStatus.FAILED,
+        RunStatus.CANCELLED,
+    }
+    if run.status in terminal_statuses:
+        logger.info(
+            f"Workflow already in terminal state: {run.status.value}",
+            run_id=run_id,
+            status=run.status.value,
+        )
+        return False
+
+    # Record cancellation requested event
+    cancellation_event = create_cancellation_requested_event(
+        run_id=run_id,
+        reason=reason,
+        requested_by="cancel_workflow",
+    )
+    await storage.record_event(cancellation_event)
+
+    logger.info(
+        f"Cancellation requested for workflow",
+        run_id=run_id,
+        reason=reason,
+        current_status=run.status.value,
+    )
+
+    # Handle based on current status
+    if run.status == RunStatus.SUSPENDED:
+        # For suspended workflows, update status to CANCELLED immediately
+        # The workflow will see cancellation when it tries to resume
+        cancelled_event = create_workflow_cancelled_event(
+            run_id=run_id,
+            reason=reason,
+            cleanup_completed=False,
+        )
+        await storage.record_event(cancelled_event)
+        await storage.update_run_status(run_id=run_id, status=RunStatus.CANCELLED)
+
+        logger.info(
+            f"Suspended workflow cancelled",
+            run_id=run_id,
+        )
+
+    elif run.status in {RunStatus.RUNNING, RunStatus.PENDING}:
+        # For running/pending workflows, set cancellation flag
+        # The workflow will detect this at the next check point
+        await storage.set_cancellation_flag(run_id)
+
+        logger.info(
+            f"Cancellation flag set for running workflow",
+            run_id=run_id,
+        )
+
+    # Wait for terminal status if requested
+    if wait:
+        poll_interval = 0.5
+        elapsed = 0.0
+        effective_timeout = timeout or 60.0
+
+        while elapsed < effective_timeout:
+            run = await storage.get_run(run_id)
+            if run and run.status in terminal_statuses:
+                logger.info(
+                    f"Workflow reached terminal state: {run.status.value}",
+                    run_id=run_id,
+                    status=run.status.value,
+                )
+                return True
+
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+
+        raise TimeoutError(
+            f"Workflow {run_id} did not reach terminal state within {effective_timeout}s"
+        )
+
+    return True

@@ -342,6 +342,45 @@ pyworkflow.configure(
 **New Run Status:**
 - `INTERRUPTED` - Workflow awaiting recovery after worker crash
 
+### Cancellation
+
+PyWorkflow supports graceful workflow cancellation via `cancel_workflow()`.
+
+**Key APIs:**
+- `cancel_workflow(run_id, reason=None, wait=False)` - Request workflow cancellation
+- `CancellationError` - Raised when workflow/step is cancelled
+- `shield()` - Context manager to protect critical sections from cancellation
+
+**Cancellation Check Points:**
+Cancellation is checked at these points:
+- Before each step execution
+- Before sleep suspension
+- Before hook suspension
+
+**Important Limitation:**
+Cancellation does NOT interrupt a step that is already executing. If a step function takes a long time (e.g., a 10-minute API call), cancellation will only be detected after the step completes. This is by design to avoid leaving operations in an inconsistent state.
+
+For long-running operations that need to be cancellable mid-execution, the step should periodically call `ctx.check_cancellation()` to cooperatively check for cancellation:
+
+```python
+@step()
+async def long_running_step():
+    ctx = get_context()
+    for chunk in process_large_dataset():
+        ctx.check_cancellation()  # Cooperative cancellation check
+        await process_chunk(chunk)
+    return result
+```
+
+**Shield for Critical Sections:**
+Use `shield()` to protect cleanup or critical code from cancellation:
+
+```python
+async with shield():
+    # This code will complete even if cancellation is requested
+    await cleanup_resources()
+```
+
 ### Celery Integration
 
 **Two Queue System:**

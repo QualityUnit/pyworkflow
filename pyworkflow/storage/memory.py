@@ -39,6 +39,7 @@ class InMemoryStorageBackend(StorageBackend):
         self._hooks: Dict[str, Hook] = {}
         self._idempotency_index: Dict[str, str] = {}  # key -> run_id
         self._token_index: Dict[str, str] = {}  # token -> hook_id
+        self._cancellation_flags: Dict[str, bool] = {}  # run_id -> cancelled
         self._lock = threading.RLock()
         self._event_sequences: Dict[str, int] = {}  # run_id -> next sequence
 
@@ -279,6 +280,23 @@ class InMemoryStorageBackend(StorageBackend):
             # Apply pagination
             return hooks[offset : offset + limit]
 
+    # Cancellation Flag Operations
+
+    async def set_cancellation_flag(self, run_id: str) -> None:
+        """Set a cancellation flag for a workflow run."""
+        with self._lock:
+            self._cancellation_flags[run_id] = True
+
+    async def check_cancellation_flag(self, run_id: str) -> bool:
+        """Check if a cancellation flag is set for a workflow run."""
+        with self._lock:
+            return self._cancellation_flags.get(run_id, False)
+
+    async def clear_cancellation_flag(self, run_id: str) -> None:
+        """Clear the cancellation flag for a workflow run."""
+        with self._lock:
+            self._cancellation_flags.pop(run_id, None)
+
     # Utility methods
 
     def clear(self) -> None:
@@ -294,6 +312,7 @@ class InMemoryStorageBackend(StorageBackend):
             self._hooks.clear()
             self._idempotency_index.clear()
             self._token_index.clear()
+            self._cancellation_flags.clear()
             self._event_sequences.clear()
 
     def __len__(self) -> int:

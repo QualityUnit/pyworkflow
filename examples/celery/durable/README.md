@@ -24,6 +24,9 @@ pyworkflow setup --check
 | [03_retries.py](03_retries.py) | Flaky API with retry handling | RetryableError, FatalError, backoff |
 | [04_batch_processing.py](04_batch_processing.py) | Process multiple items | Loops, aggregation |
 | [05_idempotency.py](05_idempotency.py) | Payment with idempotency | Duplicate prevention |
+| [06_fault_tolerance.py](06_fault_tolerance.py) | Automatic recovery from crashes | Worker loss, event replay |
+| [07_hooks.py](07_hooks.py) | External events/webhooks | Hooks, callbacks |
+| [08_cancellation.py](08_cancellation.py) | Graceful cancellation | cancel_workflow, CancellationError, shield |
 
 ## Running Examples
 
@@ -105,6 +108,27 @@ Every step is recorded:
 - Replay from any point on failure
 - Full audit trail
 - Deterministic execution
+
+### Graceful Cancellation
+
+Cancel running or suspended workflows:
+
+```bash
+# Start a workflow that sleeps
+pyworkflow --module examples.celery.durable.08_cancellation workflows run \
+    cancellable_order_workflow --arg order_id=order-123
+
+# Cancel it while sleeping
+pyworkflow runs cancel <run_id> --reason "Customer cancelled"
+
+# Or wait for cancellation to complete
+pyworkflow runs cancel <run_id> --wait --reason "Customer cancelled"
+```
+
+Cancellation is checkpoint-based:
+- Checked before each step, sleep, and hook
+- Does NOT interrupt a step mid-execution
+- Use `shield()` to protect cleanup code
 
 ## Next Steps
 

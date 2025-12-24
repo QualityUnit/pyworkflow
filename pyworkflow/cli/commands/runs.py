@@ -19,6 +19,7 @@ from pyworkflow.cli.output.formatters import (
     print_success,
     print_error,
     print_info,
+    print_warning,
 )
 
 
@@ -373,6 +374,123 @@ async def run_logs(
 
     except Exception as e:
         print_error(f"Failed to get event log: {e}")
+        if ctx.obj["verbose"]:
+            raise
+        raise click.Abort()
+
+
+@runs.command(name="cancel")
+@click.argument("run_id")
+@click.option(
+    "--wait/--no-wait",
+    default=False,
+    help="Wait for cancellation to complete",
+)
+@click.option(
+    "--timeout",
+    type=int,
+    default=30,
+    help="Timeout in seconds when waiting (default: 30)",
+)
+@click.option(
+    "--reason",
+    help="Reason for cancellation",
+)
+@click.pass_context
+@async_command
+async def cancel_run(
+    ctx: click.Context,
+    run_id: str,
+    wait: bool,
+    timeout: int,
+    reason: Optional[str],
+) -> None:
+    """
+    Cancel a running or suspended workflow.
+
+    Gracefully terminates workflow execution. The workflow will receive
+    a CancellationError at the next checkpoint (step execution, sleep, or hook).
+
+    Args:
+        RUN_ID: Workflow run identifier
+
+    Examples:
+
+        # Cancel a workflow
+        pyworkflow runs cancel run_abc123def456
+
+        # Cancel and wait for completion
+        pyworkflow runs cancel run_abc123def456 --wait
+
+        # Cancel with timeout
+        pyworkflow runs cancel run_abc123def456 --wait --timeout 60
+
+        # Cancel with reason
+        pyworkflow runs cancel run_abc123def456 --reason "User requested"
+    """
+    from pyworkflow.engine.executor import cancel_workflow
+
+    # Get context data
+    config = ctx.obj["config"]
+    output = ctx.obj["output"]
+    storage_type = ctx.obj["storage_type"]
+    storage_path = ctx.obj["storage_path"]
+
+    # Create storage backend
+    storage = create_storage(storage_type, storage_path, config)
+
+    try:
+        # First check if workflow exists
+        run = await storage.get_run(run_id)
+        if not run:
+            print_error(f"Workflow run '{run_id}' not found")
+            raise click.Abort()
+
+        # Check if already in terminal state
+        terminal_states = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
+        if run.status in terminal_states:
+            print_warning(f"Workflow is already in terminal state: {run.status.value}")
+            return
+
+        # Cancel the workflow
+        print_info(f"Cancelling workflow: {run_id}")
+
+        cancelled = await cancel_workflow(
+            run_id=run_id,
+            reason=reason,
+            wait=wait,
+            timeout=float(timeout) if wait else None,
+            storage=storage,
+        )
+
+        if cancelled:
+            if wait:
+                # Get updated status
+                run = await storage.get_run(run_id)
+                if run and run.status == RunStatus.CANCELLED:
+                    print_success(f"Workflow cancelled successfully: {run_id}")
+                else:
+                    print_warning(f"Cancellation requested but workflow may still be running")
+            else:
+                print_success(f"Cancellation requested for workflow: {run_id}")
+                print_info("Use --wait to wait for cancellation to complete")
+        else:
+            print_warning(f"Could not cancel workflow (may already be in terminal state)")
+
+        # Output in different formats
+        if output == "json":
+            run = await storage.get_run(run_id)
+            data = {
+                "run_id": run_id,
+                "cancelled": cancelled,
+                "status": run.status.value if run else None,
+            }
+            format_json(data)
+
+    except click.Abort:
+        raise
+    except Exception as e:
+        print_error(f"Failed to cancel workflow: {e}")
         if ctx.obj["verbose"]:
             raise
         raise click.Abort()

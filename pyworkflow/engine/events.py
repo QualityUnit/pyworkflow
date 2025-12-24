@@ -41,6 +41,9 @@ class EventType(Enum):
     HOOK_EXPIRED = "hook.expired"
     HOOK_DISPOSED = "hook.disposed"
 
+    # Cancellation events
+    CANCELLATION_REQUESTED = "cancellation.requested"
+
 
 @dataclass
 class Event:
@@ -323,4 +326,97 @@ def create_hook_expired_event(run_id: str, hook_id: str) -> Event:
         run_id=run_id,
         type=EventType.HOOK_EXPIRED,
         data={"hook_id": hook_id},
+    )
+
+
+def create_cancellation_requested_event(
+    run_id: str,
+    reason: Optional[str] = None,
+    requested_by: Optional[str] = None,
+) -> Event:
+    """
+    Create a cancellation requested event.
+
+    This event is recorded when cancellation is requested for a workflow.
+    It signals that the workflow should terminate gracefully.
+
+    Args:
+        run_id: The workflow run ID
+        reason: Optional reason for cancellation (e.g., "user_requested", "timeout")
+        requested_by: Optional identifier of who/what requested the cancellation
+
+    Returns:
+        Event: The cancellation requested event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.CANCELLATION_REQUESTED,
+        data={
+            "reason": reason,
+            "requested_by": requested_by,
+            "requested_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_workflow_cancelled_event(
+    run_id: str,
+    reason: Optional[str] = None,
+    cleanup_completed: bool = False,
+) -> Event:
+    """
+    Create a workflow cancelled event.
+
+    This event is recorded when a workflow has been successfully cancelled,
+    optionally after cleanup operations have completed.
+
+    Args:
+        run_id: The workflow run ID
+        reason: Optional reason for cancellation
+        cleanup_completed: Whether cleanup operations completed successfully
+
+    Returns:
+        Event: The workflow cancelled event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.WORKFLOW_CANCELLED,
+        data={
+            "reason": reason,
+            "cleanup_completed": cleanup_completed,
+            "cancelled_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_step_cancelled_event(
+    run_id: str,
+    step_id: str,
+    step_name: str,
+    reason: Optional[str] = None,
+) -> Event:
+    """
+    Create a step cancelled event.
+
+    This event is recorded when a step is cancelled, either because the
+    workflow was cancelled or the step was explicitly terminated.
+
+    Args:
+        run_id: The workflow run ID
+        step_id: The unique step identifier
+        step_name: The name of the step
+        reason: Optional reason for cancellation
+
+    Returns:
+        Event: The step cancelled event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.STEP_CANCELLED,
+        data={
+            "step_id": step_id,
+            "step_name": step_name,
+            "reason": reason,
+            "cancelled_at": datetime.now(UTC).isoformat(),
+        },
     )

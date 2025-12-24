@@ -65,7 +65,7 @@ async def _select_pending_hook_async(storage: Any) -> str | None:
     choices = _build_hook_choices(hooks_list)
 
     try:
-        result = await inquirer.select(
+        result = await inquirer.select(  # type: ignore[func-returns-value]
             message="Select hook to resume",
             choices=choices,
             style=PYWORKFLOW_STYLE,
@@ -92,7 +92,7 @@ async def _prompt_for_payload_async(hook: Any) -> dict[str, Any]:
     # If no schema, prompt for raw JSON
     if not hook.payload_schema:
         try:
-            raw = await inquirer.text(
+            raw = await inquirer.text(  # type: ignore[func-returns-value]
                 message="Enter payload (JSON)",
                 default="{}",
                 style=PYWORKFLOW_STYLE,
@@ -109,7 +109,7 @@ async def _prompt_for_payload_async(hook: Any) -> dict[str, Any]:
     properties = schema.get("properties", {})
     required = set(schema.get("required", []))
 
-    payload = {}
+    payload: dict[str, Any] = {}
 
     for field_name, field_schema in properties.items():
         field_type = field_schema.get("type", "string")
@@ -127,7 +127,7 @@ async def _prompt_for_payload_async(hook: Any) -> dict[str, Any]:
             # Handle boolean type with confirm prompt
             if field_type == "boolean":
                 default_val = default if default is not None else False
-                value = await inquirer.confirm(
+                value = await inquirer.confirm(  # type: ignore[func-returns-value]
                     message=field_name,
                     default=default_val,
                     style=PYWORKFLOW_STYLE,
@@ -140,7 +140,7 @@ async def _prompt_for_payload_async(hook: Any) -> dict[str, Any]:
             # Handle integer type with number prompt
             elif field_type == "integer":
                 default_val = default if default is not None else None
-                value = await inquirer.number(
+                value = await inquirer.number(  # type: ignore[func-returns-value]
                     message=field_name,
                     default=default_val,
                     style=PYWORKFLOW_STYLE,
@@ -157,7 +157,7 @@ async def _prompt_for_payload_async(hook: Any) -> dict[str, Any]:
             # Handle number/float type with number prompt
             elif field_type == "number":
                 default_val = default if default is not None else None
-                value = await inquirer.number(
+                value = await inquirer.number(  # type: ignore[func-returns-value]
                     message=field_name,
                     default=default_val,
                     style=PYWORKFLOW_STYLE,
@@ -178,7 +178,7 @@ async def _prompt_for_payload_async(hook: Any) -> dict[str, Any]:
                 else:
                     default_str = ""
 
-                value_str = await inquirer.text(
+                value_str = await inquirer.text(  # type: ignore[func-returns-value]
                     message=field_name,
                     default=default_str,
                     style=PYWORKFLOW_STYLE,

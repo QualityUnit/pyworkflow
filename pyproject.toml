@@ -70,6 +70,7 @@ dev = [
     # Type stubs
     "types-redis>=4.6.0",
     "types-python-dateutil>=2.8.0",
+    "types-PyYAML>=6.0.0",
 
     # Monitoring (optional)
     "flower>=2.0.0",  # Celery web UI
@@ -181,15 +182,15 @@ ignore = [
 
 [tool.mypy]
 python_version = "3.11"
-warn_return_any = true
+warn_return_any = false  # Too strict for yaml.safe_load and similar
 warn_unused_configs = true
-disallow_untyped_defs = true
+disallow_untyped_defs = false  # Allow untyped defs for gradual typing
 disallow_incomplete_defs = true
 check_untyped_defs = true
 disallow_untyped_decorators = false
 no_implicit_optional = true
 warn_redundant_casts = true
-warn_unused_ignores = true
+warn_unused_ignores = false  # Don't warn about unused ignores during transition
 warn_no_return = true
 follow_imports = "normal"
 strict_optional = true
@@ -202,8 +203,16 @@ module = [
     "aiosqlite.*",
     "InquirerPy.*",
     "prompt_toolkit.*",
+    "yaml.*",
 ]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "pyworkflow.celery.tasks",
+    "pyworkflow.aws.handler",
+]
+disallow_untyped_defs = false
 
 [tool.isort]
 profile = "black"

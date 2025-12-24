@@ -20,7 +20,7 @@ class WorkflowMetadata:
     func: Callable[..., Any]
     original_func: Callable[..., Any]  # Unwrapped function
     max_duration: str | None = None
-    metadata: dict[str, Any] = None
+    metadata: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.metadata is None:
@@ -37,7 +37,7 @@ class StepMetadata:
     max_retries: int = 3
     retry_delay: str = "exponential"
     timeout: int | None = None
-    metadata: dict[str, Any] = None
+    metadata: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.metadata is None:

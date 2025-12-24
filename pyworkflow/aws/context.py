@@ -8,7 +8,7 @@ with PyWorkflow's step and sleep primitives.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
@@ -193,9 +193,40 @@ class AWSWorkflowContext(WorkflowContext):
 
         logger.debug(f"AWS sleep completed: {duration_seconds} seconds")
 
-    async def parallel(self, *tasks) -> list[Any]:
+    async def parallel(self, *tasks: Any) -> list[Any]:
         """Execute tasks in parallel using asyncio.gather."""
         return list(await asyncio.gather(*tasks))
+
+    # =========================================================================
+    # Cancellation support (not fully implemented for AWS - defer to AWS SDK)
+    # =========================================================================
+
+    def is_cancellation_requested(self) -> bool:
+        """Check if cancellation requested (AWS manages this internally)."""
+        return False
+
+    def request_cancellation(self, reason: str | None = None) -> None:
+        """Request cancellation (AWS manages this internally)."""
+        logger.warning("Cancellation not supported in AWS context")
+
+    def check_cancellation(self) -> None:
+        """Check cancellation (AWS manages this internally)."""
+        pass  # AWS handles this
+
+    @property
+    def cancellation_blocked(self) -> bool:
+        """Check if cancellation blocked."""
+        return False
+
+    async def hook(
+        self,
+        name: str,
+        timeout: int | None = None,
+        on_created: Callable[[str], Awaitable[None]] | None = None,
+        payload_schema: type | None = None,
+    ) -> Any:
+        """Wait for hook (not implemented for AWS - use wait_for_callback)."""
+        raise NotImplementedError("Use AWS context.wait_for_callback() instead")
 
     def cleanup(self) -> None:
         """Clean up the context when workflow completes."""

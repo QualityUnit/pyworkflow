@@ -164,7 +164,7 @@ class AWSContext(WorkflowContext):
     # Parallel execution
     # =========================================================================
 
-    async def parallel(self, *tasks) -> list[Any]:
+    async def parallel(self, *tasks: Any) -> list[Any]:
         """
         Execute tasks in parallel using AWS context.parallel().
 

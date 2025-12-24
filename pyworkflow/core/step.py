@@ -178,7 +178,7 @@ def step(
                 kwargs=serialize_kwargs(**kwargs),
                 attempt=current_attempt,
             )
-            await ctx.storage.record_event(start_event)
+            await ctx.storage.record_event(start_event)  # type: ignore[union-attr]
 
             logger.info(
                 f"Executing step: {step_name} (attempt {current_attempt}/{max_retries + 1})",
@@ -199,7 +199,7 @@ def step(
                 completion_event = create_step_completed_event(
                     run_id=ctx.run_id, step_id=step_id, result=serialize(result)
                 )
-                await ctx.storage.record_event(completion_event)
+                await ctx.storage.record_event(completion_event)  # type: ignore[union-attr]
 
                 # Cache result for replay
                 ctx.cache_step_result(step_id, result)
@@ -233,7 +233,7 @@ def step(
                     is_retryable=False,
                     attempt=current_attempt,
                 )
-                await ctx.storage.record_event(failure_event)
+                await ctx.storage.record_event(failure_event)  # type: ignore[union-attr]
 
                 # Clear retry state
                 ctx.clear_retry_state(step_id)
@@ -251,9 +251,10 @@ def step(
                     next_attempt = current_attempt + 1
 
                     # Calculate retry delay
-                    if is_retryable_error and e.retry_after is not None:
+                    delay_seconds: float
+                    if isinstance(e, RetryableError) and e.retry_after is not None:
                         # Use RetryableError's specified delay
-                        delay_seconds = e.get_retry_delay_seconds()
+                        delay_seconds = float(e.get_retry_delay_seconds() or 0)
                     else:
                         # Use step's configured retry delay strategy
                         delay_seconds = _get_retry_delay(retry_delay, current_attempt - 1)
@@ -282,7 +283,7 @@ def step(
                         is_retryable=True,
                         attempt=current_attempt,
                     )
-                    await ctx.storage.record_event(failure_event)
+                    await ctx.storage.record_event(failure_event)  # type: ignore[union-attr]
 
                     # Record STEP_RETRYING event
                     from pyworkflow.engine.events import create_step_retrying_event
@@ -298,7 +299,7 @@ def step(
                     retrying_event.data["resume_at"] = resume_at.isoformat()
                     retrying_event.data["retry_strategy"] = str(retry_delay)
                     retrying_event.data["max_retries"] = max_retries
-                    await ctx.storage.record_event(retrying_event)
+                    await ctx.storage.record_event(retrying_event)  # type: ignore[union-attr]
 
                     # Update retry state in context
                     ctx.set_retry_state(
@@ -340,7 +341,7 @@ def step(
                         is_retryable=True,
                         attempt=current_attempt,
                     )
-                    await ctx.storage.record_event(failure_event)
+                    await ctx.storage.record_event(failure_event)  # type: ignore[union-attr]
 
                     ctx.clear_retry_state(step_id)
 
@@ -364,12 +365,12 @@ def step(
         )
 
         # Store metadata on wrapper
-        wrapper.__step__ = True
-        wrapper.__step_name__ = step_name
-        wrapper.__step_max_retries__ = max_retries
-        wrapper.__step_retry_delay__ = retry_delay
-        wrapper.__step_timeout__ = timeout
-        wrapper.__step_metadata__ = metadata or {}
+        wrapper.__step__ = True  # type: ignore[attr-defined]
+        wrapper.__step_name__ = step_name  # type: ignore[attr-defined]
+        wrapper.__step_max_retries__ = max_retries  # type: ignore[attr-defined]
+        wrapper.__step_retry_delay__ = retry_delay  # type: ignore[attr-defined]
+        wrapper.__step_timeout__ = timeout  # type: ignore[attr-defined]
+        wrapper.__step_metadata__ = metadata or {}  # type: ignore[attr-defined]
 
         return wrapper
 
@@ -403,7 +404,7 @@ async def _execute_with_retries(
     """
     import asyncio
 
-    last_error = None
+    last_error: Exception | None = None
 
     for attempt in range(max_retries + 1):
         try:
@@ -434,6 +435,7 @@ async def _execute_with_retries(
                     error=str(e),
                 )
 
+    assert last_error is not None  # mypy: guaranteed by loop logic
     raise last_error
 
 

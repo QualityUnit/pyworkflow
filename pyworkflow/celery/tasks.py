@@ -25,7 +25,7 @@ from pyworkflow.core.exceptions import (
     RetryableError,
     SuspensionSignal,
 )
-from pyworkflow.core.registry import get_workflow
+from pyworkflow.core.registry import WorkflowMetadata, get_workflow
 from pyworkflow.core.workflow import execute_workflow_with_context
 from pyworkflow.engine.events import (
     create_workflow_cancelled_event,
@@ -90,7 +90,7 @@ class WorkflowTask(Task):
     queue="pyworkflow.steps",
 )
 def execute_step_task(
-    self,
+    self: WorkflowTask,
     step_name: str,
     args_json: str,
     kwargs_json: str,
@@ -326,7 +326,7 @@ async def _handle_workflow_recovery(
 
 async def _recover_workflow_on_worker(
     run: WorkflowRun,
-    workflow_meta,
+    workflow_meta: WorkflowMetadata,
     storage: StorageBackend,
     storage_config: dict[str, Any] | None = None,
 ) -> str:
@@ -433,7 +433,7 @@ async def _recover_workflow_on_worker(
 
 
 async def _start_workflow_on_worker(
-    workflow_meta,
+    workflow_meta: WorkflowMetadata,
     args: tuple,
     kwargs: dict,
     storage: StorageBackend,
@@ -566,7 +566,7 @@ async def _start_workflow_on_worker(
         input_kwargs=serialize_kwargs(**kwargs),
         idempotency_key=idempotency_key,
         max_duration=workflow_meta.max_duration,
-        metadata=workflow_meta.metadata,
+        metadata=workflow_meta.metadata or {},
         recovery_attempts=0,
         max_recovery_attempts=max_recovery_attempts,
         recover_on_worker_loss=recover_on_worker_loss,

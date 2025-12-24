@@ -119,7 +119,7 @@ def get_config_value(
         # With default
         timeout = get_config_value(config, "timeout", default=30)  # 30
     """
-    value = config
+    value: Any = config
     for key in keys:
         if isinstance(value, dict):
             value = value.get(key)

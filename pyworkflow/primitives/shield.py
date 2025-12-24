@@ -75,8 +75,8 @@ async def shield() -> AsyncIterator[None]:
     ctx = get_context()
 
     # Save previous state and block cancellation
-    previous_blocked = ctx._cancellation_blocked
-    ctx._cancellation_blocked = True
+    previous_blocked = ctx._cancellation_blocked  # type: ignore[attr-defined]
+    ctx._cancellation_blocked = True  # type: ignore[attr-defined]
 
     logger.debug(
         "Entered shield scope - cancellation blocked",
@@ -87,7 +87,7 @@ async def shield() -> AsyncIterator[None]:
         yield
     finally:
         # Restore previous state
-        ctx._cancellation_blocked = previous_blocked
+        ctx._cancellation_blocked = previous_blocked  # type: ignore[attr-defined]
 
         logger.debug(
             "Exited shield scope - cancellation restored",

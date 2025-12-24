@@ -218,7 +218,7 @@ class MockContext(WorkflowContext):
     # Parallel execution
     # =========================================================================
 
-    async def parallel(self, *tasks) -> list[Any]:
+    async def parallel(self, *tasks: Any) -> list[Any]:
         """Execute tasks in parallel (tracking the call)."""
         self._parallel_calls.append(len(tasks))
         return list(await asyncio.gather(*tasks))

@@ -92,16 +92,17 @@ async def list_runs(
             print_info("No workflow runs found")
             return
 
-        # Calculate durations
+        # Calculate durations (stored as dynamic attribute for display)
+        durations: dict[str, str] = {}
         for run in runs_list:
             if run.started_at and run.completed_at:
-                duration = (run.completed_at - run.started_at).total_seconds()
-                run.duration = f"{duration:.1f}s"
+                dur = (run.completed_at - run.started_at).total_seconds()
+                durations[run.run_id] = f"{dur:.1f}s"
             elif run.started_at:
-                duration = (datetime.now() - run.started_at.replace(tzinfo=None)).total_seconds()
-                run.duration = f"{duration:.1f}s (ongoing)"
+                dur = (datetime.now() - run.started_at.replace(tzinfo=None)).total_seconds()
+                durations[run.run_id] = f"{dur:.1f}s (ongoing)"
             else:
-                run.duration = "-"
+                durations[run.run_id] = "-"
 
         # Format output
         if output == "json":
@@ -113,7 +114,7 @@ async def list_runs(
                     "created_at": run.created_at.isoformat() if run.created_at else None,
                     "started_at": run.started_at.isoformat() if run.started_at else None,
                     "completed_at": run.completed_at.isoformat() if run.completed_at else None,
-                    "duration": run.duration,
+                    "duration": durations.get(run.run_id, "-"),
                 }
                 for run in runs_list
             ]
@@ -132,7 +133,7 @@ async def list_runs(
                     "Started": run.started_at.strftime("%Y-%m-%d %H:%M:%S")
                     if run.started_at
                     else "-",
-                    "Duration": run.duration,
+                    "Duration": durations.get(run.run_id, "-"),
                 }
                 for run in runs_list
             ]

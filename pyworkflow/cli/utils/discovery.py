@@ -149,9 +149,9 @@ def discover_workflows(
     env_modules = os.getenv("PYWORKFLOW_DISCOVER", "")
     if env_modules:
         logger.debug(f"Discovering from PYWORKFLOW_DISCOVER: {env_modules}")
-        modules = [m.strip() for m in env_modules.split(",") if m.strip()]
+        env_module_list = [m.strip() for m in env_modules.split(",") if m.strip()]
         failed = []
-        for module in modules:
+        for module in env_module_list:
             if not _import_module(module):
                 failed.append(module)
 

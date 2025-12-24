@@ -279,7 +279,7 @@ class FileStorageBackend(StorageBackend):
                         )
                     )
 
-            return sorted(events, key=lambda e: e.sequence)
+            return sorted(events, key=lambda e: e.sequence or 0)
 
         return await asyncio.to_thread(_read)
 

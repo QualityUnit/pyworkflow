@@ -17,9 +17,10 @@ from typing import Any, Callable, Dict, Optional
 from loguru import logger
 
 from pyworkflow.context import LocalContext, set_context, reset_context
-from pyworkflow.core.exceptions import SuspensionSignal
+from pyworkflow.core.exceptions import CancellationError, SuspensionSignal
 from pyworkflow.core.registry import register_workflow
 from pyworkflow.engine.events import (
+    create_workflow_cancelled_event,
     create_workflow_completed_event,
     create_workflow_failed_event,
     create_workflow_started_event,
@@ -123,6 +124,7 @@ async def execute_workflow_with_context(
     kwargs: dict,
     event_log: Optional[list] = None,
     durable: bool = True,
+    cancellation_requested: bool = False,
 ) -> Any:
     """
     Execute workflow function with proper context setup.
@@ -132,6 +134,7 @@ async def execute_workflow_with_context(
     - Event logging (durable mode only)
     - Error handling
     - Suspension handling (durable mode only)
+    - Cancellation handling
 
     Args:
         workflow_func: The workflow function to execute
@@ -142,12 +145,14 @@ async def execute_workflow_with_context(
         kwargs: Keyword arguments
         event_log: Optional existing event log for replay
         durable: Whether this is a durable workflow
+        cancellation_requested: Whether cancellation was requested before execution
 
     Returns:
         Workflow result
 
     Raises:
         SuspensionSignal: When workflow needs to suspend (durable only)
+        CancellationError: When workflow is cancelled
         Exception: On workflow failure
     """
     # Determine if we're actually durable (need both flag and storage)
@@ -161,6 +166,10 @@ async def execute_workflow_with_context(
         event_log=event_log or [],
         durable=is_durable,
     )
+
+    # Set cancellation state if requested before execution
+    if cancellation_requested:
+        ctx.request_cancellation(reason="Cancellation requested before execution")
 
     # Set as current context using new API
     token = set_context(ctx)
@@ -205,6 +214,26 @@ async def execute_workflow_with_context(
             workflow_name=workflow_name,
             reason=e.reason,
         )
+        raise
+
+    except CancellationError as e:
+        # Workflow was cancelled
+        logger.info(
+            f"Workflow cancelled: {workflow_name}",
+            run_id=run_id,
+            workflow_name=workflow_name,
+            reason=e.reason,
+        )
+
+        # Record cancellation event (durable mode only)
+        if is_durable:
+            cancelled_event = create_workflow_cancelled_event(
+                run_id=run_id,
+                reason=e.reason,
+                cleanup_completed=True,
+            )
+            await storage.record_event(cancelled_event)
+
         raise
 
     except Exception as e:

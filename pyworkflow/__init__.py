@@ -40,11 +40,13 @@ from pyworkflow.core.workflow import workflow
 from pyworkflow.primitives.define_hook import TypedHook, define_hook
 from pyworkflow.primitives.hooks import hook
 from pyworkflow.primitives.resume_hook import ResumeResult, resume_hook
+from pyworkflow.primitives.shield import shield
 from pyworkflow.primitives.sleep import sleep
 
 # Execution engine
 from pyworkflow.engine.executor import (
     ConfigurationError,
+    cancel_workflow,
     get_workflow_events,
     get_workflow_run,
     resume,
@@ -53,6 +55,7 @@ from pyworkflow.engine.executor import (
 
 # Exceptions
 from pyworkflow.core.exceptions import (
+    CancellationError,
     FatalError,
     HookAlreadyReceivedError,
     HookExpiredError,
@@ -119,15 +122,18 @@ __all__ = [
     "TypedHook",
     "resume_hook",
     "ResumeResult",
+    "shield",
     # Execution
     "start",
     "resume",
+    "cancel_workflow",
     "get_workflow_run",
     "get_workflow_events",
     # Exceptions
     "WorkflowError",
     "FatalError",
     "RetryableError",
+    "CancellationError",
     "SuspensionSignal",
     "WorkflowNotFoundError",
     "WorkflowAlreadyRunningError",

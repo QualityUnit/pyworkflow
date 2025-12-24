@@ -287,6 +287,42 @@ assert run_id_1 == run_id_2
 
 **Run:** `python 06_idempotency.py 2>/dev/null`
 
+### 07_hooks.py - External Events
+
+See the hooks example for webhook/callback patterns.
+
+**Run:** `python 07_hooks.py 2>/dev/null`
+
+### 08_cancellation.py - Graceful Cancellation
+
+**What it demonstrates:**
+- Cancel running or suspended workflows with `cancel_workflow()`
+- Handle `CancellationError` for cleanup/compensation logic
+- Use `shield()` to protect critical cleanup operations
+- Checkpoint-based cancellation (not mid-step)
+
+**Key patterns:**
+```python
+@workflow(durable=True)
+async def order_workflow(order_id: str):
+    try:
+        order = await reserve_inventory(order_id)
+        await sleep("5s")  # Can be cancelled here
+        order = await charge_payment(order)
+        return order
+    except CancellationError:
+        # Cleanup with shield to ensure completion
+        async with shield():
+            await release_inventory(order_id)
+            await refund_payment(order_id)
+        raise
+
+# Cancel a workflow
+await cancel_workflow(run_id, reason="Customer cancelled")
+```
+
+**Run:** `python 08_cancellation.py 2>/dev/null`
+
 ## Learning Path
 
 **Recommended order:**

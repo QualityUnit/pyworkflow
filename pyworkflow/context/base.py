@@ -208,6 +208,57 @@ class WorkflowContext(ABC):
         ...
 
     # =========================================================================
+    # Cancellation support
+    # =========================================================================
+
+    @abstractmethod
+    def is_cancellation_requested(self) -> bool:
+        """
+        Check if cancellation has been requested for this workflow.
+
+        Returns:
+            True if cancellation was requested, False otherwise
+        """
+        ...
+
+    @abstractmethod
+    def request_cancellation(self, reason: Optional[str] = None) -> None:
+        """
+        Mark this workflow as cancelled.
+
+        This sets the cancellation flag. The workflow will raise
+        CancellationError at the next cancellation check point.
+
+        Args:
+            reason: Optional reason for cancellation
+        """
+        ...
+
+    @abstractmethod
+    def check_cancellation(self) -> None:
+        """
+        Check for cancellation and raise if requested.
+
+        This should be called at interruptible points (before steps,
+        during sleeps, etc.) to allow graceful cancellation.
+
+        Raises:
+            CancellationError: If cancellation was requested and not blocked
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def cancellation_blocked(self) -> bool:
+        """
+        Check if cancellation is currently blocked (within a shield scope).
+
+        Returns:
+            True if cancellation is blocked, False otherwise
+        """
+        ...
+
+    # =========================================================================
     # Optional methods - can be overridden by subclasses
     # =========================================================================
 

@@ -6,11 +6,13 @@ Primitives provide building blocks for workflow orchestration:
 - hook: Wait for external events (webhooks, approvals, callbacks)
 - define_hook: Create typed hooks with Pydantic validation
 - resume_hook: Resume suspended workflows from external systems
+- shield: Protection from cancellation for critical sections
 """
 
 from pyworkflow.primitives.define_hook import TypedHook, define_hook
 from pyworkflow.primitives.hooks import hook
 from pyworkflow.primitives.resume_hook import ResumeResult, resume_hook
+from pyworkflow.primitives.shield import shield
 from pyworkflow.primitives.sleep import sleep
 
 __all__ = [
@@ -22,4 +24,6 @@ __all__ = [
     "TypedHook",
     "resume_hook",
     "ResumeResult",
+    # Cancellation
+    "shield",
 ]

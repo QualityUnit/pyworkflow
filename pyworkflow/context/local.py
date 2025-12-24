@@ -88,6 +88,11 @@ class LocalContext(WorkflowContext):
         self._is_replaying = False
         self._last_warning_count: int = 0  # Track last event count for warning interval
 
+        # Cancellation state
+        self._cancellation_requested: bool = False
+        self._cancellation_blocked: bool = False
+        self._cancellation_reason: Optional[str] = None
+
         # Replay state if resuming
         if event_log:
             self._is_replaying = True
@@ -124,6 +129,10 @@ class LocalContext(WorkflowContext):
                     "retry_delay": event.data.get("retry_strategy", "exponential"),
                     "last_error": event.data.get("error", ""),
                 }
+
+            elif event.type == EventType.CANCELLATION_REQUESTED:
+                self._cancellation_requested = True
+                self._cancellation_reason = event.data.get("reason")
 
     @property
     def is_durable(self) -> bool:
@@ -485,6 +494,9 @@ class LocalContext(WorkflowContext):
             await asyncio.sleep(duration_seconds)
             return
 
+        # Check for cancellation before sleeping
+        self.check_cancellation()
+
         # Durable mode - suspend workflow
         sleep_id = self._generate_sleep_id(duration_seconds)
 
@@ -653,6 +665,9 @@ class LocalContext(WorkflowContext):
                 "Initialize LocalContext with durable=True and a storage backend."
             )
 
+        # Check for cancellation before waiting for hook
+        self.check_cancellation()
+
         # Generate deterministic hook_id
         self._step_counter += 1
         hook_id = f"hook_{name}_{self._step_counter}"
@@ -729,3 +744,77 @@ class LocalContext(WorkflowContext):
             hook_id=hook_id,
             token=actual_token,
         )
+
+    # =========================================================================
+    # Cancellation support
+    # =========================================================================
+
+    def is_cancellation_requested(self) -> bool:
+        """
+        Check if cancellation has been requested for this workflow.
+
+        Returns:
+            True if cancellation was requested, False otherwise
+        """
+        return self._cancellation_requested
+
+    def request_cancellation(self, reason: Optional[str] = None) -> None:
+        """
+        Mark this workflow as cancelled.
+
+        This sets the cancellation flag. The workflow will raise
+        CancellationError at the next cancellation check point.
+
+        Args:
+            reason: Optional reason for cancellation
+        """
+        self._cancellation_requested = True
+        self._cancellation_reason = reason
+        logger.info(
+            f"Cancellation requested for workflow",
+            run_id=self._run_id,
+            reason=reason,
+        )
+
+    def check_cancellation(self) -> None:
+        """
+        Check for cancellation and raise if requested.
+
+        This should be called at interruptible points (before steps,
+        during sleeps, etc.) to allow graceful cancellation.
+
+        Raises:
+            CancellationError: If cancellation was requested and not blocked
+        """
+        if self._cancellation_requested and not self._cancellation_blocked:
+            from pyworkflow.core.exceptions import CancellationError
+
+            logger.info(
+                f"Cancellation check triggered - raising CancellationError",
+                run_id=self._run_id,
+                reason=self._cancellation_reason,
+            )
+            raise CancellationError(
+                message=f"Workflow was cancelled: {self._cancellation_reason or 'no reason provided'}",
+                reason=self._cancellation_reason,
+            )
+
+    @property
+    def cancellation_blocked(self) -> bool:
+        """
+        Check if cancellation is currently blocked (within a shield scope).
+
+        Returns:
+            True if cancellation is blocked, False otherwise
+        """
+        return self._cancellation_blocked
+
+    @property
+    def cancellation_reason(self) -> Optional[str]:
+        """
+        Get the reason for cancellation, if any.
+
+        Returns:
+            The cancellation reason or None if not cancelled
+        """
+        return self._cancellation_reason

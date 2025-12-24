@@ -57,6 +57,7 @@
         "concepts/steps",
         "concepts/events",
         "concepts/sleep",
+        "concepts/hooks",
         "concepts/fault-tolerance"
       ]
     },

@@ -168,6 +168,9 @@ def step(
             else:
                 current_attempt = 1
 
+            # Validate event limits before executing step
+            await ctx.validate_event_limits()
+
             # Record step start event
             start_event = create_step_started_event(
                 run_id=ctx.run_id,

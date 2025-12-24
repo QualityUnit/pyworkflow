@@ -198,6 +198,23 @@ class HookAlreadyReceivedError(WorkflowError):
         self.hook_id = hook_id
 
 
+class EventLimitExceededError(FatalError):
+    """
+    Raised when workflow exceeds maximum allowed events (hard limit).
+
+    This is a safety mechanism to prevent runaway workflows from consuming
+    excessive resources. The default limit is 50,000 events.
+    """
+
+    def __init__(self, run_id: str, event_count: int, limit: int) -> None:
+        super().__init__(
+            f"Workflow {run_id} exceeded maximum event limit: {event_count} >= {limit}"
+        )
+        self.run_id = run_id
+        self.event_count = event_count
+        self.limit = limit
+
+
 class WorkflowAlreadyRunningError(WorkflowError):
     """Raised when attempting to start a workflow that's already running."""
 

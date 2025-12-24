@@ -116,6 +116,7 @@ async def resume_hook(
     # Get storage backend
     if storage is None:
         from pyworkflow import get_storage
+
         storage = get_storage()
 
     if storage is None:

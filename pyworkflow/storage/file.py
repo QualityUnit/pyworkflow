@@ -289,9 +289,7 @@ class FileStorageBackend(StorageBackend):
         event_type: str | None = None,
     ) -> Event | None:
         """Get the latest event for a run."""
-        events = await self.get_events(
-            run_id, event_types=[event_type] if event_type else None
-        )
+        events = await self.get_events(run_id, event_types=[event_type] if event_type else None)
         return events[-1] if events else None
 
     # Step Operations

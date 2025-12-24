@@ -59,8 +59,7 @@ def create_storage(
     if backend == "sqlite":
         logger.warning("SQLite backend not yet implemented in CLI")
         raise ValueError(
-            "SQLite backend is not yet supported in the CLI. "
-            "Use 'file' or 'memory' backends."
+            "SQLite backend is not yet supported in the CLI. Use 'file' or 'memory' backends."
         )
 
     # Resolve storage path with priority: CLI flag > config file > default

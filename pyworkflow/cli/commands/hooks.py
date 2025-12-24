@@ -299,8 +299,12 @@ async def list_hooks_cmd(
                     "Name": hook.name or "-",
                     "Status": hook.status.value,
                     "Run ID": hook.run_id,
-                    "Created": hook.created_at.strftime("%Y-%m-%d %H:%M") if hook.created_at else "-",
-                    "Expires": hook.expires_at.strftime("%Y-%m-%d %H:%M") if hook.expires_at else "-",
+                    "Created": hook.created_at.strftime("%Y-%m-%d %H:%M")
+                    if hook.created_at
+                    else "-",
+                    "Expires": hook.expires_at.strftime("%Y-%m-%d %H:%M")
+                    if hook.expires_at
+                    else "-",
                 }
                 for hook in hooks_list
             ]
@@ -372,9 +376,15 @@ async def hook_info_cmd(ctx: click.Context, token: str) -> None:
                 "Run ID": hook.run_id,
                 "Name": hook.name or "-",
                 "Status": hook.status.value,
-                "Created": hook.created_at.strftime("%Y-%m-%d %H:%M:%S") if hook.created_at else "-",
-                "Expires": hook.expires_at.strftime("%Y-%m-%d %H:%M:%S") if hook.expires_at else "-",
-                "Received": hook.received_at.strftime("%Y-%m-%d %H:%M:%S") if hook.received_at else "-",
+                "Created": hook.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                if hook.created_at
+                else "-",
+                "Expires": hook.expires_at.strftime("%Y-%m-%d %H:%M:%S")
+                if hook.expires_at
+                else "-",
+                "Received": hook.received_at.strftime("%Y-%m-%d %H:%M:%S")
+                if hook.received_at
+                else "-",
             }
 
             # Show payload if received
@@ -479,7 +489,9 @@ async def hooks_by_run_cmd(ctx: click.Context, run_id: str) -> None:
                 print(f"{Colors.bold(f'{i}. {hook.name or hook.hook_id}')}")
                 print(f"   Token: {hook.token}")
                 print(f"   Status: {status_color}{hook.status.value}{RESET}")
-                print(f"   Created: {hook.created_at.strftime('%Y-%m-%d %H:%M:%S') if hook.created_at else '-'}")
+                print(
+                    f"   Created: {hook.created_at.strftime('%Y-%m-%d %H:%M:%S') if hook.created_at else '-'}"
+                )
 
                 if hook.expires_at:
                     print(f"   Expires: {hook.expires_at.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -518,11 +530,13 @@ async def hooks_by_run_cmd(ctx: click.Context, run_id: str) -> None:
 @hooks.command(name="resume")
 @click.argument("token", required=False)
 @click.option(
-    "--payload", "-p",
+    "--payload",
+    "-p",
     help="JSON payload to send (skip interactive prompt)",
 )
 @click.option(
-    "--payload-file", "-f",
+    "--payload-file",
+    "-f",
     type=click.Path(exists=True),
     help="Read payload from JSON file",
 )
@@ -605,11 +619,13 @@ async def resume_hook_cmd(
 
         # Output result
         if output == "json":
-            format_json({
-                "run_id": result.run_id,
-                "hook_id": result.hook_id,
-                "status": result.status,
-            })
+            format_json(
+                {
+                    "run_id": result.run_id,
+                    "hook_id": result.hook_id,
+                    "status": result.status,
+                }
+            )
         else:
             print_success(f"Hook resumed: {result.hook_id}")
             print_info(f"Run ID: {result.run_id}")

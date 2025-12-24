@@ -76,6 +76,7 @@ async def hook(
     if timeout is not None:
         if isinstance(timeout, str):
             from pyworkflow.utils.duration import parse_duration
+
             timeout_seconds = parse_duration(timeout)
         else:
             timeout_seconds = int(timeout)

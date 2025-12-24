@@ -163,12 +163,14 @@ class MockContext(WorkflowContext):
         step_name = name or getattr(func, "__name__", "step")
 
         # Track the call
-        self._steps.append({
-            "name": step_name,
-            "func": func,
-            "args": args,
-            "kwargs": kwargs,
-        })
+        self._steps.append(
+            {
+                "name": step_name,
+                "func": func,
+                "args": args,
+                "kwargs": kwargs,
+            }
+        )
 
         logger.debug(f"[mock] Running step: {step_name}")
 
@@ -200,10 +202,12 @@ class MockContext(WorkflowContext):
         duration_seconds = parse_duration(duration) if isinstance(duration, str) else int(duration)
 
         # Track the call
-        self._sleeps.append({
-            "duration": duration,
-            "seconds": duration_seconds,
-        })
+        self._sleeps.append(
+            {
+                "duration": duration,
+                "seconds": duration_seconds,
+            }
+        )
 
         logger.debug(f"[mock] Sleep: {duration_seconds}s (skip={self._skip_sleeps})")
 
@@ -241,10 +245,12 @@ class MockContext(WorkflowContext):
             Mock event payload
         """
         # Track the call
-        self._events.append({
-            "name": event_name,
-            "timeout": timeout,
-        })
+        self._events.append(
+            {
+                "name": event_name,
+                "timeout": timeout,
+            }
+        )
 
         logger.debug(f"[mock] Waiting for event: {event_name}")
 
@@ -282,11 +288,13 @@ class MockContext(WorkflowContext):
         actual_token = f"{self._run_id}:{hook_id}"
 
         # Track the call
-        self._hooks.append({
-            "name": name,
-            "token": actual_token,
-            "timeout": timeout,
-        })
+        self._hooks.append(
+            {
+                "name": name,
+                "token": actual_token,
+                "timeout": timeout,
+            }
+        )
 
         logger.debug(f"[mock] Waiting for hook: {name} (token={actual_token[:20]}...)")
 

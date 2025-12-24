@@ -96,18 +96,14 @@ def step(
             # Check if running in AWS Durable Lambda context
             aws_ctx = _get_aws_context()
             if aws_ctx is not None:
-                logger.debug(
-                    f"Step {step_name} running in AWS context, delegating to AWS SDK"
-                )
+                logger.debug(f"Step {step_name} running in AWS context, delegating to AWS SDK")
                 # Delegate to AWS context for checkpointed execution
                 return aws_ctx.execute_step(func, *args, step_name=step_name, **kwargs)
 
             # Check if we're in a workflow context
             if not has_context():
                 # Called outside workflow - execute directly
-                logger.debug(
-                    f"Step {step_name} called outside workflow, executing directly"
-                )
+                logger.debug(f"Step {step_name} called outside workflow, executing directly")
                 return await func(*args, **kwargs)
 
             ctx = get_context()

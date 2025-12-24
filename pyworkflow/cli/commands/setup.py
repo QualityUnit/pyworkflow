@@ -108,7 +108,9 @@ def setup(
 
     # Get storage config
     storage_type = ctx.obj.get("storage_type") or config.get("storage", {}).get("type", "file")
-    storage_path = ctx.obj.get("storage_path") or config.get("storage", {}).get("base_path", "./workflow_data")
+    storage_path = ctx.obj.get("storage_path") or config.get("storage", {}).get(
+        "base_path", "./workflow_data"
+    )
     config_data["Storage Backend"] = storage_type
     if storage_type == "file":
         config_data["Storage Path"] = storage_path

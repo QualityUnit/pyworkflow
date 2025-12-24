@@ -1,6 +1,5 @@
 """Styles and themes for PyWorkflow CLI using InquirerPy."""
 
-
 from InquirerPy.utils import get_style
 
 # Primary brand color

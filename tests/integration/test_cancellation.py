@@ -56,9 +56,7 @@ class TestCancelWorkflowFunction:
 
         # Check cancellation event was recorded
         events = await storage.get_events("run_123")
-        cancellation_events = [
-            e for e in events if e.type == EventType.CANCELLATION_REQUESTED
-        ]
+        cancellation_events = [e for e in events if e.type == EventType.CANCELLATION_REQUESTED]
         assert len(cancellation_events) == 1
         assert cancellation_events[0].data["reason"] == "User cancelled"
 

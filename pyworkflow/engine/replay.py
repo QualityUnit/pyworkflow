@@ -5,7 +5,6 @@ The replay engine processes the event log to rebuild workflow state,
 enabling fault tolerance and resumption after crashes or suspensions.
 """
 
-
 from loguru import logger
 
 from pyworkflow.context import LocalContext

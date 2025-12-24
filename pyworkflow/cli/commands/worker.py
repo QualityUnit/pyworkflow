@@ -192,8 +192,12 @@ def run_worker(
             print_warning("No workflows registered!")
             print_warning("Specify workflows using one of:")
             print_warning("  1. --module flag: pyworkflow --module myapp.workflows worker run")
-            print_warning("  2. Environment: PYWORKFLOW_DISCOVER=myapp.workflows pyworkflow worker run")
-            print_warning("  3. Config file: Create pyworkflow.config.yaml with 'module: myapp.workflows'")
+            print_warning(
+                "  2. Environment: PYWORKFLOW_DISCOVER=myapp.workflows pyworkflow worker run"
+            )
+            print_warning(
+                "  3. Config file: Create pyworkflow.config.yaml with 'module: myapp.workflows'"
+            )
             print_info("")
 
         if steps:

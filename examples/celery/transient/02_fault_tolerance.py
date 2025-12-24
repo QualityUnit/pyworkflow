@@ -83,6 +83,7 @@ async def upload_result(image: dict) -> dict:
 # Workflow 1: No Recovery (Default for Transient)
 # ============================================================================
 
+
 @workflow(
     durable=False,
     recover_on_worker_loss=False,  # DEFAULT for transient - no auto-recovery
@@ -103,10 +104,10 @@ async def image_processor(image_id: str) -> dict:
     - Need manual review of failures
     - Each image should only be processed once
     """
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Image Processor (NO RECOVERY): {image_id}")
     print("If worker crashes, workflow will FAIL permanently")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     image = await download_image(image_id)
     image = await resize_image(image)
@@ -121,6 +122,7 @@ async def image_processor(image_id: str) -> dict:
 # Workflow 2: With Recovery (Restart from Scratch)
 # ============================================================================
 
+
 @step(name="transient_fetch_batch_items")
 async def fetch_batch_items(batch_id: str) -> dict:
     """Fetch items in a batch."""
@@ -134,7 +136,7 @@ async def process_batch_items(batch: dict) -> dict:
     """Process all items in batch (idempotent)."""
     print(f"[Step] Processing {len(batch['items'])} items (kill worker during this step!)...")
     for i, item in enumerate(batch["items"]):
-        print(f"  Processing item {item} ({i+1}/{len(batch['items'])})...")
+        print(f"  Processing item {item} ({i + 1}/{len(batch['items'])})...")
         await asyncio.sleep(3)  # 3 seconds per item - plenty of time to kill worker
     return {**batch, "processed": True, "processed_count": len(batch["items"])}
 
@@ -153,8 +155,8 @@ async def generate_report(batch: dict) -> dict:
 
 @workflow(
     durable=False,
-    recover_on_worker_loss=True,   # Enable recovery - restarts from scratch
-    max_recovery_attempts=3,        # Allow up to 3 restarts
+    recover_on_worker_loss=True,  # Enable recovery - restarts from scratch
+    max_recovery_attempts=3,  # Allow up to 3 restarts
 )
 async def batch_processor(batch_id: str) -> dict:
     """
@@ -177,10 +179,10 @@ async def batch_processor(batch_id: str) -> dict:
     Note: For transient workflows, recovery means RESTART, not RESUME.
     Unlike durable workflows, there are no events to replay.
     """
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Batch Processor (WITH RECOVERY): {batch_id}")
     print("If worker crashes, workflow will RESTART from scratch")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     batch = await fetch_batch_items(batch_id)
     batch = await process_batch_items(batch)
@@ -193,6 +195,7 @@ async def batch_processor(batch_id: str) -> dict:
 # ============================================================================
 # Comparison Helper
 # ============================================================================
+
 
 async def main() -> None:
     """Run the transient fault tolerance examples."""

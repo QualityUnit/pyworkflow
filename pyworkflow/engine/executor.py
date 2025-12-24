@@ -112,7 +112,9 @@ async def start(
     effective_durable = (
         durable
         if durable is not None
-        else workflow_durable if workflow_durable is not None else config.default_durable
+        else workflow_durable
+        if workflow_durable is not None
+        else config.default_durable
     )
 
     # Validate runtime + durable combination
@@ -293,9 +295,7 @@ async def _execute_workflow_local(
 
     except Exception as e:
         # Workflow failed
-        await storage.update_run_status(
-            run_id=run_id, status=RunStatus.FAILED, error=str(e)
-        )
+        await storage.update_run_status(run_id=run_id, status=RunStatus.FAILED, error=str(e))
 
         logger.error(
             f"Workflow failed: {workflow_name}",

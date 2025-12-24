@@ -109,9 +109,7 @@ class WorkflowRun:
                 datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None
             ),
             completed_at=(
-                datetime.fromisoformat(data["completed_at"])
-                if data.get("completed_at")
-                else None
+                datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None
             ),
             input_args=data.get("input_args", "{}"),
             input_kwargs=data.get("input_kwargs", "{}"),
@@ -194,9 +192,7 @@ class StepExecution:
                 datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None
             ),
             completed_at=(
-                datetime.fromisoformat(data["completed_at"])
-                if data.get("completed_at")
-                else None
+                datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None
             ),
             input_args=data.get("input_args", "{}"),
             input_kwargs=data.get("input_kwargs", "{}"),

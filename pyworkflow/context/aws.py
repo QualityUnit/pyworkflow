@@ -208,9 +208,7 @@ class AWSContext(WorkflowContext):
         # Parse timeout
         timeout_seconds = None
         if timeout:
-            timeout_seconds = (
-                parse_duration(timeout) if isinstance(timeout, str) else int(timeout)
-            )
+            timeout_seconds = parse_duration(timeout) if isinstance(timeout, str) else int(timeout)
 
         try:
             from aws_durable_execution_sdk_python.config import CallbackConfig

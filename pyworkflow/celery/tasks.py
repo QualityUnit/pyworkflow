@@ -419,9 +419,7 @@ async def _recover_workflow_on_worker(
 
     except Exception as e:
         # Workflow failed during recovery
-        await storage.update_run_status(
-            run_id=run_id, status=RunStatus.FAILED, error=str(e)
-        )
+        await storage.update_run_status(run_id=run_id, status=RunStatus.FAILED, error=str(e))
 
         logger.error(
             f"Workflow failed during recovery: {workflow_name}",
@@ -542,9 +540,11 @@ async def _start_workflow_on_worker(
 
     # Determine recovery settings
     # Priority: workflow decorator > global config > defaults based on durable mode
-    recover_on_worker_loss = getattr(workflow_meta.func, '__workflow_recover_on_worker_loss__', None)
-    max_recovery_attempts = getattr(workflow_meta.func, '__workflow_max_recovery_attempts__', None)
-    is_durable = getattr(workflow_meta.func, '__workflow_durable__', True)
+    recover_on_worker_loss = getattr(
+        workflow_meta.func, "__workflow_recover_on_worker_loss__", None
+    )
+    max_recovery_attempts = getattr(workflow_meta.func, "__workflow_max_recovery_attempts__", None)
+    is_durable = getattr(workflow_meta.func, "__workflow_durable__", True)
 
     if recover_on_worker_loss is None:
         recover_on_worker_loss = config.default_recover_on_worker_loss
@@ -654,9 +654,7 @@ async def _start_workflow_on_worker(
 
     except Exception as e:
         # Workflow failed
-        await storage.update_run_status(
-            run_id=run_id, status=RunStatus.FAILED, error=str(e)
-        )
+        await storage.update_run_status(run_id=run_id, status=RunStatus.FAILED, error=str(e))
 
         logger.error(
             f"Workflow failed on worker: {workflow_name}",
@@ -885,9 +883,7 @@ async def _resume_workflow_on_worker(
 
     except Exception as e:
         # Workflow failed
-        await storage.update_run_status(
-            run_id=run_id, status=RunStatus.FAILED, error=str(e)
-        )
+        await storage.update_run_status(run_id=run_id, status=RunStatus.FAILED, error=str(e))
 
         logger.error(
             f"Workflow failed on resume on worker: {run.workflow_name}",

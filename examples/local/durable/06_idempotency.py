@@ -82,10 +82,7 @@ async def main():
         # First call with idempotency key
         print("First call: Creating order with idempotency_key='order-unique-123'...\n")
         run_id_1 = await start(
-            order_workflow,
-            "order-unique-123",
-            99.99,
-            idempotency_key="order-unique-123"
+            order_workflow, "order-unique-123", 99.99, idempotency_key="order-unique-123"
         )
 
         run_1 = await get_workflow_run(run_id_1)
@@ -99,10 +96,7 @@ async def main():
         print("\n" + "=" * 60)
         print("\nSecond call: Same idempotency_key='order-unique-123'...\n")
         run_id_2 = await start(
-            order_workflow,
-            "order-unique-123",
-            99.99,
-            idempotency_key="order-unique-123"
+            order_workflow, "order-unique-123", 99.99, idempotency_key="order-unique-123"
         )
 
         run_2 = await get_workflow_run(run_id_2)
@@ -127,10 +121,7 @@ async def main():
         print("\n" + "=" * 60)
         print("\nThird call: Different idempotency_key='order-unique-456'...\n")
         run_id_3 = await start(
-            order_workflow,
-            "order-unique-456",
-            149.99,
-            idempotency_key="order-unique-456"
+            order_workflow, "order-unique-456", 149.99, idempotency_key="order-unique-456"
         )
 
         run_3 = await get_workflow_run(run_id_3)

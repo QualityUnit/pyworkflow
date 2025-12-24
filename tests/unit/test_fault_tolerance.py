@@ -198,7 +198,9 @@ class TestRecoveryConfig:
         """Config should have correct default values."""
         config = PyWorkflowConfig()
 
-        assert config.default_recover_on_worker_loss is None  # None = True for durable, False for transient
+        assert (
+            config.default_recover_on_worker_loss is None
+        )  # None = True for durable, False for transient
         assert config.default_max_recovery_attempts == 3
 
     def test_config_custom_values(self):

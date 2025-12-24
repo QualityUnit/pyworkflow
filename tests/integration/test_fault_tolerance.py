@@ -334,6 +334,7 @@ class TestWorkflowDecoratorRecoveryConfig:
 
     def test_workflow_decorator_stores_recovery_config(self):
         """@workflow decorator should store recovery config on wrapper."""
+
         @workflow(
             name="test_recovery_config_1",
             recover_on_worker_loss=True,
@@ -347,6 +348,7 @@ class TestWorkflowDecoratorRecoveryConfig:
 
     def test_workflow_decorator_defaults_none(self):
         """@workflow decorator should default recovery config to None when called with ()."""
+
         @workflow(name="test_recovery_config_2")
         async def my_workflow():
             pass
@@ -356,6 +358,7 @@ class TestWorkflowDecoratorRecoveryConfig:
 
     def test_workflow_decorator_disable_recovery(self):
         """@workflow decorator can disable recovery."""
+
         @workflow(name="test_recovery_config_3", recover_on_worker_loss=False)
         async def my_workflow():
             pass

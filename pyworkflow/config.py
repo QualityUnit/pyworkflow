@@ -84,7 +84,9 @@ class PyWorkflowConfig:
     default_retries: int = 3
 
     # Fault tolerance defaults
-    default_recover_on_worker_loss: bool | None = None  # None = True for durable, False for transient
+    default_recover_on_worker_loss: bool | None = (
+        None  # None = True for durable, False for transient
+    )
     default_max_recovery_attempts: int = 3
 
     # Infrastructure (app-level only)

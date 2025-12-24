@@ -6,7 +6,6 @@ This module provides:
 - Validation of runtime + durable combinations
 """
 
-
 from pyworkflow.runtime.base import Runtime
 
 # Runtime registry

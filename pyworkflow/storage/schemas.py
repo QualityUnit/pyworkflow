@@ -7,7 +7,7 @@ These schemas define the structure of data stored in various storage backends.
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class RunStatus(Enum):
@@ -55,26 +55,26 @@ class WorkflowRun:
     status: RunStatus
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
 
     # Input/output
     input_args: str = "{}"  # JSON serialized list
     input_kwargs: str = "{}"  # JSON serialized dict
-    result: Optional[str] = None  # JSON serialized result
-    error: Optional[str] = None  # Error message if failed
+    result: str | None = None  # JSON serialized result
+    error: str | None = None  # Error message if failed
 
     # Configuration
-    idempotency_key: Optional[str] = None
-    max_duration: Optional[str] = None  # e.g., "1h", "30m"
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    idempotency_key: str | None = None
+    max_duration: str | None = None  # e.g., "1h", "30m"
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     # Recovery tracking for fault tolerance
     recovery_attempts: int = 0  # Number of recovery attempts after worker failures
     max_recovery_attempts: int = 3  # Maximum recovery attempts allowed
     recover_on_worker_loss: bool = True  # Whether to auto-recover on worker failure
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "run_id": self.run_id,
@@ -97,7 +97,7 @@ class WorkflowRun:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "WorkflowRun":
+    def from_dict(cls, data: dict[str, Any]) -> "WorkflowRun":
         """Create from dictionary."""
         return cls(
             run_id=data["run_id"],
@@ -144,20 +144,20 @@ class StepExecution:
     max_retries: int = 3
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
 
     # Input/output
     input_args: str = "{}"  # JSON serialized list
     input_kwargs: str = "{}"  # JSON serialized dict
-    result: Optional[str] = None  # JSON serialized result
-    error: Optional[str] = None  # Error message if failed
+    result: str | None = None  # JSON serialized result
+    error: str | None = None  # Error message if failed
 
     # Retry configuration
-    retry_after: Optional[datetime] = None
-    retry_delay: Optional[str] = None  # e.g., "exponential", "10s"
+    retry_after: datetime | None = None
+    retry_delay: str | None = None  # e.g., "exponential", "10s"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "step_id": self.step_id,
@@ -179,7 +179,7 @@ class StepExecution:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "StepExecution":
+    def from_dict(cls, data: dict[str, Any]) -> "StepExecution":
         """Create from dictionary."""
         return cls(
             step_id=data["step_id"],
@@ -225,18 +225,18 @@ class Hook:
 
     # Timestamps
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    received_at: Optional[datetime] = None
-    expires_at: Optional[datetime] = None
+    received_at: datetime | None = None
+    expires_at: datetime | None = None
 
     # Data
-    payload: Optional[str] = None  # JSON serialized payload from webhook
-    name: Optional[str] = None  # Optional human-readable name
-    payload_schema: Optional[str] = None  # JSON schema for payload validation (from Pydantic)
+    payload: str | None = None  # JSON serialized payload from webhook
+    name: str | None = None  # Optional human-readable name
+    payload_schema: str | None = None  # JSON schema for payload validation (from Pydantic)
 
     # Metadata
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "hook_id": self.hook_id,
@@ -254,7 +254,7 @@ class Hook:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Hook":
+    def from_dict(cls, data: dict[str, Any]) -> "Hook":
         """Create from dictionary."""
         return cls(
             hook_id=data["hook_id"],

@@ -8,8 +8,9 @@ with PyWorkflow's step and sleep primitives.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, Callable, List, Optional, Union
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -20,16 +21,15 @@ if TYPE_CHECKING:
     # Only import AWS SDK types for type checking
     # Actual import happens at runtime if available
     from aws_durable_execution_sdk_python import DurableContext
-    from aws_durable_execution_sdk_python.config import Duration
 
 
 # Context variable to track current AWS context (for backward compatibility)
-_aws_context: ContextVar[Optional["AWSWorkflowContext"]] = ContextVar(
+_aws_context: ContextVar[AWSWorkflowContext | None] = ContextVar(
     "aws_workflow_context", default=None
 )
 
 
-def get_aws_context() -> Optional["AWSWorkflowContext"]:
+def get_aws_context() -> AWSWorkflowContext | None:
     """Get the current AWS workflow context if running in AWS environment."""
     return _aws_context.get()
 
@@ -54,7 +54,7 @@ class AWSWorkflowContext(WorkflowContext):
 
     def __init__(
         self,
-        aws_ctx: "DurableContext",
+        aws_ctx: DurableContext,
         run_id: str = "aws_run",
         workflow_name: str = "aws_workflow",
     ) -> None:
@@ -79,7 +79,7 @@ class AWSWorkflowContext(WorkflowContext):
         self,
         func: StepFunction,
         *args: Any,
-        name: Optional[str] = None,
+        name: str | None = None,
         **kwargs: Any,
     ) -> Any:
         """
@@ -103,7 +103,7 @@ class AWSWorkflowContext(WorkflowContext):
         self,
         step_fn: Callable[..., Any],
         *args: Any,
-        step_name: Optional[str] = None,
+        step_name: str | None = None,
         **kwargs: Any,
     ) -> Any:
         """
@@ -163,7 +163,7 @@ class AWSWorkflowContext(WorkflowContext):
         logger.debug(f"AWS step completed: {name}")
         return result
 
-    async def sleep(self, duration: Union[str, int, float]) -> None:
+    async def sleep(self, duration: str | int | float) -> None:
         """
         Sleep using AWS wait (no compute charges during wait).
 
@@ -176,10 +176,7 @@ class AWSWorkflowContext(WorkflowContext):
                 - int/float: Duration in seconds
         """
         # Parse duration to seconds
-        if isinstance(duration, str):
-            duration_seconds = parse_duration(duration)
-        else:
-            duration_seconds = int(duration)
+        duration_seconds = parse_duration(duration) if isinstance(duration, str) else int(duration)
 
         logger.debug(f"AWS sleep: {duration_seconds} seconds")
 
@@ -198,7 +195,7 @@ class AWSWorkflowContext(WorkflowContext):
 
         logger.debug(f"AWS sleep completed: {duration_seconds} seconds")
 
-    async def parallel(self, *tasks) -> List[Any]:
+    async def parallel(self, *tasks) -> list[Any]:
         """Execute tasks in parallel using asyncio.gather."""
         return list(await asyncio.gather(*tasks))
 

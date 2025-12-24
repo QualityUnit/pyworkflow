@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import functools
-from typing import TYPE_CHECKING, Any, Callable, Dict, TypeVar
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from loguru import logger
 
-from pyworkflow.context import set_context, reset_context
+from pyworkflow.context import reset_context, set_context
+
 from .context import AWSWorkflowContext
 
 if TYPE_CHECKING:
@@ -23,7 +25,7 @@ if TYPE_CHECKING:
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-def aws_workflow_handler(workflow_fn: F) -> Callable[[Dict[str, Any], Any], Any]:
+def aws_workflow_handler(workflow_fn: F) -> Callable[[dict[str, Any], Any], Any]:
     """
     Decorator to create AWS Lambda handler from a PyWorkflow workflow.
 
@@ -75,11 +77,12 @@ def aws_workflow_handler(workflow_fn: F) -> Callable[[Dict[str, Any], Any], Any]
         _has_aws_sdk = True
     except ImportError:
         _has_aws_sdk = False
-        durable_execution = lambda f: f  # no-op decorator
+        def durable_execution(f):
+            return f  # no-op decorator
 
     @durable_execution
     @functools.wraps(workflow_fn)
-    def lambda_handler(event: Dict[str, Any], context: Any) -> Any:
+    def lambda_handler(event: dict[str, Any], context: Any) -> Any:
         """
         AWS Lambda handler that executes the PyWorkflow workflow.
 
@@ -157,7 +160,7 @@ def aws_workflow_handler(workflow_fn: F) -> Callable[[Dict[str, Any], Any], Any]
 
 def create_lambda_handler(
     workflow_fn: Callable[..., Any],
-) -> Callable[[Dict[str, Any], "DurableContext"], Any]:
+) -> Callable[[dict[str, Any], DurableContext], Any]:
     """
     Alternative function-based API to create Lambda handler.
 

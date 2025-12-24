@@ -8,7 +8,8 @@ for local testing without deploying to AWS.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable, Dict, List, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
 from loguru import logger
 
@@ -20,15 +21,15 @@ class MockDuration:
         self._seconds = seconds
 
     @classmethod
-    def from_seconds(cls, seconds: int) -> "MockDuration":
+    def from_seconds(cls, seconds: int) -> MockDuration:
         return cls(seconds)
 
     @classmethod
-    def from_minutes(cls, minutes: int) -> "MockDuration":
+    def from_minutes(cls, minutes: int) -> MockDuration:
         return cls(minutes * 60)
 
     @classmethod
-    def from_hours(cls, hours: int) -> "MockDuration":
+    def from_hours(cls, hours: int) -> MockDuration:
         return cls(hours * 3600)
 
     @property
@@ -72,7 +73,7 @@ class MockDurableContext:
         self,
         skip_waits: bool = True,
         simulate_replay: bool = False,
-        checkpoint_data: Optional[Dict[str, Any]] = None,
+        checkpoint_data: dict[str, Any] | None = None,
     ) -> None:
         """
         Initialize the mock context.
@@ -86,22 +87,22 @@ class MockDurableContext:
         self.simulate_replay = simulate_replay
 
         # Tracking data
-        self._checkpoints: Dict[str, Any] = checkpoint_data or {}
-        self._step_calls: List[Dict[str, Any]] = []
-        self._wait_calls: List[int] = []
+        self._checkpoints: dict[str, Any] = checkpoint_data or {}
+        self._step_calls: list[dict[str, Any]] = []
+        self._wait_calls: list[int] = []
 
     @property
-    def checkpoints(self) -> Dict[str, Any]:
+    def checkpoints(self) -> dict[str, Any]:
         """Get all recorded checkpoints."""
         return self._checkpoints.copy()
 
     @property
-    def step_calls(self) -> List[Dict[str, Any]]:
+    def step_calls(self) -> list[dict[str, Any]]:
         """Get list of all step() calls made."""
         return self._step_calls.copy()
 
     @property
-    def wait_calls(self) -> List[int]:
+    def wait_calls(self) -> list[int]:
         """Get list of all wait() durations (in seconds)."""
         return self._wait_calls.copy()
 
@@ -113,7 +114,7 @@ class MockDurableContext:
     def step(
         self,
         fn: Callable[[Any], Any],
-        name: Optional[str] = None,
+        name: str | None = None,
     ) -> Any:
         """
         Execute a step function with checkpointing.
@@ -149,17 +150,14 @@ class MockDurableContext:
 
         return result
 
-    def wait(self, duration: Union[MockDuration, int]) -> None:
+    def wait(self, duration: MockDuration | int) -> None:
         """
         Wait for specified duration.
 
         Args:
             duration: MockDuration or seconds to wait
         """
-        if isinstance(duration, MockDuration):
-            seconds = duration.seconds
-        else:
-            seconds = int(duration)
+        seconds = duration.seconds if isinstance(duration, MockDuration) else int(duration)
 
         logger.debug(f"Mock wait: {seconds} seconds")
 
@@ -174,9 +172,9 @@ class MockDurableContext:
 
     def create_callback(
         self,
-        name: Optional[str] = None,
-        config: Optional[Any] = None,
-    ) -> "MockCallback":
+        name: str | None = None,
+        config: Any | None = None,
+    ) -> MockCallback:
         """
         Create a callback for external input (webhook/approval).
 
@@ -194,8 +192,8 @@ class MockDurableContext:
     def wait_for_callback(
         self,
         fn: Callable[[str], Any],
-        name: Optional[str] = None,
-        config: Optional[Any] = None,
+        name: str | None = None,
+        config: Any | None = None,
     ) -> Any:
         """
         Wait for a callback (combines create_callback + result).
@@ -218,7 +216,7 @@ class MockDurableContext:
         # Return mock result
         return {"callback_id": callback_id, "received": True}
 
-    def parallel(self, *tasks: Callable[["MockDurableContext"], Any]) -> List[Any]:
+    def parallel(self, *tasks: Callable[[MockDurableContext], Any]) -> list[Any]:
         """
         Execute multiple tasks in parallel.
 
@@ -248,7 +246,7 @@ class MockCallback:
     def __init__(self, name: str) -> None:
         self.name = name
         self.callback_id = f"mock_callback_{name}"
-        self._result: Optional[Any] = None
+        self._result: Any | None = None
         self._completed = False
 
     def complete(self, payload: Any) -> None:
@@ -270,8 +268,8 @@ class MockCallback:
 
 def create_test_handler(
     workflow_fn: Callable[..., Any],
-    mock_ctx: Optional[MockDurableContext] = None,
-) -> Callable[[Dict[str, Any]], Any]:
+    mock_ctx: MockDurableContext | None = None,
+) -> Callable[[dict[str, Any]], Any]:
     """
     Create a test handler for a PyWorkflow workflow.
 
@@ -298,7 +296,7 @@ def create_test_handler(
     """
     from .context import AWSWorkflowContext
 
-    def test_handler(event: Dict[str, Any]) -> Any:
+    def test_handler(event: dict[str, Any]) -> Any:
         ctx = mock_ctx or MockDurableContext()
         aws_ctx = AWSWorkflowContext(ctx)
 

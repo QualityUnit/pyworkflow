@@ -4,7 +4,8 @@ Typed hooks with Pydantic validation.
 Provides a type-safe way to define hooks with validated payloads.
 """
 
-from typing import Any, Awaitable, Callable, Generic, Optional, Type, TypeVar, Union
+from collections.abc import Awaitable, Callable
+from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -34,7 +35,7 @@ class TypedHook(Generic[T]):
             await process_order(order_id)
     """
 
-    def __init__(self, name: str, schema: Type[T]) -> None:
+    def __init__(self, name: str, schema: type[T]) -> None:
         """
         Initialize a typed hook.
 
@@ -48,8 +49,8 @@ class TypedHook(Generic[T]):
     async def __call__(
         self,
         *,
-        timeout: Optional[Union[str, int]] = None,
-        on_created: Optional[Callable[[str], Awaitable[None]]] = None,
+        timeout: str | int | None = None,
+        on_created: Callable[[str], Awaitable[None]] | None = None,
     ) -> T:
         """
         Wait for external event and validate payload.
@@ -83,7 +84,7 @@ class TypedHook(Generic[T]):
         return f"TypedHook(name={self.name!r}, schema={self.schema.__name__})"
 
 
-def define_hook(name: str, schema: Type[T]) -> TypedHook[T]:
+def define_hook(name: str, schema: type[T]) -> TypedHook[T]:
     """
     Create a typed hook with Pydantic validation.
 
@@ -137,7 +138,7 @@ class HookValidationError(Exception):
     def __init__(
         self,
         hook_name: str,
-        schema: Type[BaseModel],
+        schema: type[BaseModel],
         validation_error: ValidationError,
     ) -> None:
         self.hook_name = hook_name

@@ -10,31 +10,29 @@ decorated with @workflow to enable:
 """
 
 import functools
-import uuid
-from datetime import UTC, datetime
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 from loguru import logger
 
-from pyworkflow.context import LocalContext, set_context, reset_context
+from pyworkflow.context import LocalContext, reset_context, set_context
 from pyworkflow.core.exceptions import CancellationError, SuspensionSignal
 from pyworkflow.core.registry import register_workflow
 from pyworkflow.engine.events import (
     create_workflow_cancelled_event,
     create_workflow_completed_event,
     create_workflow_failed_event,
-    create_workflow_started_event,
 )
-from pyworkflow.serialization.encoder import serialize, serialize_args, serialize_kwargs
+from pyworkflow.serialization.encoder import serialize
 
 
 def workflow(
-    name: Optional[str] = None,
-    durable: Optional[bool] = None,
-    max_duration: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
-    recover_on_worker_loss: Optional[bool] = None,
-    max_recovery_attempts: Optional[int] = None,
+    name: str | None = None,
+    durable: bool | None = None,
+    max_duration: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    recover_on_worker_loss: bool | None = None,
+    max_recovery_attempts: int | None = None,
 ) -> Callable:
     """
     Decorator to mark async functions as workflows.
@@ -122,7 +120,7 @@ async def execute_workflow_with_context(
     storage: Any,  # StorageBackend or None for transient
     args: tuple,
     kwargs: dict,
-    event_log: Optional[list] = None,
+    event_log: list | None = None,
     durable: bool = True,
     cancellation_requested: bool = False,
 ) -> Any:

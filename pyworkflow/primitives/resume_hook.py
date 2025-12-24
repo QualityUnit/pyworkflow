@@ -7,7 +7,7 @@ Uses events for idempotency checks (no separate hook storage needed).
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Optional, Tuple
+from typing import Any
 
 from loguru import logger
 
@@ -20,12 +20,11 @@ from pyworkflow.core.exceptions import (
 from pyworkflow.engine.events import EventType
 from pyworkflow.storage.base import StorageBackend
 
-
 # Token format separator
 HOOK_TOKEN_SEPARATOR = ":"
 
 
-def parse_hook_token(token: str) -> Tuple[str, str]:
+def parse_hook_token(token: str) -> tuple[str, str]:
     """
     Parse a composite hook token into run_id and hook_id.
 
@@ -74,7 +73,7 @@ async def resume_hook(
     token: str,
     payload: Any,
     *,
-    storage: Optional[StorageBackend] = None,
+    storage: StorageBackend | None = None,
 ) -> ResumeResult:
     """
     Resume a suspended workflow with a payload.
@@ -139,9 +138,8 @@ async def resume_hook(
         if event.type == EventType.HOOK_CREATED:
             if event.data.get("hook_id") == hook_id:
                 hook_created_event = event
-        elif event.type == EventType.HOOK_RECEIVED:
-            if event.data.get("hook_id") == hook_id:
-                hook_received_event = event
+        elif event.type == EventType.HOOK_RECEIVED and event.data.get("hook_id") == hook_id:
+            hook_received_event = event
 
     # Check if hook was created
     if hook_created_event is None:

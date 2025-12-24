@@ -9,8 +9,9 @@ The Celery runtime is ideal for:
 """
 
 import os
+from collections.abc import Callable
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from loguru import logger
 
@@ -35,8 +36,8 @@ class CeleryRuntime(Runtime):
 
     def __init__(
         self,
-        broker_url: Optional[str] = None,
-        result_backend: Optional[str] = None,
+        broker_url: str | None = None,
+        result_backend: str | None = None,
     ):
         """
         Initialize Celery runtime.
@@ -75,7 +76,7 @@ class CeleryRuntime(Runtime):
         """Get the configured result backend URL."""
         return self._result_backend
 
-    def _get_storage_config(self, storage: Optional["StorageBackend"]) -> Optional[dict]:
+    def _get_storage_config(self, storage: Optional["StorageBackend"]) -> dict | None:
         """
         Convert storage backend to configuration dict for Celery tasks.
 
@@ -108,9 +109,9 @@ class CeleryRuntime(Runtime):
         workflow_name: str,
         storage: Optional["StorageBackend"],
         durable: bool,
-        idempotency_key: Optional[str] = None,
-        max_duration: Optional[str] = None,
-        metadata: Optional[dict] = None,
+        idempotency_key: str | None = None,
+        max_duration: str | None = None,
+        metadata: dict | None = None,
     ) -> str:
         """
         Start a workflow execution by dispatching to Celery workers.

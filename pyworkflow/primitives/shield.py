@@ -32,8 +32,8 @@ Example:
             raise  # Re-raise after cleanup
 """
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from loguru import logger
 

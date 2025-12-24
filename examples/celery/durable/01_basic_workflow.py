@@ -65,6 +65,7 @@ async def order_workflow(order_id: str, amount: float) -> dict:
 async def main() -> None:
     """Run the order workflow example."""
     import argparse
+
     import pyworkflow
 
     parser = argparse.ArgumentParser(description="Order Processing Workflow")

@@ -6,47 +6,44 @@ import json
 import sys
 import threading
 import time
-import click
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set, get_type_hints
+from typing import Any, get_type_hints
 
+import click
 from InquirerPy import inquirer
-from InquirerPy.separator import Separator
 
 import pyworkflow
 from pyworkflow import RunStatus
-from pyworkflow.cli.utils.async_helpers import async_command
-from pyworkflow.cli.utils.discovery import discover_workflows
-from pyworkflow.cli.utils.storage import create_storage
 from pyworkflow.cli.output.formatters import (
-    format_table,
-    format_json,
-    format_plain,
-    format_key_value,
+    clear_line,
     format_event_type,
-    format_status,
-    print_success,
+    format_json,
+    format_key_value,
+    format_plain,
+    format_table,
+    hide_cursor,
+    move_cursor_up,
+    print_breadcrumb,
     print_error,
     print_info,
+    print_success,
     print_warning,
-    print_breadcrumb,
-    clear_line,
-    move_cursor_up,
-    hide_cursor,
     show_cursor,
 )
 from pyworkflow.cli.output.styles import (
+    DIM,
     PYWORKFLOW_STYLE,
+    RESET,
     SPINNER_FRAMES,
     SYMBOLS,
     Colors,
-    RESET,
-    BOLD,
-    DIM,
 )
+from pyworkflow.cli.utils.async_helpers import async_command
+from pyworkflow.cli.utils.discovery import discover_workflows
+from pyworkflow.cli.utils.storage import create_storage
 
 
-def _build_workflow_choices(workflows_dict: Dict[str, Any]) -> List[Dict[str, str]]:
+def _build_workflow_choices(workflows_dict: dict[str, Any]) -> list[dict[str, str]]:
     """Build choices list for workflow selection."""
     choices = []
     for name, meta in workflows_dict.items():
@@ -55,16 +52,13 @@ def _build_workflow_choices(workflows_dict: Dict[str, Any]) -> List[Dict[str, st
             # Get first line of docstring
             description = meta.original_func.__doc__.strip().split("\n")[0][:50]
 
-        if description:
-            display_name = f"{name} - {description}"
-        else:
-            display_name = name
+        display_name = f"{name} - {description}" if description else name
 
         choices.append({"name": display_name, "value": name})
     return choices
 
 
-def _select_workflow(workflows_dict: Dict[str, Any]) -> Optional[str]:
+def _select_workflow(workflows_dict: dict[str, Any]) -> str | None:
     """
     Display an interactive workflow selection menu using InquirerPy (sync version).
 
@@ -95,7 +89,7 @@ def _select_workflow(workflows_dict: Dict[str, Any]) -> Optional[str]:
         return None
 
 
-async def _select_workflow_async(workflows_dict: Dict[str, Any]) -> Optional[str]:
+async def _select_workflow_async(workflows_dict: dict[str, Any]) -> str | None:
     """
     Display an interactive workflow selection menu using InquirerPy (async version).
 
@@ -126,7 +120,7 @@ async def _select_workflow_async(workflows_dict: Dict[str, Any]) -> Optional[str
         return None
 
 
-def _get_workflow_parameters(func: Any) -> List[Dict[str, Any]]:
+def _get_workflow_parameters(func: Any) -> list[dict[str, Any]]:
     """
     Extract parameter information from a workflow function.
 
@@ -203,7 +197,7 @@ def _parse_value(value_str: str, type_hint: Any) -> Any:
         return value_str
 
 
-def _prompt_for_arguments(params: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _prompt_for_arguments(params: list[dict[str, Any]]) -> dict[str, Any]:
     """
     Interactively prompt user for workflow argument values using InquirerPy (sync).
 
@@ -316,7 +310,7 @@ def _prompt_for_arguments(params: List[Dict[str, Any]]) -> Dict[str, Any]:
     return kwargs
 
 
-async def _prompt_for_arguments_async(params: List[Dict[str, Any]]) -> Dict[str, Any]:
+async def _prompt_for_arguments_async(params: list[dict[str, Any]]) -> dict[str, Any]:
     """
     Interactively prompt user for workflow argument values using InquirerPy (async).
 
@@ -436,8 +430,8 @@ class SpinnerDisplay:
         self.message = message
         self.running = False
         self.frame_index = 0
-        self.thread: Optional[threading.Thread] = None
-        self.events: List[Any] = []
+        self.thread: threading.Thread | None = None
+        self.events: list[Any] = []
         self.status: RunStatus = RunStatus.RUNNING
         self.elapsed: float = 0.0
         self.lines_printed = 0
@@ -499,7 +493,7 @@ class SpinnerDisplay:
                 pass
             self._keyboard_active = False
 
-    def _format_step_call(self, event_data: Dict[str, Any]) -> str:
+    def _format_step_call(self, event_data: dict[str, Any]) -> str:
         """Format step call with arguments like: step_name(arg1, arg2, ...)"""
         step_name = event_data.get("step_name", "unknown")
 
@@ -509,7 +503,7 @@ class SpinnerDisplay:
         # Check for args (positional)
         if "args" in event_data and event_data["args"]:
             args = event_data["args"]
-            if isinstance(args, (list, tuple)):
+            if isinstance(args, list | tuple):
                 for arg in args:
                     arg_str = self._format_value_short(arg)
                     args_parts.append(arg_str)
@@ -539,11 +533,11 @@ class SpinnerDisplay:
             if len(value) > 15:
                 return f'"{value[:12]}..."'
             return f'"{value}"'
-        if isinstance(value, (int, float, bool)):
+        if isinstance(value, int | float | bool):
             return str(value)
         if isinstance(value, dict):
             return "{...}"
-        if isinstance(value, (list, tuple)):
+        if isinstance(value, list | tuple):
             return "[...]"
         return str(value)[:15]
 
@@ -553,13 +547,13 @@ class SpinnerDisplay:
             return "None"
         if isinstance(value, str):
             return f'"{value}"'
-        if isinstance(value, (int, float, bool)):
+        if isinstance(value, int | float | bool):
             return str(value)
-        if isinstance(value, (dict, list, tuple)):
+        if isinstance(value, dict | list | tuple):
             return json.dumps(value, default=str)
         return str(value)
 
-    def _format_step_call_full(self, event_data: Dict[str, Any]) -> str:
+    def _format_step_call_full(self, event_data: dict[str, Any]) -> str:
         """Format step call with full arguments (no truncation)."""
         step_name = event_data.get("step_name", "unknown")
 
@@ -569,7 +563,7 @@ class SpinnerDisplay:
         # Check for args (positional)
         if "args" in event_data and event_data["args"]:
             args = event_data["args"]
-            if isinstance(args, (list, tuple)):
+            if isinstance(args, list | tuple):
                 for arg in args:
                     arg_str = self._format_value_full(arg)
                     args_parts.append(arg_str)
@@ -591,7 +585,7 @@ class SpinnerDisplay:
         else:
             return f"{step_name}()"
 
-    def _format_event_detail(self, event: Any) -> List[str]:
+    def _format_event_detail(self, event: Any) -> list[str]:
         """Format event with full details for detail mode (no truncation)."""
         lines = []
         time_str = event.timestamp.strftime("%H:%M:%S.%f")[:-3] if event.timestamp else "--:--:--"
@@ -639,7 +633,7 @@ class SpinnerDisplay:
 
         return lines
 
-    def _format_event_compact(self, event: Any) -> List[str]:
+    def _format_event_compact(self, event: Any) -> list[str]:
         """Format event in compact mode."""
         lines = []
         time_str = event.timestamp.strftime("%H:%M:%S") if event.timestamp else "--:--:--"
@@ -754,9 +748,9 @@ class SpinnerDisplay:
 
     def update(
         self,
-        events: Optional[List[Any]] = None,
-        status: Optional[RunStatus] = None,
-        elapsed: Optional[float] = None,
+        events: list[Any] | None = None,
+        status: RunStatus | None = None,
+        elapsed: float | None = None,
     ) -> None:
         """Update spinner state."""
         with self._lock:
@@ -791,8 +785,8 @@ async def _watch_workflow(
         Final workflow status
     """
     start_time = datetime.now()
-    seen_event_ids: Set[str] = set()
-    all_events: List[Any] = []
+    seen_event_ids: set[str] = set()
+    all_events: list[Any] = []
 
     terminal_statuses = {
         RunStatus.COMPLETED,
@@ -1029,11 +1023,11 @@ def workflow_info(ctx: click.Context, workflow_name: str) -> None:
 @async_command
 async def run_workflow(
     ctx: click.Context,
-    workflow_name: Optional[str],
+    workflow_name: str | None,
     arg: tuple,
-    args_json: Optional[str],
+    args_json: str | None,
     durable: bool,
-    idempotency_key: Optional[str],
+    idempotency_key: str | None,
     no_wait: bool,
     debug: bool,
 ) -> None:

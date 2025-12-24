@@ -1,18 +1,15 @@
 """Worker management commands for Celery runtime."""
 
 import os
-import sys
+
 import click
-from typing import Optional
 
 from pyworkflow.cli.output.formatters import (
-    format_table,
     format_json,
-    format_plain,
-    format_key_value,
-    print_success,
+    format_table,
     print_error,
     print_info,
+    print_success,
     print_warning,
 )
 
@@ -79,11 +76,11 @@ def run_worker(
     queue_workflow: bool,
     queue_step: bool,
     queue_schedule: bool,
-    concurrency: Optional[int],
+    concurrency: int | None,
     loglevel: str,
-    hostname: Optional[str],
+    hostname: str | None,
     beat: bool,
-    pool: Optional[str],
+    pool: str | None,
 ) -> None:
     """
     Start a Celery worker for processing workflows.
@@ -182,7 +179,7 @@ def run_worker(
         )
 
         # Log discovered workflows and steps
-        from pyworkflow import list_workflows, list_steps
+        from pyworkflow import list_steps, list_workflows
 
         workflows = list_workflows()
         steps = list_steps()
@@ -280,7 +277,7 @@ def worker_status(ctx: click.Context) -> None:
 
         if not ping:
             print_warning("No active workers found")
-            print_info(f"\nStart a worker with: pyworkflow worker run")
+            print_info("\nStart a worker with: pyworkflow worker run")
             return
 
         workers = []

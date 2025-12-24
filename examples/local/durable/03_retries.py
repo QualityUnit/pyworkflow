@@ -28,7 +28,6 @@ from pyworkflow import (
 )
 from pyworkflow.storage import InMemoryStorageBackend
 
-
 # Simulate API call counter
 attempt_count = 0
 
@@ -128,7 +127,7 @@ async def main():
             print("\nResuming workflow for attempt 3...")
             result = await resume(run_id)
 
-            print(f"\n✓ Workflow completed successfully!")
+            print("\n✓ Workflow completed successfully!")
             print(f"Result: {result}")
 
     # Final status

@@ -11,8 +11,8 @@ Supports multiple runtimes (local, celery) and durability modes (durable, transi
 """
 
 import uuid
-from datetime import UTC, datetime
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from loguru import logger
 
@@ -21,14 +21,13 @@ from pyworkflow.core.exceptions import (
     WorkflowAlreadyRunningError,
     WorkflowNotFoundError,
 )
-from pyworkflow.core.registry import get_workflow, get_workflow_by_func
+from pyworkflow.core.registry import get_workflow_by_func
 from pyworkflow.core.workflow import execute_workflow_with_context
 from pyworkflow.engine.events import (
     create_cancellation_requested_event,
     create_workflow_cancelled_event,
-    create_workflow_started_event,
 )
-from pyworkflow.serialization.encoder import serialize_args, serialize_kwargs
+from pyworkflow.serialization.encoder import serialize_args
 from pyworkflow.storage.base import StorageBackend
 from pyworkflow.storage.schemas import RunStatus, WorkflowRun
 
@@ -42,10 +41,10 @@ class ConfigurationError(Exception):
 async def start(
     workflow_func: Callable,
     *args: Any,
-    runtime: Optional[str] = None,
-    durable: Optional[bool] = None,
-    storage: Optional[StorageBackend] = None,
-    idempotency_key: Optional[str] = None,
+    runtime: str | None = None,
+    durable: bool | None = None,
+    storage: StorageBackend | None = None,
+    idempotency_key: str | None = None,
     **kwargs: Any,
 ) -> str:
     """
@@ -170,8 +169,8 @@ async def start(
 
 async def resume(
     run_id: str,
-    runtime: Optional[str] = None,
-    storage: Optional[StorageBackend] = None,
+    runtime: str | None = None,
+    storage: StorageBackend | None = None,
 ) -> Any:
     """
     Resume a suspended workflow.
@@ -231,7 +230,7 @@ async def _execute_workflow_local(
     storage: StorageBackend,
     args: tuple,
     kwargs: dict,
-    event_log: Optional[list] = None,
+    event_log: list | None = None,
 ) -> Any:
     """
     Execute workflow locally (used by Celery tasks).
@@ -311,8 +310,8 @@ async def _execute_workflow_local(
 
 async def get_workflow_run(
     run_id: str,
-    storage: Optional[StorageBackend] = None,
-) -> Optional[WorkflowRun]:
+    storage: StorageBackend | None = None,
+) -> WorkflowRun | None:
     """
     Get workflow run information.
 
@@ -339,7 +338,7 @@ async def get_workflow_run(
 
 async def get_workflow_events(
     run_id: str,
-    storage: Optional[StorageBackend] = None,
+    storage: StorageBackend | None = None,
 ) -> list:
     """
     Get all events for a workflow run.
@@ -367,10 +366,10 @@ async def get_workflow_events(
 
 async def cancel_workflow(
     run_id: str,
-    reason: Optional[str] = None,
+    reason: str | None = None,
     wait: bool = False,
-    timeout: Optional[float] = None,
-    storage: Optional[StorageBackend] = None,
+    timeout: float | None = None,
+    storage: StorageBackend | None = None,
 ) -> bool:
     """
     Request cancellation of a workflow.
@@ -466,7 +465,7 @@ async def cancel_workflow(
     await storage.record_event(cancellation_event)
 
     logger.info(
-        f"Cancellation requested for workflow",
+        "Cancellation requested for workflow",
         run_id=run_id,
         reason=reason,
         current_status=run.status.value,
@@ -485,7 +484,7 @@ async def cancel_workflow(
         await storage.update_run_status(run_id=run_id, status=RunStatus.CANCELLED)
 
         logger.info(
-            f"Suspended workflow cancelled",
+            "Suspended workflow cancelled",
             run_id=run_id,
         )
 
@@ -495,7 +494,7 @@ async def cancel_workflow(
         await storage.set_cancellation_flag(run_id)
 
         logger.info(
-            f"Cancellation flag set for running workflow",
+            "Cancellation flag set for running workflow",
             run_id=run_id,
         )
 

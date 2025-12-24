@@ -7,8 +7,9 @@ The registry tracks all decorated workflows and steps, enabling:
 - Validation
 """
 
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -18,8 +19,8 @@ class WorkflowMetadata:
     name: str
     func: Callable[..., Any]
     original_func: Callable[..., Any]  # Unwrapped function
-    max_duration: Optional[str] = None
-    metadata: Dict[str, Any] = None
+    max_duration: str | None = None
+    metadata: dict[str, Any] = None
 
     def __post_init__(self) -> None:
         if self.metadata is None:
@@ -35,8 +36,8 @@ class StepMetadata:
     original_func: Callable[..., Any]  # Unwrapped function
     max_retries: int = 3
     retry_delay: str = "exponential"
-    timeout: Optional[int] = None
-    metadata: Dict[str, Any] = None
+    timeout: int | None = None
+    metadata: dict[str, Any] = None
 
     def __post_init__(self) -> None:
         if self.metadata is None:
@@ -51,10 +52,10 @@ class WorkflowRegistry:
     """
 
     def __init__(self) -> None:
-        self._workflows: Dict[str, WorkflowMetadata] = {}
-        self._steps: Dict[str, StepMetadata] = {}
-        self._workflow_by_func: Dict[Callable[..., Any], str] = {}
-        self._step_by_func: Dict[Callable[..., Any], str] = {}
+        self._workflows: dict[str, WorkflowMetadata] = {}
+        self._steps: dict[str, StepMetadata] = {}
+        self._workflow_by_func: dict[Callable[..., Any], str] = {}
+        self._step_by_func: dict[Callable[..., Any], str] = {}
 
     # Workflow registration
 
@@ -63,8 +64,8 @@ class WorkflowRegistry:
         name: str,
         func: Callable[..., Any],
         original_func: Callable[..., Any],
-        max_duration: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        max_duration: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Register a workflow.
@@ -97,7 +98,7 @@ class WorkflowRegistry:
         self._workflow_by_func[func] = name
         self._workflow_by_func[original_func] = name
 
-    def get_workflow(self, name: str) -> Optional[WorkflowMetadata]:
+    def get_workflow(self, name: str) -> WorkflowMetadata | None:
         """
         Get workflow metadata by name.
 
@@ -109,7 +110,7 @@ class WorkflowRegistry:
         """
         return self._workflows.get(name)
 
-    def get_workflow_by_func(self, func: Callable[..., Any]) -> Optional[WorkflowMetadata]:
+    def get_workflow_by_func(self, func: Callable[..., Any]) -> WorkflowMetadata | None:
         """
         Get workflow metadata by function reference.
 
@@ -122,7 +123,7 @@ class WorkflowRegistry:
         name = self._workflow_by_func.get(func)
         return self._workflows.get(name) if name else None
 
-    def get_workflow_name(self, func: Callable[..., Any]) -> Optional[str]:
+    def get_workflow_name(self, func: Callable[..., Any]) -> str | None:
         """
         Get workflow name from function reference.
 
@@ -134,7 +135,7 @@ class WorkflowRegistry:
         """
         return self._workflow_by_func.get(func)
 
-    def list_workflows(self) -> Dict[str, WorkflowMetadata]:
+    def list_workflows(self) -> dict[str, WorkflowMetadata]:
         """Get all registered workflows."""
         return self._workflows.copy()
 
@@ -147,8 +148,8 @@ class WorkflowRegistry:
         original_func: Callable[..., Any],
         max_retries: int = 3,
         retry_delay: str = "exponential",
-        timeout: Optional[int] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        timeout: int | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Register a step.
@@ -183,7 +184,7 @@ class WorkflowRegistry:
         self._step_by_func[func] = name
         self._step_by_func[original_func] = name
 
-    def get_step(self, name: str) -> Optional[StepMetadata]:
+    def get_step(self, name: str) -> StepMetadata | None:
         """
         Get step metadata by name.
 
@@ -195,7 +196,7 @@ class WorkflowRegistry:
         """
         return self._steps.get(name)
 
-    def get_step_by_func(self, func: Callable[..., Any]) -> Optional[StepMetadata]:
+    def get_step_by_func(self, func: Callable[..., Any]) -> StepMetadata | None:
         """
         Get step metadata by function reference.
 
@@ -208,7 +209,7 @@ class WorkflowRegistry:
         name = self._step_by_func.get(func)
         return self._steps.get(name) if name else None
 
-    def get_step_name(self, func: Callable[..., Any]) -> Optional[str]:
+    def get_step_name(self, func: Callable[..., Any]) -> str | None:
         """
         Get step name from function reference.
 
@@ -220,7 +221,7 @@ class WorkflowRegistry:
         """
         return self._step_by_func.get(func)
 
-    def list_steps(self) -> Dict[str, StepMetadata]:
+    def list_steps(self) -> dict[str, StepMetadata]:
         """Get all registered steps."""
         return self._steps.copy()
 
@@ -242,29 +243,29 @@ def register_workflow(
     name: str,
     func: Callable[..., Any],
     original_func: Callable[..., Any],
-    max_duration: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    max_duration: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     """Register a workflow in the global registry."""
     _registry.register_workflow(name, func, original_func, max_duration, metadata)
 
 
-def get_workflow(name: str) -> Optional[WorkflowMetadata]:
+def get_workflow(name: str) -> WorkflowMetadata | None:
     """Get workflow metadata from global registry."""
     return _registry.get_workflow(name)
 
 
-def get_workflow_by_func(func: Callable[..., Any]) -> Optional[WorkflowMetadata]:
+def get_workflow_by_func(func: Callable[..., Any]) -> WorkflowMetadata | None:
     """Get workflow metadata by function from global registry."""
     return _registry.get_workflow_by_func(func)
 
 
-def get_workflow_name(func: Callable[..., Any]) -> Optional[str]:
+def get_workflow_name(func: Callable[..., Any]) -> str | None:
     """Get workflow name from function in global registry."""
     return _registry.get_workflow_name(func)
 
 
-def list_workflows() -> Dict[str, WorkflowMetadata]:
+def list_workflows() -> dict[str, WorkflowMetadata]:
     """List all workflows in global registry."""
     return _registry.list_workflows()
 
@@ -275,29 +276,29 @@ def register_step(
     original_func: Callable[..., Any],
     max_retries: int = 3,
     retry_delay: str = "exponential",
-    timeout: Optional[int] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    timeout: int | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     """Register a step in the global registry."""
     _registry.register_step(name, func, original_func, max_retries, retry_delay, timeout, metadata)
 
 
-def get_step(name: str) -> Optional[StepMetadata]:
+def get_step(name: str) -> StepMetadata | None:
     """Get step metadata from global registry."""
     return _registry.get_step(name)
 
 
-def get_step_by_func(func: Callable[..., Any]) -> Optional[StepMetadata]:
+def get_step_by_func(func: Callable[..., Any]) -> StepMetadata | None:
     """Get step metadata by function from global registry."""
     return _registry.get_step_by_func(func)
 
 
-def get_step_name(func: Callable[..., Any]) -> Optional[str]:
+def get_step_name(func: Callable[..., Any]) -> str | None:
     """Get step name from function in global registry."""
     return _registry.get_step_name(func)
 
 
-def list_steps() -> Dict[str, StepMetadata]:
+def list_steps() -> dict[str, StepMetadata]:
     """List all steps in global registry."""
     return _registry.list_steps()
 

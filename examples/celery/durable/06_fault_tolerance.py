@@ -37,6 +37,7 @@ Check status:
 """
 
 import asyncio
+
 from pyworkflow import sleep, step, workflow
 
 
@@ -128,13 +129,13 @@ async def data_pipeline(data_id: str) -> dict:
     await sleep("10s")
 
     data = await load_data(data)
-    print(f"  -> Load complete\n")
+    print("  -> Load complete\n")
 
     data = await send_notification(data)
-    print(f"  -> Notification sent\n")
+    print("  -> Notification sent\n")
 
     print(f"{'='*60}")
-    print(f"Pipeline completed successfully!")
+    print("Pipeline completed successfully!")
     print(f"{'='*60}\n")
 
     return data
@@ -175,6 +176,7 @@ async def critical_pipeline(data_id: str) -> dict:
 async def main() -> None:
     """Run the fault tolerance example."""
     import argparse
+
     import pyworkflow
 
     parser = argparse.ArgumentParser(description="Data Pipeline with Fault Tolerance")
@@ -197,7 +199,7 @@ async def main() -> None:
         run_id = await pyworkflow.start(data_pipeline, args.data_id)
 
     print(f"\nWorkflow started with run_id: {run_id}")
-    print(f"\nMonitor with:")
+    print("\nMonitor with:")
     print(f"  pyworkflow runs status {run_id}")
     print(f"  pyworkflow runs logs {run_id}")
 

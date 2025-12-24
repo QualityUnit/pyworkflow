@@ -11,7 +11,6 @@ Run: python examples/local/durable/05_event_log.py 2>/dev/null
 """
 
 import asyncio
-from datetime import datetime
 
 from pyworkflow import (
     configure,
@@ -70,7 +69,7 @@ def print_event_details(event, index: int):
     print(f"  Timestamp: {event.timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}")
 
     if event.data:
-        print(f"  Data:")
+        print("  Data:")
         for key, value in event.data.items():
             # Format value nicely
             if isinstance(value, str) and len(value) > 50:

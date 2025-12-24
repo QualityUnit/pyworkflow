@@ -4,13 +4,13 @@ import importlib
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import click
 from loguru import logger
 
 
-def _find_project_root() -> Optional[Path]:
+def _find_project_root() -> Path | None:
     """
     Find the project root by looking for common project markers.
 
@@ -74,7 +74,7 @@ def _import_module(module_path: str) -> bool:
         return False
 
 
-def _load_yaml_config() -> Optional[Dict[str, Any]]:
+def _load_yaml_config() -> dict[str, Any] | None:
     """
     Load pyworkflow.config.yaml from current directory.
 
@@ -101,8 +101,8 @@ def _load_yaml_config() -> Optional[Dict[str, Any]]:
 
 
 def discover_workflows(
-    module_path: Optional[str] = None,
-    config: Optional[Dict[str, Any]] = None,
+    module_path: str | None = None,
+    config: dict[str, Any] | None = None,
 ) -> None:
     """
     Import Python modules to trigger workflow registration.
@@ -166,7 +166,7 @@ def discover_workflows(
     yaml_config = _load_yaml_config()
     if yaml_config:
         # Support both 'module' (single) and 'modules' (list)
-        modules: List[str] = []
+        modules: list[str] = []
 
         if "module" in yaml_config:
             modules.append(yaml_config["module"])

@@ -8,8 +8,9 @@ Runtimes are responsible for:
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from pyworkflow.storage.base import StorageBackend
@@ -33,9 +34,9 @@ class Runtime(ABC):
         workflow_name: str,
         storage: Optional["StorageBackend"],
         durable: bool,
-        idempotency_key: Optional[str] = None,
-        max_duration: Optional[str] = None,
-        metadata: Optional[dict] = None,
+        idempotency_key: str | None = None,
+        max_duration: str | None = None,
+        metadata: dict | None = None,
     ) -> str:
         """
         Start a new workflow execution.

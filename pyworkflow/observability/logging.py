@@ -7,6 +7,7 @@ and events. Integrates with loguru for powerful logging capabilities.
 
 import sys
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
@@ -72,7 +73,7 @@ def configure_logging(
             )
 
     # Add console handler with filter to inject context
-    def format_with_context(record):
+    def format_with_context(record: dict[str, Any]) -> bool:
         """Add context fields to the format string dynamically."""
         extra_str = ""
         if show_context and record["extra"]:
@@ -95,7 +96,7 @@ def configure_logging(
         level=level,
         colorize=not json_logs,
         serialize=json_logs,
-        filter=format_with_context,
+        filter=format_with_context,  # type: ignore[arg-type]
     )
 
     # Add file handler if requested
@@ -152,7 +153,7 @@ def _get_json_format() -> str:
     )
 
 
-def get_logger(name: str | None = None):
+def get_logger(name: str | None = None) -> Any:
     """
     Get a logger instance.
 
@@ -179,7 +180,7 @@ def get_logger(name: str | None = None):
     return logger
 
 
-def bind_workflow_context(run_id: str, workflow_name: str):
+def bind_workflow_context(run_id: str, workflow_name: str) -> Any:
     """
     Bind workflow context to logger.
 
@@ -200,7 +201,7 @@ def bind_workflow_context(run_id: str, workflow_name: str):
     return logger.bind(run_id=run_id, workflow_name=workflow_name)
 
 
-def bind_step_context(run_id: str, step_id: str, step_name: str):
+def bind_step_context(run_id: str, step_id: str, step_name: str) -> Any:
     """
     Bind step context to logger.
 
@@ -226,7 +227,7 @@ def bind_step_context(run_id: str, step_id: str, step_name: str):
 # Users can override by calling configure_logging()
 try:
     # Only configure if logger doesn't have handlers
-    if len(logger._core.handlers) == 0:
+    if len(logger._core.handlers) == 0:  # type: ignore[attr-defined]
         configure_logging(level="INFO", show_context=False)
 except Exception:
     # If configuration fails, just use default loguru

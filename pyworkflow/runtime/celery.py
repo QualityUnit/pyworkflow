@@ -46,11 +46,15 @@ class CeleryRuntime(Runtime):
             broker_url: Celery broker URL (default: from env or redis://localhost:6379/0)
             result_backend: Result backend URL (default: from env or redis://localhost:6379/1)
         """
-        self._broker_url = broker_url or os.getenv(
-            "PYWORKFLOW_CELERY_BROKER", "redis://localhost:6379/0"
+        self._broker_url: str = (
+            broker_url
+            or os.getenv("PYWORKFLOW_CELERY_BROKER", "redis://localhost:6379/0")
+            or "redis://localhost:6379/0"
         )
-        self._result_backend = result_backend or os.getenv(
-            "PYWORKFLOW_CELERY_RESULT_BACKEND", "redis://localhost:6379/1"
+        self._result_backend: str = (
+            result_backend
+            or os.getenv("PYWORKFLOW_CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
+            or "redis://localhost:6379/1"
         )
 
     @property

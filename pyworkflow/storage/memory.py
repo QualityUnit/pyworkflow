@@ -30,7 +30,7 @@ class InMemoryStorageBackend(StorageBackend):
         >>> pyworkflow.configure(storage=storage)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize empty storage."""
         self._runs: dict[str, WorkflowRun] = {}
         self._events: dict[str, list[Event]] = {}
@@ -152,10 +152,10 @@ class InMemoryStorageBackend(StorageBackend):
 
             # Filter by event types
             if event_types:
-                events = [e for e in events if e.event_type in event_types]
+                events = [e for e in events if e.type in event_types]
 
             # Sort by sequence
-            events.sort(key=lambda e: e.sequence)
+            events.sort(key=lambda e: e.sequence or 0)
 
             return events
 
@@ -172,13 +172,13 @@ class InMemoryStorageBackend(StorageBackend):
 
             # Filter by event type
             if event_type:
-                events = [e for e in events if e.event_type == event_type]
+                events = [e for e in events if e.type.value == event_type]
 
             if not events:
                 return None
 
             # Return event with highest sequence
-            return max(events, key=lambda e: e.sequence)
+            return max(events, key=lambda e: e.sequence or 0)
 
     # Step Operations
 

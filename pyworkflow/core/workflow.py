@@ -100,15 +100,15 @@ def workflow(
         )
 
         # Store metadata on wrapper
-        wrapper.__workflow__ = True
-        wrapper.__workflow_name__ = workflow_name
-        wrapper.__workflow_durable__ = durable  # None = use config default
-        wrapper.__workflow_max_duration__ = max_duration
-        wrapper.__workflow_metadata__ = metadata or {}
-        wrapper.__workflow_recover_on_worker_loss__ = (
+        wrapper.__workflow__ = True  # type: ignore[attr-defined]
+        wrapper.__workflow_name__ = workflow_name  # type: ignore[attr-defined]
+        wrapper.__workflow_durable__ = durable  # type: ignore[attr-defined]  # None = use config default
+        wrapper.__workflow_max_duration__ = max_duration  # type: ignore[attr-defined]
+        wrapper.__workflow_metadata__ = metadata or {}  # type: ignore[attr-defined]
+        wrapper.__workflow_recover_on_worker_loss__ = (  # type: ignore[attr-defined]
             recover_on_worker_loss  # None = use config default
         )
-        wrapper.__workflow_max_recovery_attempts__ = (
+        wrapper.__workflow_max_recovery_attempts__ = (  # type: ignore[attr-defined]
             max_recovery_attempts  # None = use config default
         )
 

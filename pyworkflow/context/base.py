@@ -26,9 +26,12 @@ import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Coroutine
 from contextvars import ContextVar, Token
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
 
 # Type for step functions
 T = TypeVar("T")
@@ -185,6 +188,7 @@ class WorkflowContext(ABC):
         name: str,
         timeout: int | None = None,
         on_created: Callable[[str], Awaitable[None]] | None = None,
+        payload_schema: type[BaseModel] | None = None,
     ) -> Any:
         """
         Wait for an external event (webhook, approval, callback).
@@ -196,6 +200,7 @@ class WorkflowContext(ABC):
             name: Human-readable name for the hook (for logging/debugging)
             timeout: Optional timeout in seconds. None means wait forever.
             on_created: Optional async callback called with token when hook is created.
+            payload_schema: Optional Pydantic model for payload validation.
 
         Returns:
             The payload passed to resume_hook()
@@ -256,6 +261,61 @@ class WorkflowContext(ABC):
             True if cancellation is blocked, False otherwise
         """
         ...
+
+    # =========================================================================
+    # Durable execution support - used by step decorator
+    # =========================================================================
+
+    @property
+    def is_durable(self) -> bool:
+        """Check if running in durable (event-sourced) mode."""
+        return False  # Default: transient mode
+
+    @property
+    def is_replaying(self) -> bool:
+        """Check if currently replaying events."""
+        return False
+
+    @property
+    def storage(self) -> Any | None:
+        """Get the storage backend."""
+        return None
+
+    def should_execute_step(self, step_id: str) -> bool:
+        """Check if step should be executed (not already completed)."""
+        return True  # Default: always execute
+
+    def get_step_result(self, step_id: str) -> Any:
+        """Get cached step result."""
+        raise KeyError(f"Step {step_id} not found")
+
+    def cache_step_result(self, step_id: str, result: Any) -> None:
+        """Cache step result for replay."""
+        pass  # Default: no caching
+
+    def get_retry_state(self, step_id: str) -> dict[str, Any] | None:
+        """Get retry state for a step."""
+        return None
+
+    def set_retry_state(
+        self,
+        step_id: str,
+        attempt: int,
+        resume_at: Any,
+        max_retries: int,
+        retry_delay: Any,
+        last_error: str,
+    ) -> None:
+        """Set retry state for a step."""
+        pass
+
+    def clear_retry_state(self, step_id: str) -> None:
+        """Clear retry state for a step."""
+        pass
+
+    async def validate_event_limits(self) -> None:
+        """Validate event count against configured limits."""
+        pass  # Default: no validation
 
     # =========================================================================
     # Optional methods - can be overridden by subclasses

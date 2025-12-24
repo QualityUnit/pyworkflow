@@ -93,11 +93,6 @@ class LocalContext(WorkflowContext):
         self._cancellation_blocked: bool = False
         self._cancellation_reason: str | None = None
 
-        # Cancellation state
-        self._cancellation_requested: bool = False
-        self._cancellation_blocked: bool = False
-        self._cancellation_reason: str | None = None
-
         # Replay state if resuming
         if event_log:
             self._is_replaying = True
@@ -146,6 +141,11 @@ class LocalContext(WorkflowContext):
     @property
     def storage(self) -> Any | None:
         """Get the storage backend."""
+        return self._storage
+
+    def _get_storage(self) -> Any:
+        """Get storage backend, asserting it's not None (for durable mode)."""
+        assert self._storage is not None, "Storage not available in transient mode"
         return self._storage
 
     @property
@@ -314,7 +314,7 @@ class LocalContext(WorkflowContext):
         config = get_config()
 
         # Get current event count from storage
-        events = await self._storage.get_events(self._run_id)
+        events = await self._get_storage().get_events(self._run_id)
         event_count = len(events)
 
         # Hard limit check - fail immediately
@@ -370,7 +370,7 @@ class LocalContext(WorkflowContext):
         Returns:
             Result of the step function
         """
-        step_name = name or getattr(func, "__name__", "step")
+        step_name: str = name or getattr(func, "__name__", None) or "step"
 
         if not self._durable:
             # Transient mode - execute directly
@@ -438,7 +438,7 @@ class LocalContext(WorkflowContext):
             kwargs=serialize_kwargs(**kwargs),
             attempt=1,
         )
-        await self._storage.record_event(event)
+        await self._get_storage().record_event(event)
 
     async def _record_step_complete(self, step_id: str, result: Any) -> None:
         """Record step completed event."""
@@ -450,7 +450,7 @@ class LocalContext(WorkflowContext):
             step_id=step_id,
             result=serialize(result),
         )
-        await self._storage.record_event(event)
+        await self._get_storage().record_event(event)
 
     async def _record_step_failed(self, step_id: str, error: Exception) -> None:
         """Record step failed event."""
@@ -464,7 +464,7 @@ class LocalContext(WorkflowContext):
             is_retryable=True,
             attempt=1,
         )
-        await self._storage.record_event(event)
+        await self._get_storage().record_event(event)
 
     # =========================================================================
     # Sleep
@@ -548,13 +548,13 @@ class LocalContext(WorkflowContext):
             duration_seconds=duration_seconds,
             resume_at=datetime.fromtimestamp(resume_at, tz=UTC),
         )
-        await self._storage.record_event(event)
+        await self._get_storage().record_event(event)
 
     # =========================================================================
     # Parallel execution
     # =========================================================================
 
-    async def parallel(self, *tasks) -> list[Any]:
+    async def parallel(self, *tasks: Any) -> list[Any]:
         """Execute multiple tasks in parallel."""
         return list(await asyncio.gather(*tasks))
 
@@ -623,7 +623,7 @@ class LocalContext(WorkflowContext):
             hook_name=event_name,
             timeout_seconds=timeout_seconds,
         )
-        await self._storage.record_event(event)
+        await self._get_storage().record_event(event)
 
     async def hook(
         self,
@@ -699,7 +699,7 @@ class LocalContext(WorkflowContext):
             timeout_seconds=timeout,
             expires_at=expires_at,
         )
-        await self._storage.record_event(event)
+        await self._get_storage().record_event(event)
 
         # Convert Pydantic model to JSON schema if provided
         schema_json = None
@@ -717,7 +717,7 @@ class LocalContext(WorkflowContext):
             expires_at=expires_at,
             payload_schema=schema_json,
         )
-        await self._storage.create_hook(hook_record)
+        await self._get_storage().create_hook(hook_record)
 
         # Track pending hook locally
         self._pending_hooks[hook_id] = {

@@ -1,15 +1,12 @@
 """Controller for workflow run endpoints."""
 
-from typing import Optional
-
-from pyworkflow.storage.base import StorageBackend
-
 from app.repositories.run_repository import RunRepository
-from app.services.run_service import RunService
-from app.schemas.run import RunDetailResponse, RunListResponse
 from app.schemas.event import EventListResponse
-from app.schemas.step import StepListResponse
 from app.schemas.hook import HookListResponse
+from app.schemas.run import RunDetailResponse, RunListResponse
+from app.schemas.step import StepListResponse
+from app.services.run_service import RunService
+from pyworkflow.storage.base import StorageBackend
 
 
 class RunController:
@@ -26,8 +23,8 @@ class RunController:
 
     async def list_runs(
         self,
-        workflow_name: Optional[str] = None,
-        status: Optional[str] = None,
+        workflow_name: str | None = None,
+        status: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> RunListResponse:
@@ -49,7 +46,7 @@ class RunController:
             offset=offset,
         )
 
-    async def get_run(self, run_id: str) -> Optional[RunDetailResponse]:
+    async def get_run(self, run_id: str) -> RunDetailResponse | None:
         """Get detailed information about a run.
 
         Args:

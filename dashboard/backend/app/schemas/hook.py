@@ -1,7 +1,7 @@
 """Hook response schemas."""
 
 from datetime import datetime
-from typing import List, Optional
+
 from pydantic import BaseModel
 
 
@@ -10,16 +10,16 @@ class HookResponse(BaseModel):
 
     hook_id: str
     run_id: str
-    name: Optional[str] = None
+    name: str | None = None
     status: str
     created_at: datetime
-    received_at: Optional[datetime] = None
-    expires_at: Optional[datetime] = None
+    received_at: datetime | None = None
+    expires_at: datetime | None = None
     has_payload: bool = False
 
 
 class HookListResponse(BaseModel):
     """Response model for listing hooks."""
 
-    items: List[HookResponse]
+    items: list[HookResponse]
     count: int

@@ -1,10 +1,8 @@
 """Controller for workflow endpoints."""
 
-from typing import Optional
-
 from app.repositories.workflow_repository import WorkflowRepository
+from app.schemas.workflow import WorkflowListResponse, WorkflowResponse
 from app.services.workflow_service import WorkflowService
-from app.schemas.workflow import WorkflowResponse, WorkflowListResponse
 
 
 class WorkflowController:
@@ -23,7 +21,7 @@ class WorkflowController:
         """
         return self.service.list_workflows()
 
-    def get_workflow(self, name: str) -> Optional[WorkflowResponse]:
+    def get_workflow(self, name: str) -> WorkflowResponse | None:
         """Get a specific workflow by name.
 
         Args:

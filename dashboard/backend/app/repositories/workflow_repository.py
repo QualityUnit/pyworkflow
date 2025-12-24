@@ -1,15 +1,13 @@
 """Repository for workflow metadata access."""
 
-from typing import Dict, Optional
-
-from pyworkflow import list_workflows, get_workflow
+from pyworkflow import get_workflow, list_workflows
 from pyworkflow.core.registry import WorkflowMetadata
 
 
 class WorkflowRepository:
     """Repository for accessing registered workflow metadata."""
 
-    def list_all(self) -> Dict[str, WorkflowMetadata]:
+    def list_all(self) -> dict[str, WorkflowMetadata]:
         """Get all registered workflows.
 
         Returns:
@@ -17,7 +15,7 @@ class WorkflowRepository:
         """
         return list_workflows()
 
-    def get_by_name(self, name: str) -> Optional[WorkflowMetadata]:
+    def get_by_name(self, name: str) -> WorkflowMetadata | None:
         """Get a specific workflow by name.
 
         Args:

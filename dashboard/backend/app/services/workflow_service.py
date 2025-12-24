@@ -1,9 +1,7 @@
 """Service layer for workflow operations."""
 
-from typing import List, Optional
-
 from app.repositories.workflow_repository import WorkflowRepository
-from app.schemas.workflow import WorkflowResponse, WorkflowListResponse
+from app.schemas.workflow import WorkflowListResponse, WorkflowResponse
 
 
 class WorkflowService:
@@ -39,7 +37,7 @@ class WorkflowService:
             count=len(items),
         )
 
-    def get_workflow(self, name: str) -> Optional[WorkflowResponse]:
+    def get_workflow(self, name: str) -> WorkflowResponse | None:
         """Get a specific workflow by name.
 
         Args:

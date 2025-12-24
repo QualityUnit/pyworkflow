@@ -1,14 +1,11 @@
 """Storage dependency for FastAPI."""
 
-from typing import Optional
-
+from app.config import settings
 from pyworkflow import get_storage as pyworkflow_get_storage
 from pyworkflow.storage.base import StorageBackend
 from pyworkflow.storage.file import FileStorageBackend
 
-from app.config import settings
-
-_storage_instance: Optional[StorageBackend] = None
+_storage_instance: StorageBackend | None = None
 
 
 async def get_storage() -> StorageBackend:

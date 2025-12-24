@@ -1,25 +1,22 @@
 """Workflow run endpoints."""
 
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from pyworkflow.storage.base import StorageBackend
-
-from app.dependencies import get_storage
 from app.controllers.run_controller import RunController
-from app.schemas.run import RunDetailResponse, RunListResponse
+from app.dependencies import get_storage
 from app.schemas.event import EventListResponse
-from app.schemas.step import StepListResponse
 from app.schemas.hook import HookListResponse
+from app.schemas.run import RunDetailResponse, RunListResponse
+from app.schemas.step import StepListResponse
+from pyworkflow.storage.base import StorageBackend
 
 router = APIRouter()
 
 
 @router.get("", response_model=RunListResponse)
 async def list_runs(
-    workflow_name: Optional[str] = Query(None, description="Filter by workflow name"),
-    status: Optional[str] = Query(
+    workflow_name: str | None = Query(None, description="Filter by workflow name"),
+    status: str | None = Query(
         None,
         description="Filter by status (pending, running, suspended, completed, failed, interrupted, cancelled)",
     ),

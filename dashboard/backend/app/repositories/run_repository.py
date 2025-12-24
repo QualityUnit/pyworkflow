@@ -1,16 +1,14 @@
 """Repository for workflow run data access."""
 
-from typing import List, Optional
-
+from pyworkflow.engine.events import Event
 from pyworkflow.storage.base import StorageBackend
 from pyworkflow.storage.schemas import (
-    WorkflowRun,
-    RunStatus,
-    StepExecution,
     Hook,
     HookStatus,
+    RunStatus,
+    StepExecution,
+    WorkflowRun,
 )
-from pyworkflow.engine.events import Event
 
 
 class RunRepository:
@@ -26,11 +24,11 @@ class RunRepository:
 
     async def list_runs(
         self,
-        workflow_name: Optional[str] = None,
-        status: Optional[RunStatus] = None,
+        workflow_name: str | None = None,
+        status: RunStatus | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[WorkflowRun]:
+    ) -> list[WorkflowRun]:
         """List workflow runs with optional filtering.
 
         Args:
@@ -49,7 +47,7 @@ class RunRepository:
             offset=offset,
         )
 
-    async def get_run(self, run_id: str) -> Optional[WorkflowRun]:
+    async def get_run(self, run_id: str) -> WorkflowRun | None:
         """Get a workflow run by ID.
 
         Args:
@@ -63,8 +61,8 @@ class RunRepository:
     async def get_events(
         self,
         run_id: str,
-        event_types: Optional[List[str]] = None,
-    ) -> List[Event]:
+        event_types: list[str] | None = None,
+    ) -> list[Event]:
         """Get all events for a workflow run.
 
         Args:
@@ -76,7 +74,7 @@ class RunRepository:
         """
         return await self.storage.get_events(run_id, event_types=event_types)
 
-    async def list_steps(self, run_id: str) -> List[StepExecution]:
+    async def list_steps(self, run_id: str) -> list[StepExecution]:
         """List all steps for a workflow run.
 
         Args:
@@ -89,11 +87,11 @@ class RunRepository:
 
     async def list_hooks(
         self,
-        run_id: Optional[str] = None,
-        status: Optional[HookStatus] = None,
+        run_id: str | None = None,
+        status: HookStatus | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Hook]:
+    ) -> list[Hook]:
         """List hooks with optional filtering.
 
         Args:

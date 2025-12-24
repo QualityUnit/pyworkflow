@@ -1,7 +1,6 @@
 """CLI entry point for the dashboard backend server."""
 
 import uvicorn
-
 from app.config import settings
 
 

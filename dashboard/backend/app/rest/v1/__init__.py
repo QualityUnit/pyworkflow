@@ -3,8 +3,8 @@
 from fastapi import APIRouter
 
 from app.rest.v1.health import router as health_router
-from app.rest.v1.workflows import router as workflows_router
 from app.rest.v1.runs import router as runs_router
+from app.rest.v1.workflows import router as workflows_router
 
 router = APIRouter()
 router.include_router(health_router, tags=["health"])

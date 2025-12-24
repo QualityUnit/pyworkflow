@@ -3,7 +3,7 @@
 from fastapi import APIRouter, HTTPException
 
 from app.controllers.workflow_controller import WorkflowController
-from app.schemas.workflow import WorkflowResponse, WorkflowListResponse
+from app.schemas.workflow import WorkflowListResponse, WorkflowResponse
 
 router = APIRouter()
 

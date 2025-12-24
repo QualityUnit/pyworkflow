@@ -1,7 +1,7 @@
 """Step execution response schemas."""
 
 from datetime import datetime
-from typing import List, Optional
+
 from pydantic import BaseModel
 
 
@@ -15,14 +15,14 @@ class StepResponse(BaseModel):
     attempt: int = 1
     max_retries: int = 3
     created_at: datetime
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    duration_seconds: Optional[float] = None
-    error: Optional[str] = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    duration_seconds: float | None = None
+    error: str | None = None
 
 
 class StepListResponse(BaseModel):
     """Response model for listing steps."""
 
-    items: List[StepResponse]
+    items: list[StepResponse]
     count: int

@@ -1,6 +1,5 @@
 """Dashboard configuration using pydantic-settings."""
 
-from typing import List
 from pydantic_settings import BaseSettings
 
 
@@ -16,7 +15,7 @@ class Settings(BaseSettings):
     port: int = 8585
 
     # CORS configuration
-    cors_origins: List[str] = ["http://localhost:5173", "http://localhost:3000"]
+    cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 
     # Debug mode
     debug: bool = False

@@ -1,16 +1,14 @@
 """Service layer for workflow run operations."""
 
 import json
-from datetime import datetime, timezone
-from typing import List, Optional
-
-from pyworkflow.storage.schemas import RunStatus, HookStatus
+from datetime import UTC, datetime
 
 from app.repositories.run_repository import RunRepository
-from app.schemas.run import RunResponse, RunDetailResponse, RunListResponse
-from app.schemas.event import EventResponse, EventListResponse
-from app.schemas.step import StepResponse, StepListResponse
-from app.schemas.hook import HookResponse, HookListResponse
+from app.schemas.event import EventListResponse, EventResponse
+from app.schemas.hook import HookListResponse, HookResponse
+from app.schemas.run import RunDetailResponse, RunListResponse, RunResponse
+from app.schemas.step import StepListResponse, StepResponse
+from pyworkflow.storage.schemas import RunStatus
 
 
 class RunService:
@@ -26,8 +24,8 @@ class RunService:
 
     async def list_runs(
         self,
-        workflow_name: Optional[str] = None,
-        status: Optional[str] = None,
+        workflow_name: str | None = None,
+        status: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> RunListResponse:
@@ -60,7 +58,7 @@ class RunService:
             offset=offset,
         )
 
-    async def get_run(self, run_id: str) -> Optional[RunDetailResponse]:
+    async def get_run(self, run_id: str) -> RunDetailResponse | None:
         """Get detailed information about a workflow run.
 
         Args:
@@ -222,9 +220,9 @@ class RunService:
 
     def _calculate_duration(
         self,
-        started_at: Optional[datetime],
-        completed_at: Optional[datetime],
-    ) -> Optional[float]:
+        started_at: datetime | None,
+        completed_at: datetime | None,
+    ) -> float | None:
         """Calculate duration in seconds.
 
         Args:
@@ -237,17 +235,17 @@ class RunService:
         if started_at is None:
             return None
 
-        end_time = completed_at or datetime.now(timezone.utc)
+        end_time = completed_at or datetime.now(UTC)
 
         # Handle timezone-naive datetimes
         if started_at.tzinfo is None:
-            started_at = started_at.replace(tzinfo=timezone.utc)
+            started_at = started_at.replace(tzinfo=UTC)
         if end_time.tzinfo is None:
-            end_time = end_time.replace(tzinfo=timezone.utc)
+            end_time = end_time.replace(tzinfo=UTC)
 
         return (end_time - started_at).total_seconds()
 
-    def _safe_json_parse(self, value: Optional[str]):
+    def _safe_json_parse(self, value: str | None):
         """Safely parse a JSON string.
 
         Args:

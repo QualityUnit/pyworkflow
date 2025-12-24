@@ -8,8 +8,9 @@ all running children are automatically cancelled (TERMINATE policy).
 
 import hashlib
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Callable, Union
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -37,7 +38,7 @@ async def start_child_workflow(
     *args: Any,
     wait_for_completion: bool = True,
     **kwargs: Any,
-) -> Union[Any, ChildWorkflowHandle]:
+) -> Any | ChildWorkflowHandle:
     """
     Start a child workflow from within a parent workflow.
 
@@ -88,6 +89,14 @@ async def start_child_workflow(
 
     ctx = get_context()
 
+    # Validate storage is available (required for child workflows)
+    storage = ctx.storage
+    if storage is None:
+        raise RuntimeError(
+            "start_child_workflow() requires durable mode with storage. "
+            "Make sure you have configured a storage backend."
+        )
+
     # Check for cancellation before starting child
     ctx.check_cancellation()
 
@@ -102,7 +111,7 @@ async def start_child_workflow(
     child_workflow_name = workflow_meta.name
 
     # Enforce max nesting depth
-    current_depth = await ctx.storage.get_nesting_depth(ctx.run_id)
+    current_depth = await storage.get_nesting_depth(ctx.run_id)
     if current_depth >= MAX_NESTING_DEPTH:
         raise MaxNestingDepthError(current_depth)
 
@@ -135,7 +144,7 @@ async def start_child_workflow(
                 child_run_id=cached["child_run_id"],
                 child_workflow_name=child_workflow_name,
                 parent_run_id=ctx.run_id,
-                _storage=ctx.storage,
+                _storage=storage,
             )
 
     # Check if child is pending (started but not completed in events)
@@ -143,7 +152,7 @@ async def start_child_workflow(
     # or might have completed while we were recovering
     if child_id in ctx.pending_children:
         existing_child_run_id = ctx.pending_children[child_id]
-        child_run = await ctx.storage.get_run(existing_child_run_id)
+        child_run = await storage.get_run(existing_child_run_id)
 
         if child_run:
             logger.debug(
@@ -171,7 +180,7 @@ async def start_child_workflow(
                         child_run_id=existing_child_run_id,
                         child_workflow_name=child_workflow_name,
                         parent_run_id=ctx.run_id,
-                        _storage=ctx.storage,
+                        _storage=storage,
                     )
 
             elif child_run.status == RunStatus.FAILED:
@@ -194,7 +203,7 @@ async def start_child_workflow(
                         child_run_id=existing_child_run_id,
                         child_workflow_name=child_workflow_name,
                         parent_run_id=ctx.run_id,
-                        _storage=ctx.storage,
+                        _storage=storage,
                     )
 
             elif child_run.status in (
@@ -216,7 +225,7 @@ async def start_child_workflow(
                         child_run_id=existing_child_run_id,
                         child_workflow_name=child_workflow_name,
                         parent_run_id=ctx.run_id,
-                        _storage=ctx.storage,
+                        _storage=storage,
                     )
 
                 # Suspend to wait for the existing child
@@ -230,6 +239,7 @@ async def start_child_workflow(
     # Start the child workflow
     child_run_id = await _start_child_on_worker(
         ctx=ctx,
+        storage=storage,
         child_id=child_id,
         workflow_meta=workflow_meta,
         args=args,
@@ -250,7 +260,7 @@ async def start_child_workflow(
             child_run_id=child_run_id,
             child_workflow_name=child_workflow_name,
             parent_run_id=ctx.run_id,
-            _storage=ctx.storage,
+            _storage=storage,
         )
 
     # Wait for completion: suspend parent
@@ -285,11 +295,12 @@ def _generate_child_id(workflow_name: str, args: tuple, kwargs: dict) -> str:
 
 
 async def _start_child_on_worker(
-    ctx,
+    ctx: Any,
+    storage: Any,
     child_id: str,
     workflow_meta: "WorkflowMetadata",
-    args: tuple,
-    kwargs: dict,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     wait_for_completion: bool,
 ) -> str:
     """
@@ -305,7 +316,7 @@ async def _start_child_on_worker(
     child_run_id = f"run_{uuid.uuid4().hex[:16]}"
 
     # Get parent's nesting depth
-    parent_depth = await ctx.storage.get_nesting_depth(ctx.run_id)
+    parent_depth = await storage.get_nesting_depth(ctx.run_id)
     child_depth = parent_depth + 1
 
     # Serialize arguments
@@ -322,7 +333,7 @@ async def _start_child_on_worker(
         kwargs=kwargs_json,
         wait_for_completion=wait_for_completion,
     )
-    await ctx.storage.record_event(start_event)
+    await storage.record_event(start_event)
 
     # Create child workflow run record
     child_run = WorkflowRun(
@@ -337,7 +348,7 @@ async def _start_child_on_worker(
         max_duration=workflow_meta.max_duration,
         metadata=workflow_meta.metadata or {},
     )
-    await ctx.storage.create_run(child_run)
+    await storage.create_run(child_run)
 
     # Delegate child workflow execution to the runtime
     from pyworkflow.config import get_config
@@ -352,7 +363,7 @@ async def _start_child_on_worker(
         kwargs=kwargs,
         child_run_id=child_run_id,
         workflow_name=workflow_meta.name,
-        storage=ctx.storage,
+        storage=storage,
         parent_run_id=ctx.run_id,
         child_id=child_id,
         wait_for_completion=wait_for_completion,

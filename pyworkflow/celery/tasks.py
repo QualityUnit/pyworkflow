@@ -11,6 +11,7 @@ These tasks enable:
 
 import asyncio
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -253,7 +254,7 @@ def start_child_workflow_task(
     args_json: str,
     kwargs_json: str,
     child_run_id: str,
-    storage_config: Optional[Dict[str, Any]],
+    storage_config: dict[str, Any] | None,
     parent_run_id: str,
     child_id: str,
     wait_for_completion: bool,
@@ -319,13 +320,13 @@ def start_child_workflow_task(
 
 
 async def _execute_child_workflow_on_worker(
-    workflow_func,
+    workflow_func: Callable[..., Any],
     workflow_name: str,
-    args: tuple,
-    kwargs: dict,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     child_run_id: str,
     storage: StorageBackend,
-    storage_config: Optional[Dict[str, Any]],
+    storage_config: dict[str, Any] | None,
     parent_run_id: str,
     child_id: str,
     wait_for_completion: bool,
@@ -338,37 +339,12 @@ async def _execute_child_workflow_on_worker(
     2. Recording completion/failure events in parent's log
     3. Triggering parent resumption if waiting
     """
-    from datetime import timedelta
 
     from pyworkflow.engine.events import (
         create_child_workflow_completed_event,
         create_child_workflow_failed_event,
     )
     from pyworkflow.serialization.encoder import serialize
-
-    # Check if this child is already being executed (duplicate task)
-    existing_run = await storage.get_run(child_run_id)
-    if existing_run:
-        if existing_run.status == RunStatus.RUNNING:
-            # Check if recently created (duplicate execution)
-            run_age = datetime.now(UTC) - existing_run.created_at
-            if run_age < timedelta(seconds=30):
-                logger.info(
-                    f"Child workflow {child_run_id} already running (created {run_age.total_seconds():.1f}s ago). "
-                    "Likely duplicate task execution, skipping.",
-                    child_run_id=child_run_id,
-                    parent_run_id=parent_run_id,
-                )
-                return
-        elif existing_run.status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
-            # Already finished - skip
-            logger.info(
-                f"Child workflow {child_run_id} already finished with status {existing_run.status.value}. "
-                "Skipping duplicate execution.",
-                child_run_id=child_run_id,
-                parent_run_id=parent_run_id,
-            )
-            return
 
     try:
         # Update status to RUNNING
@@ -464,7 +440,7 @@ async def _execute_child_workflow_on_worker(
 async def _trigger_parent_resumption_celery(
     parent_run_id: str,
     storage: StorageBackend,
-    storage_config: Optional[Dict[str, Any]],
+    storage_config: dict[str, Any] | None,
 ) -> None:
     """
     Trigger parent workflow resumption after child completes.
@@ -474,7 +450,7 @@ async def _trigger_parent_resumption_celery(
     parent_run = await storage.get_run(parent_run_id)
     if parent_run and parent_run.status == RunStatus.SUSPENDED:
         logger.debug(
-            f"Triggering parent resumption via Celery",
+            "Triggering parent resumption via Celery",
             parent_run_id=parent_run_id,
         )
         # Schedule immediate resumption via Celery
@@ -1284,7 +1260,7 @@ async def _handle_parent_completion(
             child_id = None
             for event in events:
                 if (
-                    event.event_type == EventType.CHILD_WORKFLOW_STARTED
+                    event.type == EventType.CHILD_WORKFLOW_STARTED
                     and event.data.get("child_run_id") == child.run_id
                 ):
                     child_id = event.data.get("child_id")

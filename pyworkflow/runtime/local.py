@@ -19,6 +19,7 @@ from pyworkflow.runtime.base import Runtime
 
 if TYPE_CHECKING:
     from pyworkflow.storage.base import StorageBackend
+    from pyworkflow.storage.schemas import RunStatus
 
 
 async def _handle_parent_completion_local(
@@ -73,7 +74,7 @@ async def _handle_parent_completion_local(
             child_id = None
             for event in events:
                 if (
-                    event.event_type == EventType.CHILD_WORKFLOW_STARTED
+                    event.type == EventType.CHILD_WORKFLOW_STARTED
                     and event.data.get("child_run_id") == child.run_id
                 ):
                     child_id = event.data.get("child_id")
@@ -602,7 +603,7 @@ class LocalRuntime(Runtime):
         parent_run = await storage.get_run(parent_run_id)
         if parent_run and parent_run.status == RunStatus.SUSPENDED:
             logger.debug(
-                f"Triggering parent resumption",
+                "Triggering parent resumption",
                 parent_run_id=parent_run_id,
             )
             # Resume the parent workflow directly (we're already in a background task)

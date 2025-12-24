@@ -7,7 +7,7 @@ These schemas define the structure of data stored in various storage backends.
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 class RunStatus(Enum):
@@ -75,7 +75,7 @@ class WorkflowRun:
     recover_on_worker_loss: bool = True  # Whether to auto-recover on worker failure
 
     # Child workflow tracking
-    parent_run_id: Optional[str] = None  # Link to parent workflow (None if root)
+    parent_run_id: str | None = None  # Link to parent workflow (None if root)
     nesting_depth: int = 0  # 0=root, 1=child, 2=grandchild (max 3)
 
     def to_dict(self) -> dict[str, Any]:

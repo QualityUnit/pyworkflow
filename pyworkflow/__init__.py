@@ -44,26 +44,6 @@ from pyworkflow.context import (
     reset_context,
     set_context,
 )
-# Core decorators and primitives
-from pyworkflow.core.step import step
-from pyworkflow.core.workflow import workflow
-from pyworkflow.primitives.define_hook import TypedHook, define_hook
-from pyworkflow.primitives.hooks import hook
-from pyworkflow.primitives.resume_hook import ResumeResult, resume_hook
-from pyworkflow.primitives.shield import shield
-from pyworkflow.primitives.sleep import sleep
-from pyworkflow.primitives.child_workflow import start_child_workflow
-from pyworkflow.primitives.child_handle import ChildWorkflowHandle
-
-# Execution engine
-from pyworkflow.engine.executor import (
-    ConfigurationError,
-    cancel_workflow,
-    get_workflow_events,
-    get_workflow_run,
-    resume,
-    start,
-)
 
 # Exceptions
 from pyworkflow.core.exceptions import (
@@ -105,6 +85,8 @@ from pyworkflow.engine.executor import (
     start,
 )
 
+# Core decorators and primitives
+# Execution engine
 # Logging and observability
 from pyworkflow.observability.logging import (
     bind_step_context,
@@ -112,6 +94,8 @@ from pyworkflow.observability.logging import (
     configure_logging,
     get_logger,
 )
+from pyworkflow.primitives.child_handle import ChildWorkflowHandle
+from pyworkflow.primitives.child_workflow import start_child_workflow
 from pyworkflow.primitives.define_hook import TypedHook, define_hook
 from pyworkflow.primitives.hooks import hook
 from pyworkflow.primitives.resume_hook import ResumeResult, resume_hook

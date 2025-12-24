@@ -7,7 +7,7 @@ it returns a handle that can be used to query status, get results, or cancel.
 
 import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from pyworkflow.core.exceptions import ChildWorkflowFailedError
 from pyworkflow.storage.schemas import RunStatus
@@ -71,7 +71,7 @@ class ChildWorkflowHandle:
             raise ValueError(f"Child workflow {self.child_run_id} not found")
         return run.status
 
-    async def result(self, timeout: Optional[float] = None) -> Any:
+    async def result(self, timeout: float | None = None) -> Any:
         """
         Wait for child workflow to complete and return result.
 
@@ -127,7 +127,7 @@ class ChildWorkflowHandle:
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
 
-    async def cancel(self, reason: Optional[str] = None) -> bool:
+    async def cancel(self, reason: str | None = None) -> bool:
         """
         Request cancellation of the child workflow.
 

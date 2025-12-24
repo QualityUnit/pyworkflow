@@ -133,7 +133,7 @@ async def error_handling_parent_workflow() -> dict:
         # This child will fail
         await start_child_workflow(failing_child_workflow)
     except ChildWorkflowFailedError as e:
-        print(f"[ErrorParent] Caught child failure!")
+        print("[ErrorParent] Caught child failure!")
         print(f"  Child run_id: {e.child_run_id}")
         print(f"  Child workflow: {e.child_workflow_name}")
         print(f"  Error: {e.error}")

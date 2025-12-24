@@ -94,12 +94,8 @@ class LocalContext(WorkflowContext):
         self._cancellation_reason: str | None = None
 
         # Child workflow state
-        self._child_results: Dict[str, Dict[str, Any]] = {}
-        self._pending_children: Dict[str, str] = {}  # child_id -> child_run_id
-
-        # Child workflow state
-        self._child_results: Dict[str, Dict[str, Any]] = {}
-        self._pending_children: Dict[str, str] = {}  # child_id -> child_run_id
+        self._child_results: dict[str, dict[str, Any]] = {}
+        self._pending_children: dict[str, str] = {}  # child_id -> child_run_id
 
         # Replay state if resuming
         if event_log:
@@ -319,12 +315,12 @@ class LocalContext(WorkflowContext):
     # =========================================================================
 
     @property
-    def pending_children(self) -> Dict[str, str]:
+    def pending_children(self) -> dict[str, str]:
         """Get pending child workflows (child_id -> child_run_id)."""
         return self._pending_children
 
     @property
-    def child_results(self) -> Dict[str, Dict[str, Any]]:
+    def child_results(self) -> dict[str, dict[str, Any]]:
         """Get child workflow results."""
         return self._child_results
 
@@ -332,7 +328,7 @@ class LocalContext(WorkflowContext):
         """Check if a child workflow result exists."""
         return child_id in self._child_results
 
-    def get_child_result(self, child_id: str) -> Dict[str, Any]:
+    def get_child_result(self, child_id: str) -> dict[str, Any]:
         """Get cached child workflow result."""
         return self._child_results.get(child_id, {})
 
@@ -342,8 +338,8 @@ class LocalContext(WorkflowContext):
         child_run_id: str,
         result: Any,
         failed: bool = False,
-        error: Optional[str] = None,
-        error_type: Optional[str] = None,
+        error: str | None = None,
+        error_type: str | None = None,
     ) -> None:
         """
         Cache a child workflow result.

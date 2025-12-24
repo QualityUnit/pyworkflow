@@ -526,11 +526,11 @@ class FileStorageBackend(StorageBackend):
     async def get_children(
         self,
         parent_run_id: str,
-        status: Optional[RunStatus] = None,
-    ) -> List[WorkflowRun]:
+        status: RunStatus | None = None,
+    ) -> list[WorkflowRun]:
         """Get all child workflow runs for a parent workflow."""
 
-        def _list() -> List[dict]:
+        def _list() -> list[dict]:
             children = []
             for run_file in self.runs_dir.glob("*.json"):
                 data = json.loads(run_file.read_text())
@@ -552,7 +552,7 @@ class FileStorageBackend(StorageBackend):
         child_data_list = await asyncio.to_thread(_list)
         return [WorkflowRun.from_dict(data) for data in child_data_list]
 
-    async def get_parent(self, run_id: str) -> Optional[WorkflowRun]:
+    async def get_parent(self, run_id: str) -> WorkflowRun | None:
         """Get the parent workflow run for a child workflow."""
         run = await self.get_run(run_id)
         if run and run.parent_run_id:

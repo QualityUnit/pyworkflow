@@ -12,12 +12,12 @@ Tests cover:
 """
 
 import asyncio
+
 import pytest
 
 from pyworkflow import (
     ChildWorkflowFailedError,
     ChildWorkflowHandle,
-    MaxNestingDepthError,
     RunStatus,
     configure,
     get_context,

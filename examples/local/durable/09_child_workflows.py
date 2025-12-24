@@ -105,7 +105,7 @@ async def order_fulfillment_workflow(
         return {"order_id": order_id, "status": "invalid"}
 
     # Step 2: Process payment via child workflow (wait for completion)
-    print(f"[OrderFulfillment] Starting payment child workflow...")
+    print("[OrderFulfillment] Starting payment child workflow...")
     payment_result = await start_child_workflow(
         payment_workflow,
         order_id,
@@ -115,7 +115,7 @@ async def order_fulfillment_workflow(
     print(f"[OrderFulfillment] Payment completed: {payment_result}")
 
     # Step 3: Ship order via child workflow (wait for completion)
-    print(f"[OrderFulfillment] Starting shipping child workflow...")
+    print("[OrderFulfillment] Starting shipping child workflow...")
     shipping_result = await start_child_workflow(
         shipping_workflow,
         order_id,
@@ -125,7 +125,7 @@ async def order_fulfillment_workflow(
 
     # Step 4: Send notification via fire-and-forget child workflow
     # This returns immediately with a handle, parent continues
-    print(f"[OrderFulfillment] Starting notification child workflow (fire-and-forget)...")
+    print("[OrderFulfillment] Starting notification child workflow (fire-and-forget)...")
     notification_handle: ChildWorkflowHandle = await start_child_workflow(
         notification_workflow,
         customer_email,
@@ -169,7 +169,7 @@ async def main():
     # Give fire-and-forget child time to complete
     await asyncio.sleep(0.5)
 
-    print(f"\n=== Workflow Results ===")
+    print("\n=== Workflow Results ===")
 
     # Check parent workflow
     parent_run = await get_workflow_run(run_id)

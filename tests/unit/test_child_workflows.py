@@ -10,6 +10,8 @@ Tests cover:
 - Context child workflow state
 """
 
+from datetime import UTC, datetime
+
 import pytest
 
 from pyworkflow import (
@@ -17,9 +19,7 @@ from pyworkflow import (
     ChildWorkflowFailedError,
     LocalContext,
     MaxNestingDepthError,
-    MockContext,
     WorkflowError,
-    set_context,
 )
 from pyworkflow.engine.events import (
     EventType,
@@ -31,7 +31,6 @@ from pyworkflow.engine.events import (
 from pyworkflow.primitives.child_handle import ChildWorkflowHandle
 from pyworkflow.storage.memory import InMemoryStorageBackend
 from pyworkflow.storage.schemas import RunStatus, WorkflowRun
-from datetime import datetime, UTC
 
 
 class TestChildWorkflowError:

@@ -548,7 +548,7 @@ def create_child_workflow_cancelled_event(
     run_id: str,
     child_id: str,
     child_run_id: str,
-    reason: Optional[str] = None,
+    reason: str | None = None,
 ) -> Event:
     """
     Create a child workflow cancelled event.

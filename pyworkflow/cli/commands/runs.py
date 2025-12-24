@@ -6,7 +6,7 @@ from datetime import datetime
 import click
 
 import pyworkflow
-from pyworkflow import RunStatus
+from pyworkflow import RunStatus, WorkflowRun
 from pyworkflow.cli.output.formatters import (
     format_json,
     format_key_value,
@@ -513,7 +513,7 @@ async def cancel_run(
 async def list_children(
     ctx: click.Context,
     run_id: str,
-    status: Optional[str],
+    status: str | None,
 ) -> None:
     """
     List child workflows spawned by a parent workflow.
@@ -562,16 +562,16 @@ async def list_children(
             print_info(f"No child workflows found for run: {run_id}")
             return
 
-        # Calculate durations
-        for child in children:
+        def _calc_duration(child: WorkflowRun) -> str:
+            """Calculate duration for display."""
             if child.started_at and child.completed_at:
                 duration = (child.completed_at - child.started_at).total_seconds()
-                child.duration = f"{duration:.1f}s"
+                return f"{duration:.1f}s"
             elif child.started_at:
                 duration = (datetime.now() - child.started_at.replace(tzinfo=None)).total_seconds()
-                child.duration = f"{duration:.1f}s (ongoing)"
+                return f"{duration:.1f}s (ongoing)"
             else:
-                child.duration = "-"
+                return "-"
 
         # Format output
         if output == "json":
@@ -584,7 +584,7 @@ async def list_children(
                     "created_at": child.created_at.isoformat() if child.created_at else None,
                     "started_at": child.started_at.isoformat() if child.started_at else None,
                     "completed_at": child.completed_at.isoformat() if child.completed_at else None,
-                    "duration": child.duration,
+                    "duration": _calc_duration(child),
                 }
                 for child in children
             ]
@@ -602,7 +602,7 @@ async def list_children(
                     "Status": child.status.value,
                     "Depth": child.nesting_depth,
                     "Started": child.started_at.strftime("%Y-%m-%d %H:%M:%S") if child.started_at else "-",
-                    "Duration": child.duration,
+                    "Duration": _calc_duration(child),
                 }
                 for child in children
             ]

@@ -301,8 +301,8 @@ class InMemoryStorageBackend(StorageBackend):
     async def get_children(
         self,
         parent_run_id: str,
-        status: Optional[RunStatus] = None,
-    ) -> List[WorkflowRun]:
+        status: RunStatus | None = None,
+    ) -> list[WorkflowRun]:
         """Get all child workflow runs for a parent workflow."""
         with self._lock:
             children = [
@@ -317,7 +317,7 @@ class InMemoryStorageBackend(StorageBackend):
 
             return children
 
-    async def get_parent(self, run_id: str) -> Optional[WorkflowRun]:
+    async def get_parent(self, run_id: str) -> WorkflowRun | None:
         """Get the parent workflow run for a child workflow."""
         with self._lock:
             run = self._runs.get(run_id)

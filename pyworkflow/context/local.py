@@ -93,6 +93,11 @@ class LocalContext(WorkflowContext):
         self._cancellation_blocked: bool = False
         self._cancellation_reason: Optional[str] = None
 
+        # Cancellation state
+        self._cancellation_requested: bool = False
+        self._cancellation_blocked: bool = False
+        self._cancellation_reason: Optional[str] = None
+
         # Replay state if resuming
         if event_log:
             self._is_replaying = True

@@ -74,6 +74,11 @@ class MockContext(WorkflowContext):
         self._hooks: List[Dict[str, Any]] = []
         self._parallel_calls: List[int] = []
 
+        # Cancellation state
+        self._cancellation_requested: bool = False
+        self._cancellation_blocked: bool = False
+        self._cancellation_reason: Optional[str] = None
+
     # =========================================================================
     # Tracking properties
     # =========================================================================
@@ -297,6 +302,34 @@ class MockContext(WorkflowContext):
 
         # Return default mock data
         return {"hook": name, "mock": True}
+
+    # =========================================================================
+    # Cancellation methods
+    # =========================================================================
+
+    def is_cancellation_requested(self) -> bool:
+        """Check if cancellation has been requested."""
+        return self._cancellation_requested
+
+    def request_cancellation(self, reason: Optional[str] = None) -> None:
+        """Request cancellation of the workflow."""
+        self._cancellation_requested = True
+        self._cancellation_reason = reason
+
+    def check_cancellation(self) -> None:
+        """Check if cancellation was requested and raise if not blocked."""
+        from pyworkflow.core.exceptions import CancellationError
+
+        if self._cancellation_requested and not self._cancellation_blocked:
+            raise CancellationError(
+                message="Workflow was cancelled",
+                reason=self._cancellation_reason,
+            )
+
+    @property
+    def cancellation_blocked(self) -> bool:
+        """Check if cancellation is currently blocked (e.g., inside shield)."""
+        return self._cancellation_blocked
 
     # =========================================================================
     # Utility methods

@@ -58,6 +58,7 @@
         "concepts/events",
         "concepts/sleep",
         "concepts/hooks",
+        "concepts/cancellation",
         "concepts/fault-tolerance"
       ]
     },

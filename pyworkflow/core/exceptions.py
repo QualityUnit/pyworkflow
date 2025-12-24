@@ -36,6 +36,47 @@ class FatalError(WorkflowError):
         self.metadata = kwargs
 
 
+class CancellationError(WorkflowError):
+    """
+    Raised when a workflow or step is cancelled.
+
+    Use CancellationError to handle graceful cancellation in workflows.
+    Workflows can catch this exception to perform cleanup operations
+    before terminating.
+
+    Note:
+        CancellationError is raised at checkpoint boundaries (before steps,
+        sleeps, hooks), not during step execution. Long-running steps can
+        call ``ctx.check_cancellation()`` for cooperative cancellation.
+
+    Example:
+        @workflow
+        async def order_workflow(order_id: str):
+            try:
+                await reserve_inventory()
+                await charge_payment()
+                await ship_order()
+            except CancellationError:
+                # Cleanup on cancellation
+                await release_inventory()
+                await refund_payment()
+                raise  # Re-raise to mark as cancelled
+
+    Attributes:
+        message: Description of the cancellation
+        reason: Optional reason for cancellation (e.g., "user_requested", "timeout")
+    """
+
+    def __init__(
+        self,
+        message: str = "Workflow was cancelled",
+        reason: Optional[str] = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.reason = reason
+
+
 class RetryableError(WorkflowError):
     """
     Retriable error that triggers automatic retry with optional delay.

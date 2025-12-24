@@ -19,12 +19,18 @@ from celery.exceptions import WorkerLostError
 from loguru import logger
 
 from pyworkflow.celery.app import celery_app
-from pyworkflow.core.exceptions import FatalError, RetryableError, SuspensionSignal
+from pyworkflow.core.exceptions import (
+    CancellationError,
+    FatalError,
+    RetryableError,
+    SuspensionSignal,
+)
 from pyworkflow.core.registry import get_workflow, get_workflow_by_func
 from pyworkflow.core.workflow import execute_workflow_with_context
 from pyworkflow.engine.events import (
-    create_workflow_started_event,
+    create_workflow_cancelled_event,
     create_workflow_interrupted_event,
+    create_workflow_started_event,
 )
 from pyworkflow.serialization.decoder import deserialize_args, deserialize_kwargs
 from pyworkflow.serialization.encoder import serialize_args, serialize_kwargs
@@ -604,6 +610,26 @@ async def _start_workflow_on_worker(
 
         return run_id
 
+    except CancellationError as e:
+        # Workflow was cancelled
+        cancelled_event = create_workflow_cancelled_event(
+            run_id=run_id,
+            reason=e.reason,
+            cleanup_completed=True,  # If we got here, cleanup has completed
+        )
+        await storage.record_event(cancelled_event)
+        await storage.update_run_status(run_id=run_id, status=RunStatus.CANCELLED)
+        await storage.clear_cancellation_flag(run_id)
+
+        logger.info(
+            f"Workflow cancelled on worker: {workflow_name}",
+            run_id=run_id,
+            workflow_name=workflow_name,
+            reason=e.reason,
+        )
+
+        return run_id
+
     except SuspensionSignal as e:
         # Workflow suspended (sleep or hook)
         await storage.update_run_status(run_id=run_id, status=RunStatus.SUSPENDED)
@@ -748,11 +774,24 @@ async def _resume_workflow_on_worker(
     if not run:
         raise WorkflowNotFoundError(run_id)
 
+    # Check if workflow was cancelled while suspended
+    if run.status == RunStatus.CANCELLED:
+        logger.info(
+            f"Workflow was cancelled while suspended, skipping resume",
+            run_id=run_id,
+            workflow_name=run.workflow_name,
+        )
+        return None
+
+    # Check for cancellation flag
+    cancellation_requested = await storage.check_cancellation_flag(run_id)
+
     logger.info(
         f"Resuming workflow execution on worker: {run.workflow_name}",
         run_id=run_id,
         workflow_name=run.workflow_name,
         current_status=run.status.value,
+        cancellation_requested=cancellation_requested,
     )
 
     # Get workflow function
@@ -783,12 +822,16 @@ async def _resume_workflow_on_worker(
             args=args,
             kwargs=kwargs,
             event_log=events,
+            cancellation_requested=cancellation_requested,
         )
 
         # Update run status to completed
         await storage.update_run_status(
             run_id=run_id, status=RunStatus.COMPLETED, result=serialize_args(result)
         )
+
+        # Clear cancellation flag if any
+        await storage.clear_cancellation_flag(run_id)
 
         logger.info(
             f"Workflow resumed and completed on worker: {run.workflow_name}",
@@ -797,6 +840,26 @@ async def _resume_workflow_on_worker(
         )
 
         return result
+
+    except CancellationError as e:
+        # Workflow was cancelled
+        cancelled_event = create_workflow_cancelled_event(
+            run_id=run_id,
+            reason=e.reason,
+            cleanup_completed=True,
+        )
+        await storage.record_event(cancelled_event)
+        await storage.update_run_status(run_id=run_id, status=RunStatus.CANCELLED)
+        await storage.clear_cancellation_flag(run_id)
+
+        logger.info(
+            f"Workflow cancelled on resume on worker: {run.workflow_name}",
+            run_id=run_id,
+            workflow_name=run.workflow_name,
+            reason=e.reason,
+        )
+
+        return None
 
     except SuspensionSignal as e:
         # Workflow suspended again

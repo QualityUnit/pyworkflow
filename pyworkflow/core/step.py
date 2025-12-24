@@ -113,6 +113,9 @@ def step(
 
             ctx = get_context()
 
+            # Check for cancellation before executing step
+            ctx.check_cancellation()
+
             # Transient mode: execute directly without event sourcing
             # Retries are still supported via direct execution
             if not ctx.is_durable:
@@ -186,6 +189,9 @@ def step(
                 step_name=step_name,
                 attempt=current_attempt,
             )
+
+            # Check for cancellation before executing step
+            ctx.check_cancellation()
 
             try:
                 # Execute step function

@@ -347,10 +347,48 @@ pyworkflow runs logs run_abc123 --filter step_completed
 | `--filter` | Filter events by type (case-insensitive substring match) |
 
 **Event Types:**
-- `workflow_started`, `workflow_completed`, `workflow_failed`
+- `workflow_started`, `workflow_completed`, `workflow_failed`, `workflow_cancelled`
 - `step_started`, `step_completed`, `step_failed`
 - `sleep_started`, `sleep_resumed`
 - `hook_created`, `hook_received`
+- `cancellation_requested`
+
+#### `runs cancel`
+
+Cancel a running or suspended workflow:
+
+```bash
+pyworkflow runs cancel run_abc123 --reason "User requested"
+```
+
+**Arguments:**
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `RUN_ID` | Yes | Workflow run identifier |
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--wait/--no-wait` | Wait for cancellation to complete (default: no-wait) |
+| `--timeout` | Timeout in seconds when waiting (default: 30) |
+| `--reason` | Reason for cancellation |
+
+**Examples:**
+
+```bash
+# Cancel a workflow
+pyworkflow runs cancel run_abc123
+
+# Cancel with reason
+pyworkflow runs cancel run_abc123 --reason "Customer cancelled order"
+
+# Wait for cancellation to complete
+pyworkflow runs cancel run_abc123 --wait --timeout 60
+```
+
+<Note>
+Cancellation is graceful - the workflow will stop at the next checkpoint (before a step, sleep, or hook), not immediately. See [Cancellation](/concepts/cancellation) for details.
+</Note>
 
 ---
 

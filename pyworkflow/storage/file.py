@@ -487,3 +487,39 @@ class FileStorageBackend(StorageBackend):
 
         hook_data_list = await asyncio.to_thread(_list)
         return [Hook.from_dict(data) for data in hook_data_list]
+
+    # Cancellation Flag Operations
+
+    async def set_cancellation_flag(self, run_id: str) -> None:
+        """Set a cancellation flag for a workflow run."""
+        cancel_file = self.runs_dir / f"{run_id}.cancel"
+        lock_file = self.locks_dir / f"{run_id}_cancel.lock"
+        lock = FileLock(str(lock_file))
+
+        def _write() -> None:
+            with lock:
+                cancel_file.write_text(datetime.now(UTC).isoformat())
+
+        await asyncio.to_thread(_write)
+
+    async def check_cancellation_flag(self, run_id: str) -> bool:
+        """Check if a cancellation flag is set for a workflow run."""
+        cancel_file = self.runs_dir / f"{run_id}.cancel"
+
+        def _check() -> bool:
+            return cancel_file.exists()
+
+        return await asyncio.to_thread(_check)
+
+    async def clear_cancellation_flag(self, run_id: str) -> None:
+        """Clear the cancellation flag for a workflow run."""
+        cancel_file = self.runs_dir / f"{run_id}.cancel"
+        lock_file = self.locks_dir / f"{run_id}_cancel.lock"
+        lock = FileLock(str(lock_file))
+
+        def _clear() -> None:
+            with lock:
+                if cancel_file.exists():
+                    cancel_file.unlink()
+
+        await asyncio.to_thread(_clear)

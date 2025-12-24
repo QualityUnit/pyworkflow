@@ -92,6 +92,9 @@ class EventReplayer:
         elif event.type == EventType.WORKFLOW_INTERRUPTED:
             await self._apply_workflow_interrupted(ctx, event)
 
+        elif event.type == EventType.CANCELLATION_REQUESTED:
+            await self._apply_cancellation_requested(ctx, event)
+
         # Other event types don't affect replay state
         # (workflow_started, step_started, step_failed, etc. are informational)
 
@@ -231,6 +234,27 @@ class EventReplayer:
             reason=reason,
             recovery_attempt=recovery_attempt,
             last_event_sequence=last_event_sequence,
+        )
+
+    async def _apply_cancellation_requested(self, ctx: LocalContext, event: Event) -> None:
+        """
+        Apply cancellation_requested event - mark workflow for cancellation.
+
+        This event signals that cancellation was requested. During replay,
+        we set the cancellation flag so the workflow will raise CancellationError
+        at the next check point.
+        """
+        reason = event.data.get("reason")
+        requested_by = event.data.get("requested_by")
+
+        # Set cancellation flag in context
+        ctx.request_cancellation(reason=reason)
+
+        logger.info(
+            f"Cancellation requested for workflow",
+            run_id=ctx.run_id,
+            reason=reason,
+            requested_by=requested_by,
         )
 
 

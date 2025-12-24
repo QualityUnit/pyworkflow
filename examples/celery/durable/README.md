@@ -27,6 +27,8 @@ pyworkflow setup --check
 | [06_fault_tolerance.py](06_fault_tolerance.py) | Automatic recovery from crashes | Worker loss, event replay |
 | [07_hooks.py](07_hooks.py) | External events/webhooks | Hooks, callbacks |
 | [08_cancellation.py](08_cancellation.py) | Graceful cancellation | cancel_workflow, CancellationError, shield |
+| [09_child_workflows.py](09_child_workflows.py) | Parent-child workflow orchestration | start_child_workflow, ChildWorkflowHandle |
+| [10_child_workflow_patterns.py](10_child_workflow_patterns.py) | Advanced child patterns | Nesting, parallel, error propagation |
 
 ## Running Examples
 
@@ -70,6 +72,13 @@ pyworkflow --module examples.celery.durable.04_batch_processing workflows run ba
 pyworkflow --module examples.celery.durable.05_idempotency workflows run payment_workflow \
     --arg payment_id=pay-123 --arg amount=99.99 \
     --idempotency-key payment-pay-123
+
+# Child workflows (order fulfillment with children)
+pyworkflow --module examples.celery.durable.09_child_workflows workflows run order_fulfillment_workflow \
+    --arg order_id=order-456 --arg amount=149.99 --arg customer_email=customer@example.com
+
+# Parallel child workflows
+pyworkflow --module examples.celery.durable.10_child_workflow_patterns workflows run parallel_parent_workflow
 ```
 
 ### Step 3: Monitor Execution
@@ -129,6 +138,23 @@ Cancellation is checkpoint-based:
 - Checked before each step, sleep, and hook
 - Does NOT interrupt a step mid-execution
 - Use `shield()` to protect cleanup code
+
+### Child Workflows
+
+Spawn child workflows for complex orchestration:
+
+```bash
+# Check parent and children
+pyworkflow runs status <parent_run_id>
+pyworkflow runs children <parent_run_id>
+```
+
+Child workflow features:
+- Own run_id and event history
+- Wait for completion or fire-and-forget
+- Automatic cancellation when parent completes (TERMINATE policy)
+- Max nesting depth of 3 levels
+- Error propagation via ChildWorkflowFailedError
 
 ## Next Steps
 

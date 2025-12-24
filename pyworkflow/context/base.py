@@ -318,6 +318,23 @@ class WorkflowContext(ABC):
         pass  # Default: no validation
 
     # =========================================================================
+    # Child workflow support - used by start_child_workflow
+    # =========================================================================
+
+    @property
+    def pending_children(self) -> dict[str, str]:
+        """Get pending child workflows (child_id -> child_run_id)."""
+        return {}
+
+    def has_child_result(self, child_id: str) -> bool:
+        """Check if a child workflow result exists."""
+        return False
+
+    def get_child_result(self, child_id: str) -> dict[str, Any]:
+        """Get cached child workflow result."""
+        return {}
+
+    # =========================================================================
     # Optional methods - can be overridden by subclasses
     # =========================================================================
 

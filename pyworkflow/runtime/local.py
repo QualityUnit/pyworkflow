@@ -14,11 +14,94 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from loguru import logger
 
-from pyworkflow.core.exceptions import SuspensionSignal, WorkflowNotFoundError
+from pyworkflow.core.exceptions import CancellationError, SuspensionSignal, WorkflowNotFoundError
 from pyworkflow.runtime.base import Runtime
 
 if TYPE_CHECKING:
     from pyworkflow.storage.base import StorageBackend
+    from pyworkflow.storage.schemas import RunStatus
+
+
+async def _handle_parent_completion_local(
+    run_id: str,
+    status: "RunStatus",
+    storage: "StorageBackend",
+) -> None:
+    """
+    Handle parent workflow completion by cancelling all running children.
+
+    When a parent workflow reaches a terminal state (COMPLETED, FAILED, CANCELLED),
+    all running child workflows are automatically cancelled. This implements the
+    TERMINATE parent close policy.
+    """
+    from pyworkflow.engine.events import EventType, create_child_workflow_cancelled_event
+    from pyworkflow.engine.executor import cancel_workflow
+    from pyworkflow.storage.schemas import RunStatus
+
+    # Get all non-terminal children
+    children = await storage.get_children(run_id)
+    non_terminal_statuses = {
+        RunStatus.PENDING,
+        RunStatus.RUNNING,
+        RunStatus.SUSPENDED,
+        RunStatus.INTERRUPTED,
+    }
+
+    running_children = [c for c in children if c.status in non_terminal_statuses]
+
+    if not running_children:
+        return
+
+    logger.info(
+        f"Cancelling {len(running_children)} child workflow(s) due to parent {status.value}",
+        parent_run_id=run_id,
+        parent_status=status.value,
+        child_count=len(running_children),
+    )
+
+    for child in running_children:
+        try:
+            reason = f"Parent workflow {run_id} {status.value}"
+
+            await cancel_workflow(
+                run_id=child.run_id,
+                reason=reason,
+                storage=storage,
+            )
+
+            # Find child_id from parent's events
+            events = await storage.get_events(run_id)
+            child_id = None
+            for event in events:
+                if (
+                    event.type == EventType.CHILD_WORKFLOW_STARTED
+                    and event.data.get("child_run_id") == child.run_id
+                ):
+                    child_id = event.data.get("child_id")
+                    break
+
+            if child_id:
+                cancel_event = create_child_workflow_cancelled_event(
+                    run_id=run_id,
+                    child_id=child_id,
+                    child_run_id=child.run_id,
+                    reason=reason,
+                )
+                await storage.record_event(cancel_event)
+
+            logger.info(
+                f"Cancelled child workflow: {child.workflow_name}",
+                parent_run_id=run_id,
+                child_run_id=child.run_id,
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Failed to cancel child workflow: {child.workflow_name}",
+                parent_run_id=run_id,
+                child_run_id=child.run_id,
+                error=str(e),
+            )
 
 
 class LocalRuntime(Runtime):
@@ -105,11 +188,39 @@ class LocalRuntime(Runtime):
                     result=serialize_args(result),
                 )
 
+                # Cancel all running children (TERMINATE policy)
+                await _handle_parent_completion_local(run_id, RunStatus.COMPLETED, storage)
+
             logger.info(
                 f"Workflow completed: {workflow_name}",
                 run_id=run_id,
                 workflow_name=workflow_name,
                 durable=durable,
+            )
+
+            return run_id
+
+        except CancellationError as e:
+            if durable and storage is not None:
+                from pyworkflow.engine.events import create_workflow_cancelled_event
+
+                cancelled_event = create_workflow_cancelled_event(
+                    run_id=run_id,
+                    reason=e.reason,
+                    cleanup_completed=True,
+                )
+                await storage.record_event(cancelled_event)
+                await storage.update_run_status(run_id=run_id, status=RunStatus.CANCELLED)
+                await storage.clear_cancellation_flag(run_id)
+
+                # Cancel all running children (TERMINATE policy)
+                await _handle_parent_completion_local(run_id, RunStatus.CANCELLED, storage)
+
+            logger.info(
+                f"Workflow cancelled: {workflow_name}",
+                run_id=run_id,
+                workflow_name=workflow_name,
+                reason=e.reason,
             )
 
             return run_id
@@ -148,6 +259,9 @@ class LocalRuntime(Runtime):
                 await storage.update_run_status(
                     run_id=run_id, status=RunStatus.FAILED, error=str(e)
                 )
+
+                # Cancel all running children (TERMINATE policy)
+                await _handle_parent_completion_local(run_id, RunStatus.FAILED, storage)
 
             logger.error(
                 f"Workflow failed: {workflow_name}",
@@ -218,6 +332,9 @@ class LocalRuntime(Runtime):
                 result=serialize_args(result),
             )
 
+            # Cancel all running children (TERMINATE policy)
+            await _handle_parent_completion_local(run_id, RunStatus.COMPLETED, storage)
+
             logger.info(
                 f"Workflow resumed and completed: {run.workflow_name}",
                 run_id=run_id,
@@ -225,6 +342,30 @@ class LocalRuntime(Runtime):
             )
 
             return result
+
+        except CancellationError as e:
+            from pyworkflow.engine.events import create_workflow_cancelled_event
+
+            cancelled_event = create_workflow_cancelled_event(
+                run_id=run_id,
+                reason=e.reason,
+                cleanup_completed=True,
+            )
+            await storage.record_event(cancelled_event)
+            await storage.update_run_status(run_id=run_id, status=RunStatus.CANCELLED)
+            await storage.clear_cancellation_flag(run_id)
+
+            # Cancel all running children (TERMINATE policy)
+            await _handle_parent_completion_local(run_id, RunStatus.CANCELLED, storage)
+
+            logger.info(
+                f"Workflow cancelled on resume: {run.workflow_name}",
+                run_id=run_id,
+                workflow_name=run.workflow_name,
+                reason=e.reason,
+            )
+
+            return None
 
         except SuspensionSignal as e:
             # Workflow suspended again
@@ -242,6 +383,12 @@ class LocalRuntime(Runtime):
         except Exception as e:
             # Workflow failed
             await storage.update_run_status(run_id=run_id, status=RunStatus.FAILED, error=str(e))
+
+            # Cancel all running children (TERMINATE policy)
+            await _handle_parent_completion_local(run_id, RunStatus.FAILED, storage)
+
+            # Cancel all running children (TERMINATE policy)
+            await _handle_parent_completion_local(run_id, RunStatus.FAILED, storage)
 
             logger.error(
                 f"Workflow failed on resume: {run.workflow_name}",
@@ -297,3 +444,200 @@ class LocalRuntime(Runtime):
             run_id=run_id,
             wake_time=wake_time.isoformat(),
         )
+
+    async def start_child_workflow(
+        self,
+        workflow_func: Callable[..., Any],
+        args: tuple,
+        kwargs: dict,
+        child_run_id: str,
+        workflow_name: str,
+        storage: "StorageBackend",
+        parent_run_id: str,
+        child_id: str,
+        wait_for_completion: bool,
+    ) -> None:
+        """
+        Start a child workflow in the background (fire-and-forget).
+
+        Uses asyncio.create_task to run the child workflow asynchronously
+        so the caller returns immediately.
+        """
+        import asyncio
+
+        asyncio.create_task(
+            self._execute_child_workflow(
+                workflow_func=workflow_func,
+                args=args,
+                kwargs=kwargs,
+                child_run_id=child_run_id,
+                workflow_name=workflow_name,
+                storage=storage,
+                parent_run_id=parent_run_id,
+                child_id=child_id,
+                wait_for_completion=wait_for_completion,
+            )
+        )
+
+    async def _execute_child_workflow(
+        self,
+        workflow_func: Callable[..., Any],
+        args: tuple,
+        kwargs: dict,
+        child_run_id: str,
+        workflow_name: str,
+        storage: "StorageBackend",
+        parent_run_id: str,
+        child_id: str,
+        wait_for_completion: bool,
+    ) -> None:
+        """
+        Execute a child workflow and notify parent on completion.
+
+        This runs in the background and handles:
+        1. Executing the child workflow
+        2. Recording completion/failure events in parent's log
+        3. Triggering parent resumption if waiting
+        """
+        from pyworkflow.core.workflow import execute_workflow_with_context
+        from pyworkflow.engine.events import (
+            create_child_workflow_completed_event,
+            create_child_workflow_failed_event,
+        )
+        from pyworkflow.serialization.encoder import serialize
+        from pyworkflow.storage.schemas import RunStatus
+
+        try:
+            # Update status to RUNNING
+            await storage.update_run_status(child_run_id, RunStatus.RUNNING)
+
+            # Execute the child workflow
+            result = await execute_workflow_with_context(
+                run_id=child_run_id,
+                workflow_func=workflow_func,
+                workflow_name=workflow_name,
+                args=args,
+                kwargs=kwargs,
+                storage=storage,
+                durable=True,
+                event_log=None,  # Fresh execution
+            )
+
+            # Update status to COMPLETED
+            serialized_result = serialize(result)
+            await storage.update_run_status(
+                child_run_id, RunStatus.COMPLETED, result=serialized_result
+            )
+
+            # Record completion in parent's log
+            completion_event = create_child_workflow_completed_event(
+                run_id=parent_run_id,
+                child_id=child_id,
+                child_run_id=child_run_id,
+                result=serialized_result,
+            )
+            await storage.record_event(completion_event)
+
+            logger.info(
+                f"Child workflow completed: {workflow_name}",
+                parent_run_id=parent_run_id,
+                child_run_id=child_run_id,
+            )
+
+            # If parent is waiting, trigger resumption
+            if wait_for_completion:
+                await self._trigger_parent_resumption(parent_run_id, storage)
+
+        except SuspensionSignal:
+            # Child workflow suspended (e.g., sleep, hook)
+            # Update status and don't notify parent yet - handled on child resumption
+            await storage.update_run_status(child_run_id, RunStatus.SUSPENDED)
+            logger.debug(
+                f"Child workflow suspended: {workflow_name}",
+                parent_run_id=parent_run_id,
+                child_run_id=child_run_id,
+            )
+
+        except Exception as e:
+            # Child workflow failed
+            error_msg = str(e)
+            error_type = type(e).__name__
+
+            await storage.update_run_status(child_run_id, RunStatus.FAILED, error=error_msg)
+
+            # Record failure in parent's log
+            failure_event = create_child_workflow_failed_event(
+                run_id=parent_run_id,
+                child_id=child_id,
+                child_run_id=child_run_id,
+                error=error_msg,
+                error_type=error_type,
+            )
+            await storage.record_event(failure_event)
+
+            logger.error(
+                f"Child workflow failed: {workflow_name}",
+                parent_run_id=parent_run_id,
+                child_run_id=child_run_id,
+                error=error_msg,
+            )
+
+            # If parent is waiting, trigger resumption (will raise error on replay)
+            if wait_for_completion:
+                await self._trigger_parent_resumption(parent_run_id, storage)
+
+    async def _trigger_parent_resumption(
+        self,
+        parent_run_id: str,
+        storage: "StorageBackend",
+    ) -> None:
+        """
+        Trigger parent workflow resumption after child completes.
+
+        Checks if parent is suspended and resumes it.
+        """
+        from pyworkflow.storage.schemas import RunStatus
+
+        parent_run = await storage.get_run(parent_run_id)
+        if parent_run and parent_run.status == RunStatus.SUSPENDED:
+            logger.debug(
+                "Triggering parent resumption",
+                parent_run_id=parent_run_id,
+            )
+            # Resume the parent workflow directly (we're already in a background task)
+            await self.resume_workflow(parent_run_id, storage=storage)
+
+
+async def resume(
+    run_id: str,
+    storage: Optional["StorageBackend"] = None,
+) -> Any:
+    """
+    Resume a suspended workflow using the local runtime.
+
+    This is a convenience function for resuming workflows without
+    explicitly creating a LocalRuntime instance.
+
+    Args:
+        run_id: Workflow run ID to resume
+        storage: Storage backend (uses configured default if None)
+
+    Returns:
+        Workflow result if completed, None if suspended again
+
+    Raises:
+        WorkflowNotFoundError: If workflow run doesn't exist
+    """
+    if storage is None:
+        from pyworkflow.config import get_config
+
+        config = get_config()
+        storage = config.storage
+
+        if storage is None:
+            from pyworkflow.storage.file import FileStorageBackend
+
+            storage = FileStorageBackend()
+
+    runtime = LocalRuntime()
+    return await runtime.resume_workflow(run_id=run_id, storage=storage)

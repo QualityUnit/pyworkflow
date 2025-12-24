@@ -74,6 +74,10 @@ class WorkflowRun:
     max_recovery_attempts: int = 3  # Maximum recovery attempts allowed
     recover_on_worker_loss: bool = True  # Whether to auto-recover on worker failure
 
+    # Child workflow tracking
+    parent_run_id: str | None = None  # Link to parent workflow (None if root)
+    nesting_depth: int = 0  # 0=root, 1=child, 2=grandchild (max 3)
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
@@ -94,6 +98,8 @@ class WorkflowRun:
             "recovery_attempts": self.recovery_attempts,
             "max_recovery_attempts": self.max_recovery_attempts,
             "recover_on_worker_loss": self.recover_on_worker_loss,
+            "parent_run_id": self.parent_run_id,
+            "nesting_depth": self.nesting_depth,
         }
 
     @classmethod
@@ -121,6 +127,8 @@ class WorkflowRun:
             recovery_attempts=data.get("recovery_attempts", 0),
             max_recovery_attempts=data.get("max_recovery_attempts", 3),
             recover_on_worker_loss=data.get("recover_on_worker_loss", True),
+            parent_run_id=data.get("parent_run_id"),
+            nesting_depth=data.get("nesting_depth", 0),
         )
 
 

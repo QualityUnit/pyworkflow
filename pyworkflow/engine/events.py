@@ -44,6 +44,12 @@ class EventType(Enum):
     # Cancellation events
     CANCELLATION_REQUESTED = "cancellation.requested"
 
+    # Child workflow events
+    CHILD_WORKFLOW_STARTED = "child_workflow.started"
+    CHILD_WORKFLOW_COMPLETED = "child_workflow.completed"
+    CHILD_WORKFLOW_FAILED = "child_workflow.failed"
+    CHILD_WORKFLOW_CANCELLED = "child_workflow.cancelled"
+
 
 @dataclass
 class Event:
@@ -418,6 +424,153 @@ def create_step_cancelled_event(
         data={
             "step_id": step_id,
             "step_name": step_name,
+            "reason": reason,
+            "cancelled_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+# Child workflow event creation helpers
+
+
+def create_child_workflow_started_event(
+    run_id: str,
+    child_id: str,
+    child_run_id: str,
+    child_workflow_name: str,
+    args: Any,
+    kwargs: Any,
+    wait_for_completion: bool,
+) -> Event:
+    """
+    Create a child workflow started event.
+
+    This event is recorded in the parent workflow's event log when a child
+    workflow is spawned.
+
+    Args:
+        run_id: The parent workflow run ID
+        child_id: Deterministic child identifier (for replay)
+        child_run_id: The child workflow's unique run ID
+        child_workflow_name: The name of the child workflow
+        args: Serialized positional arguments for child workflow
+        kwargs: Serialized keyword arguments for child workflow
+        wait_for_completion: Whether parent is waiting for child to complete
+
+    Returns:
+        Event: The child workflow started event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.CHILD_WORKFLOW_STARTED,
+        data={
+            "child_id": child_id,
+            "child_run_id": child_run_id,
+            "child_workflow_name": child_workflow_name,
+            "args": args,
+            "kwargs": kwargs,
+            "wait_for_completion": wait_for_completion,
+            "started_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_child_workflow_completed_event(
+    run_id: str,
+    child_id: str,
+    child_run_id: str,
+    result: Any,
+) -> Event:
+    """
+    Create a child workflow completed event.
+
+    This event is recorded in the parent workflow's event log when a child
+    workflow completes successfully.
+
+    Args:
+        run_id: The parent workflow run ID
+        child_id: Deterministic child identifier (for replay)
+        child_run_id: The child workflow's run ID
+        result: Serialized result from the child workflow
+
+    Returns:
+        Event: The child workflow completed event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.CHILD_WORKFLOW_COMPLETED,
+        data={
+            "child_id": child_id,
+            "child_run_id": child_run_id,
+            "result": result,
+            "completed_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_child_workflow_failed_event(
+    run_id: str,
+    child_id: str,
+    child_run_id: str,
+    error: str,
+    error_type: str,
+) -> Event:
+    """
+    Create a child workflow failed event.
+
+    This event is recorded in the parent workflow's event log when a child
+    workflow fails.
+
+    Args:
+        run_id: The parent workflow run ID
+        child_id: Deterministic child identifier (for replay)
+        child_run_id: The child workflow's run ID
+        error: Error message from the child workflow
+        error_type: The exception type that caused the failure
+
+    Returns:
+        Event: The child workflow failed event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.CHILD_WORKFLOW_FAILED,
+        data={
+            "child_id": child_id,
+            "child_run_id": child_run_id,
+            "error": error,
+            "error_type": error_type,
+            "failed_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_child_workflow_cancelled_event(
+    run_id: str,
+    child_id: str,
+    child_run_id: str,
+    reason: str | None = None,
+) -> Event:
+    """
+    Create a child workflow cancelled event.
+
+    This event is recorded in the parent workflow's event log when a child
+    workflow is cancelled (typically due to parent completion or explicit cancel).
+
+    Args:
+        run_id: The parent workflow run ID
+        child_id: Deterministic child identifier (for replay)
+        child_run_id: The child workflow's run ID
+        reason: Optional reason for cancellation
+
+    Returns:
+        Event: The child workflow cancelled event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.CHILD_WORKFLOW_CANCELLED,
+        data={
+            "child_id": child_id,
+            "child_run_id": child_run_id,
             "reason": reason,
             "cancelled_at": datetime.now(UTC).isoformat(),
         },

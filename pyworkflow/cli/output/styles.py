@@ -79,6 +79,10 @@ STATUS_COLORS: Dict[str, str] = {
     "failed": Colors.RED,
     "cancelled": Colors.MAGENTA,
     "pending": Colors.CYAN,
+    # Hook statuses
+    "received": Colors.GREEN,
+    "expired": Colors.RED,
+    "disposed": Colors.GRAY,
 }
 
 # Event type color mapping

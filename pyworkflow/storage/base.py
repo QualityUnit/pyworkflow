@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from typing import List, Optional
 
 from pyworkflow.engine.events import Event
-from pyworkflow.storage.schemas import RunStatus, StepExecution, WorkflowRun
+from pyworkflow.storage.schemas import Hook, HookStatus, RunStatus, StepExecution, WorkflowRun
 
 
 class StorageBackend(ABC):
@@ -228,6 +228,83 @@ class StorageBackend(ABC):
 
         Returns:
             List of StepExecution instances
+        """
+        pass
+
+    # Hook Operations
+
+    @abstractmethod
+    async def create_hook(self, hook: Hook) -> None:
+        """
+        Create a hook record.
+
+        Args:
+            hook: Hook instance to persist
+        """
+        pass
+
+    @abstractmethod
+    async def get_hook(self, hook_id: str) -> Optional[Hook]:
+        """
+        Retrieve a hook by ID.
+
+        Args:
+            hook_id: Hook identifier
+
+        Returns:
+            Hook if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def get_hook_by_token(self, token: str) -> Optional[Hook]:
+        """
+        Retrieve a hook by its token.
+
+        Args:
+            token: Hook token (composite format: run_id:hook_id)
+
+        Returns:
+            Hook if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def update_hook_status(
+        self,
+        hook_id: str,
+        status: HookStatus,
+        payload: Optional[str] = None,
+    ) -> None:
+        """
+        Update hook status and optionally payload.
+
+        Args:
+            hook_id: Hook identifier
+            status: New status
+            payload: JSON serialized payload (if received)
+        """
+        pass
+
+    @abstractmethod
+    async def list_hooks(
+        self,
+        run_id: Optional[str] = None,
+        status: Optional[HookStatus] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[Hook]:
+        """
+        List hooks with optional filtering.
+
+        Args:
+            run_id: Filter by workflow run ID
+            status: Filter by status
+            limit: Maximum number of results
+            offset: Number of results to skip
+
+        Returns:
+            List of Hook instances
         """
         pass
 

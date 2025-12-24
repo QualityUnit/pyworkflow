@@ -8,9 +8,10 @@ any side effects. Tracks all operations for verification.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, Union
 
 from loguru import logger
+from pydantic import BaseModel
 
 from pyworkflow.context.base import StepFunction, WorkflowContext
 
@@ -256,6 +257,7 @@ class MockContext(WorkflowContext):
         name: str,
         timeout: Optional[int] = None,
         on_created: Optional[Callable[[str], Awaitable[None]]] = None,
+        payload_schema: Optional[Type[BaseModel]] = None,
     ) -> Any:
         """
         Wait for an external event (hook).
@@ -266,6 +268,7 @@ class MockContext(WorkflowContext):
             name: Hook name
             timeout: Optional timeout in seconds (tracked but not enforced)
             on_created: Optional callback called with token (for testing)
+            payload_schema: Optional Pydantic model (tracked but not enforced)
 
         Returns:
             Mock hook payload

@@ -84,7 +84,8 @@ def config_to_storage(config: Optional[Dict[str, Any]] = None) -> StorageBackend
     if storage_type == "file":
         from pyworkflow.storage.file import FileStorageBackend
 
-        return FileStorageBackend(base_path=config.get("base_path"))
+        base_path = config.get("base_path") or "./workflow_data"
+        return FileStorageBackend(base_path=base_path)
 
     elif storage_type == "memory":
         from pyworkflow.storage.memory import InMemoryStorageBackend

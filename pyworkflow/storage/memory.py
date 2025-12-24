@@ -16,7 +16,7 @@ from typing import Dict, List, Optional
 
 from pyworkflow.engine.events import Event
 from pyworkflow.storage.base import StorageBackend
-from pyworkflow.storage.schemas import RunStatus, StepExecution, WorkflowRun
+from pyworkflow.storage.schemas import Hook, HookStatus, RunStatus, StepExecution, WorkflowRun
 
 
 class InMemoryStorageBackend(StorageBackend):
@@ -36,7 +36,9 @@ class InMemoryStorageBackend(StorageBackend):
         self._runs: Dict[str, WorkflowRun] = {}
         self._events: Dict[str, List[Event]] = {}
         self._steps: Dict[str, StepExecution] = {}
+        self._hooks: Dict[str, Hook] = {}
         self._idempotency_index: Dict[str, str] = {}  # key -> run_id
+        self._token_index: Dict[str, str] = {}  # token -> hook_id
         self._lock = threading.RLock()
         self._event_sequences: Dict[str, int] = {}  # run_id -> next sequence
 
@@ -215,6 +217,68 @@ class InMemoryStorageBackend(StorageBackend):
         with self._lock:
             return [s for s in self._steps.values() if s.run_id == run_id]
 
+    # Hook Operations
+
+    async def create_hook(self, hook: Hook) -> None:
+        """Create a hook record."""
+        with self._lock:
+            self._hooks[hook.hook_id] = hook
+            self._token_index[hook.token] = hook.hook_id
+
+    async def get_hook(self, hook_id: str) -> Optional[Hook]:
+        """Retrieve a hook by ID."""
+        with self._lock:
+            return self._hooks.get(hook_id)
+
+    async def get_hook_by_token(self, token: str) -> Optional[Hook]:
+        """Retrieve a hook by its token."""
+        with self._lock:
+            hook_id = self._token_index.get(token)
+            if hook_id:
+                return self._hooks.get(hook_id)
+            return None
+
+    async def update_hook_status(
+        self,
+        hook_id: str,
+        status: HookStatus,
+        payload: Optional[str] = None,
+    ) -> None:
+        """Update hook status and optionally payload."""
+        with self._lock:
+            hook = self._hooks.get(hook_id)
+            if hook:
+                hook.status = status
+                if payload is not None:
+                    hook.payload = payload
+                if status == HookStatus.RECEIVED:
+                    hook.received_at = datetime.now(UTC)
+
+    async def list_hooks(
+        self,
+        run_id: Optional[str] = None,
+        status: Optional[HookStatus] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[Hook]:
+        """List hooks with optional filtering."""
+        with self._lock:
+            hooks = list(self._hooks.values())
+
+            # Filter by run_id
+            if run_id:
+                hooks = [h for h in hooks if h.run_id == run_id]
+
+            # Filter by status
+            if status:
+                hooks = [h for h in hooks if h.status == status]
+
+            # Sort by created_at descending
+            hooks.sort(key=lambda h: h.created_at, reverse=True)
+
+            # Apply pagination
+            return hooks[offset : offset + limit]
+
     # Utility methods
 
     def clear(self) -> None:
@@ -227,7 +291,9 @@ class InMemoryStorageBackend(StorageBackend):
             self._runs.clear()
             self._events.clear()
             self._steps.clear()
+            self._hooks.clear()
             self._idempotency_index.clear()
+            self._token_index.clear()
             self._event_sequences.clear()
 
     def __len__(self) -> int:
@@ -242,5 +308,6 @@ class InMemoryStorageBackend(StorageBackend):
                 f"InMemoryStorageBackend("
                 f"runs={len(self._runs)}, "
                 f"events={sum(len(e) for e in self._events.values())}, "
-                f"steps={len(self._steps)})"
+                f"steps={len(self._steps)}, "
+                f"hooks={len(self._hooks)})"
             )

@@ -73,6 +73,7 @@ class TypedHook(Generic[T]):
             self.name,
             timeout=timeout,
             on_created=on_created,
+            payload_schema=self.schema,
         )
 
         # Validate and return typed result

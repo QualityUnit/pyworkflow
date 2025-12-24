@@ -326,21 +326,50 @@ async def run_logs(
             lines = [f"{event.sequence}: {event.type.value}" for event in events]
             format_plain(lines)
 
-        else:  # table (displays as list)
-            data = [
-                {
-                    "Seq": event.sequence or "-",
-                    "Type": event.type.value,
-                    "Timestamp": event.timestamp.strftime("%H:%M:%S.%f")[:-3] if event.timestamp else "-",
-                    "Data": json.dumps(event.data)[:60] + "..." if len(json.dumps(event.data)) > 60 else json.dumps(event.data),
-                }
-                for event in events
-            ]
-            format_table(
-                data,
-                ["Seq", "Type", "Timestamp", "Data"],
-                title=f"Event Log: {run_id}",
-            )
+        else:  # table (displays as list with full data)
+            from pyworkflow.cli.output.styles import Colors, RESET, DIM
+
+            print(f"\n{Colors.PRIMARY}{Colors.bold(f'Event Log: {run_id}')}{RESET}")
+            print(f"{DIM}{'─' * 60}{RESET}")
+            print(f"Total events: {len(events)}\n")
+
+            for event in events:
+                seq = event.sequence or "-"
+                event_type = event.type.value
+                timestamp = event.timestamp.strftime("%H:%M:%S.%f")[:-3] if event.timestamp else "-"
+
+                # Color code event types
+                type_color = {
+                    "workflow.started": Colors.BLUE,
+                    "workflow.completed": Colors.GREEN,
+                    "workflow.failed": Colors.RED,
+                    "workflow.interrupted": Colors.YELLOW,
+                    "step.started": Colors.CYAN,
+                    "step.completed": Colors.GREEN,
+                    "step.failed": Colors.RED,
+                    "step.retrying": Colors.YELLOW,
+                    "sleep.started": Colors.MAGENTA,
+                    "sleep.completed": Colors.MAGENTA,
+                    "hook.created": Colors.YELLOW,
+                    "hook.received": Colors.GREEN,
+                }.get(event_type, "")
+
+                print(f"{Colors.bold(str(seq))}")
+                print(f"   Type: {type_color}{event_type}{RESET}")
+                print(f"   Timestamp: {timestamp}")
+
+                # Pretty print data if not empty
+                if event.data:
+                    data_str = json.dumps(event.data, indent=6)
+                    # Indent each line of the JSON
+                    data_lines = data_str.split('\n')
+                    print(f"   Data: {data_lines[0]}")
+                    for line in data_lines[1:]:
+                        print(f"   {line}")
+                else:
+                    print(f"   Data: {DIM}{{}}{RESET}")
+
+                print()  # Blank line between events
 
     except Exception as e:
         print_error(f"Failed to get event log: {e}")

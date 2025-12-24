@@ -170,13 +170,23 @@ async def resume_hook(
     # Record HOOK_RECEIVED event (this is the idempotency marker and payload store)
     from pyworkflow.engine.events import create_hook_received_event
     from pyworkflow.serialization.encoder import serialize
+    from pyworkflow.storage.schemas import HookStatus
+
+    serialized_payload = serialize(payload)
 
     event = create_hook_received_event(
         run_id=run_id,
         hook_id=hook_id,
-        payload=serialize(payload),
+        payload=serialized_payload,
     )
     await storage.record_event(event)
+
+    # Update hook status in storage
+    await storage.update_hook_status(
+        hook_id=hook_id,
+        status=HookStatus.RECEIVED,
+        payload=serialized_payload,
+    )
 
     # Schedule workflow resumption via Celery
     try:

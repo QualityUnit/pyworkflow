@@ -14,6 +14,9 @@ Data is stored in a directory structure:
             {run_id}.jsonl  (append-only)
         steps/
             {step_id}.json
+        hooks/
+            {hook_id}.json
+        _token_index.json  (token -> hook_id mapping)
 """
 
 import asyncio
@@ -26,7 +29,7 @@ from filelock import FileLock
 
 from pyworkflow.engine.events import Event, EventType
 from pyworkflow.storage.base import StorageBackend
-from pyworkflow.storage.schemas import RunStatus, StepExecution, WorkflowRun
+from pyworkflow.storage.schemas import Hook, HookStatus, RunStatus, StepExecution, WorkflowRun
 
 
 class FileStorageBackend(StorageBackend):
@@ -47,13 +50,16 @@ class FileStorageBackend(StorageBackend):
         self.runs_dir = self.base_path / "runs"
         self.events_dir = self.base_path / "events"
         self.steps_dir = self.base_path / "steps"
+        self.hooks_dir = self.base_path / "hooks"
         self.locks_dir = self.base_path / ".locks"
+        self._token_index_file = self.base_path / "_token_index.json"
 
         # Create directories
         for dir_path in [
             self.runs_dir,
             self.events_dir,
             self.steps_dir,
+            self.hooks_dir,
             self.locks_dir,
         ]:
             dir_path.mkdir(parents=True, exist_ok=True)
@@ -365,3 +371,119 @@ class FileStorageBackend(StorageBackend):
 
         step_data_list = await asyncio.to_thread(_list)
         return [StepExecution.from_dict(data) for data in step_data_list]
+
+    # Hook Operations
+
+    def _load_token_index(self) -> dict:
+        """Load the token -> hook_id index."""
+        if self._token_index_file.exists():
+            return json.loads(self._token_index_file.read_text())
+        return {}
+
+    def _save_token_index(self, index: dict) -> None:
+        """Save the token -> hook_id index."""
+        self._token_index_file.write_text(json.dumps(index, indent=2))
+
+    async def create_hook(self, hook: Hook) -> None:
+        """Create a hook record."""
+        hook_file = self.hooks_dir / f"{hook.hook_id}.json"
+        lock_file = self.locks_dir / "token_index.lock"
+        lock = FileLock(str(lock_file))
+
+        data = hook.to_dict()
+
+        def _write() -> None:
+            with lock:
+                hook_file.write_text(json.dumps(data, indent=2))
+                # Update token index
+                index = self._load_token_index()
+                index[hook.token] = hook.hook_id
+                self._save_token_index(index)
+
+        await asyncio.to_thread(_write)
+
+    async def get_hook(self, hook_id: str) -> Optional[Hook]:
+        """Retrieve a hook by ID."""
+        hook_file = self.hooks_dir / f"{hook_id}.json"
+
+        if not hook_file.exists():
+            return None
+
+        def _read() -> dict:
+            return json.loads(hook_file.read_text())
+
+        data = await asyncio.to_thread(_read)
+        return Hook.from_dict(data)
+
+    async def get_hook_by_token(self, token: str) -> Optional[Hook]:
+        """Retrieve a hook by its token."""
+
+        def _lookup() -> Optional[str]:
+            index = self._load_token_index()
+            return index.get(token)
+
+        hook_id = await asyncio.to_thread(_lookup)
+        if hook_id:
+            return await self.get_hook(hook_id)
+        return None
+
+    async def update_hook_status(
+        self,
+        hook_id: str,
+        status: HookStatus,
+        payload: Optional[str] = None,
+    ) -> None:
+        """Update hook status and optionally payload."""
+        hook_file = self.hooks_dir / f"{hook_id}.json"
+
+        if not hook_file.exists():
+            raise ValueError(f"Hook {hook_id} not found")
+
+        lock_file = self.locks_dir / f"hook_{hook_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _update() -> None:
+            with lock:
+                data = json.loads(hook_file.read_text())
+                data["status"] = status.value
+
+                if payload is not None:
+                    data["payload"] = payload
+
+                if status == HookStatus.RECEIVED:
+                    data["received_at"] = datetime.now(UTC).isoformat()
+
+                hook_file.write_text(json.dumps(data, indent=2))
+
+        await asyncio.to_thread(_update)
+
+    async def list_hooks(
+        self,
+        run_id: Optional[str] = None,
+        status: Optional[HookStatus] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[Hook]:
+        """List hooks with optional filtering."""
+
+        def _list() -> List[dict]:
+            hooks = []
+            for hook_file in self.hooks_dir.glob("*.json"):
+                data = json.loads(hook_file.read_text())
+
+                # Apply filters
+                if run_id and data.get("run_id") != run_id:
+                    continue
+                if status and data.get("status") != status.value:
+                    continue
+
+                hooks.append(data)
+
+            # Sort by created_at descending
+            hooks.sort(key=lambda h: h.get("created_at", ""), reverse=True)
+
+            # Apply pagination
+            return hooks[offset : offset + limit]
+
+        hook_data_list = await asyncio.to_thread(_list)
+        return [Hook.from_dict(data) for data in hook_data_list]

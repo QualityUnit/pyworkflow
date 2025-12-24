@@ -112,11 +112,13 @@ from pyworkflow.cli.commands.workflows import workflows
 from pyworkflow.cli.commands.runs import runs
 from pyworkflow.cli.commands.worker import worker
 from pyworkflow.cli.commands.setup import setup
+from pyworkflow.cli.commands.hooks import hooks
 
 main.add_command(workflows)
 main.add_command(runs)
 main.add_command(worker)
 main.add_command(setup)
+main.add_command(hooks)
 
 
 # Export main for entry point

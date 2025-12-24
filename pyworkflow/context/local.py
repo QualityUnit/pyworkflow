@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Type, Union
 
 from loguru import logger
+from pydantic import BaseModel
 
 from pyworkflow.context.base import StepFunction, WorkflowContext
 from pyworkflow.core.exceptions import SuspensionSignal
@@ -562,6 +564,7 @@ class LocalContext(WorkflowContext):
         name: str,
         timeout: Optional[int] = None,
         on_created: Optional[Callable[[str], Awaitable[None]]] = None,
+        payload_schema: Optional[Type[BaseModel]] = None,
     ) -> Any:
         """
         Wait for an external event (webhook, approval, callback).
@@ -580,6 +583,7 @@ class LocalContext(WorkflowContext):
             name: Human-readable name for the hook
             timeout: Optional timeout in seconds
             on_created: Optional async callback called with token when hook is created
+            payload_schema: Optional Pydantic model class for payload validation
 
         Returns:
             Payload from resume_hook()
@@ -624,6 +628,24 @@ class LocalContext(WorkflowContext):
             expires_at=expires_at,
         )
         await self._storage.record_event(event)
+
+        # Convert Pydantic model to JSON schema if provided
+        schema_json = None
+        if payload_schema is not None:
+            schema_json = json.dumps(payload_schema.model_json_schema())
+
+        # Create Hook record in storage for querying
+        from pyworkflow.storage.schemas import Hook
+
+        hook_record = Hook(
+            hook_id=hook_id,
+            run_id=self._run_id,
+            token=actual_token,
+            name=name,
+            expires_at=expires_at,
+            payload_schema=schema_json,
+        )
+        await self._storage.create_hook(hook_record)
 
         # Track pending hook locally
         self._pending_hooks[hook_id] = {

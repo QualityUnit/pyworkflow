@@ -5,9 +5,10 @@ Allows workflows to suspend and wait for external events such as
 webhooks, manual approvals, or third-party callbacks.
 """
 
-from typing import Any, Awaitable, Callable, Optional, Union
+from typing import Any, Awaitable, Callable, Optional, Type, Union
 
 from loguru import logger
+from pydantic import BaseModel
 
 from pyworkflow.context import get_context, has_context
 
@@ -17,6 +18,7 @@ async def hook(
     *,
     timeout: Optional[Union[str, int]] = None,
     on_created: Optional[Callable[[str], Awaitable[None]]] = None,
+    payload_schema: Optional[Type[BaseModel]] = None,
 ) -> Any:
     """
     Wait for an external event (webhook, approval, callback).
@@ -37,6 +39,8 @@ async def hook(
             - None: Wait forever
         on_created: Optional async callback invoked with the token when
             the hook is created. Use this to notify external systems.
+        payload_schema: Optional Pydantic model class for payload validation.
+            When provided, the schema is stored with the hook for CLI resume.
 
     Returns:
         Payload from resume_hook()
@@ -87,4 +91,5 @@ async def hook(
         name,
         timeout=timeout_seconds,
         on_created=on_created,
+        payload_schema=payload_schema,
     )

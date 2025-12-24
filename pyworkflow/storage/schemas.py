@@ -231,6 +231,7 @@ class Hook:
     # Data
     payload: Optional[str] = None  # JSON serialized payload from webhook
     name: Optional[str] = None  # Optional human-readable name
+    payload_schema: Optional[str] = None  # JSON schema for payload validation (from Pydantic)
 
     # Metadata
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -248,6 +249,7 @@ class Hook:
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "payload": self.payload,
             "name": self.name,
+            "payload_schema": self.payload_schema,
             "metadata": self.metadata,
         }
 
@@ -269,5 +271,6 @@ class Hook:
             ),
             payload=data.get("payload"),
             name=data.get("name"),
+            payload_schema=data.get("payload_schema"),
             metadata=data.get("metadata", {}),
         )

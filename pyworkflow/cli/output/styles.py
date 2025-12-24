@@ -90,14 +90,19 @@ EVENT_COLORS: Dict[str, str] = {
     "workflow_started": Colors.BLUE,
     "workflow_completed": Colors.GREEN,
     "workflow_failed": Colors.RED,
+    "workflow_cancelled": Colors.RED,
+    "workflow_interrupted": Colors.RED,
     "step_started": Colors.CYAN,
     "step_completed": Colors.GREEN,
     "step_failed": Colors.RED,
+    "step_cancelled": Colors.RED,
     "step_retrying": Colors.YELLOW,
     "sleep_started": Colors.MAGENTA,
     "sleep_completed": Colors.MAGENTA,
     "hook_created": Colors.YELLOW,
     "hook_received": Colors.GREEN,
+    "cancellation_requested": Colors.RED,
+    "cancellation.requested": Colors.RED,
 }
 
 # Spinner frames for watch mode

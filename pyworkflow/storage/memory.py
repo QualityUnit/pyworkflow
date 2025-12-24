@@ -296,6 +296,49 @@ class InMemoryStorageBackend(StorageBackend):
         with self._lock:
             self._cancellation_flags.pop(run_id, None)
 
+    # Continue-As-New Chain Operations
+
+    async def update_run_continuation(
+        self,
+        run_id: str,
+        continued_to_run_id: str,
+    ) -> None:
+        """Update the continuation link for a workflow run."""
+        with self._lock:
+            run = self._runs.get(run_id)
+            if run:
+                run.continued_to_run_id = continued_to_run_id
+                run.updated_at = datetime.now(UTC)
+
+    async def get_workflow_chain(
+        self,
+        run_id: str,
+    ) -> list[WorkflowRun]:
+        """Get all runs in a continue-as-new chain."""
+        with self._lock:
+            run = self._runs.get(run_id)
+            if not run:
+                return []
+
+            # Walk backwards to find the start of the chain
+            current = run
+            while current.continued_from_run_id:
+                prev = self._runs.get(current.continued_from_run_id)
+                if not prev:
+                    break
+                current = prev
+
+            # Build chain from start to end
+            chain = [current]
+            while current.continued_to_run_id:
+                next_run = self._runs.get(current.continued_to_run_id)
+                if not next_run:
+                    break
+                chain.append(next_run)
+                current = next_run
+
+            return chain
+
     # Child Workflow Operations
 
     async def get_children(

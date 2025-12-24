@@ -7,8 +7,10 @@ Primitives provide building blocks for workflow orchestration:
 - define_hook: Create typed hooks with Pydantic validation
 - resume_hook: Resume suspended workflows from external systems
 - shield: Protection from cancellation for critical sections
+- continue_as_new: Continue workflow with fresh event history
 """
 
+from pyworkflow.primitives.continue_as_new import continue_as_new
 from pyworkflow.primitives.define_hook import TypedHook, define_hook
 from pyworkflow.primitives.hooks import hook
 from pyworkflow.primitives.resume_hook import ResumeResult, resume_hook
@@ -26,4 +28,6 @@ __all__ = [
     "ResumeResult",
     # Cancellation
     "shield",
+    # Continue-as-new
+    "continue_as_new",
 ]

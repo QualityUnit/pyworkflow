@@ -621,3 +621,132 @@ async def list_children(
         if ctx.obj["verbose"]:
             raise
         raise click.Abort()
+
+
+@runs.command(name="chain")
+@click.argument("run_id")
+@click.pass_context
+@async_command
+async def run_chain(
+    ctx: click.Context,
+    run_id: str,
+) -> None:
+    """
+    Show the continue-as-new chain for a workflow run.
+
+    Displays all workflow runs in a continue-as-new chain, from the original
+    run to the latest continuation. Useful for tracking long-running workflows
+    that use continue_as_new() to reset their event history.
+
+    Args:
+        RUN_ID: Any workflow run identifier in the chain
+
+    Examples:
+
+        # Show chain for a workflow
+        pyworkflow runs chain run_abc123def456
+
+        # JSON output
+        pyworkflow --output json runs chain run_abc123def456
+    """
+    # Get context data
+    config = ctx.obj["config"]
+    output = ctx.obj["output"]
+    storage_type = ctx.obj["storage_type"]
+    storage_path = ctx.obj["storage_path"]
+
+    # Create storage backend
+    storage = create_storage(storage_type, storage_path, config)
+
+    try:
+        # Get the chain
+        chain = await storage.get_workflow_chain(run_id)
+
+        if not chain:
+            print_error(f"Workflow run '{run_id}' not found")
+            raise click.Abort()
+
+        def _calc_duration(run: WorkflowRun) -> str:
+            """Calculate duration for display."""
+            if run.started_at and run.completed_at:
+                duration = (run.completed_at - run.started_at).total_seconds()
+                return f"{duration:.1f}s"
+            elif run.started_at:
+                duration = (datetime.now() - run.started_at.replace(tzinfo=None)).total_seconds()
+                return f"{duration:.1f}s (ongoing)"
+            else:
+                return "-"
+
+        # Format output
+        if output == "json":
+            data = [
+                {
+                    "run_id": run.run_id,
+                    "workflow_name": run.workflow_name,
+                    "status": run.status.value,
+                    "continued_from_run_id": run.continued_from_run_id,
+                    "continued_to_run_id": run.continued_to_run_id,
+                    "created_at": run.created_at.isoformat() if run.created_at else None,
+                    "started_at": run.started_at.isoformat() if run.started_at else None,
+                    "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+                    "duration": _calc_duration(run),
+                }
+                for run in chain
+            ]
+            format_json(data)
+
+        elif output == "plain":
+            run_ids = [run.run_id for run in chain]
+            format_plain(run_ids)
+
+        else:  # table
+            from pyworkflow.cli.output.styles import DIM, RESET, Colors
+
+            print(f"\n{Colors.PRIMARY}{Colors.bold('Continue-As-New Chain')}{RESET}")
+            print(f"{DIM}{'─' * 60}{RESET}")
+            print(f"Chain length: {len(chain)} run(s)\n")
+
+            for i, run in enumerate(chain):
+                # Indicate position in chain
+                if i == 0:
+                    position = "START"
+                elif i == len(chain) - 1:
+                    position = "CURRENT"
+                else:
+                    position = f"#{i + 1}"
+
+                # Color code status
+                status_color = {
+                    "completed": Colors.GREEN,
+                    "failed": Colors.RED,
+                    "running": Colors.BLUE,
+                    "suspended": Colors.YELLOW,
+                    "cancelled": Colors.RED,
+                    "continued_as_new": Colors.CYAN,
+                }.get(run.status.value, "")
+
+                # Mark the queried run
+                marker = " <--" if run.run_id == run_id else ""
+
+                print(f"{Colors.bold(position)}{marker}")
+                print(f"   Run ID: {run.run_id}")
+                print(f"   Workflow: {run.workflow_name}")
+                print(f"   Status: {status_color}{run.status.value}{RESET}")
+                print(f"   Duration: {_calc_duration(run)}")
+
+                if run.started_at:
+                    print(f"   Started: {run.started_at.strftime('%Y-%m-%d %H:%M:%S')}")
+
+                # Show arrow to next run if not last
+                if i < len(chain) - 1:
+                    print(f"\n   {DIM}↓ continued as new{RESET}\n")
+                else:
+                    print()
+
+    except click.Abort:
+        raise
+    except Exception as e:
+        print_error(f"Failed to get workflow chain: {e}")
+        if ctx.obj["verbose"]:
+            raise
+        raise click.Abort()

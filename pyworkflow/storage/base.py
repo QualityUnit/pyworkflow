@@ -349,6 +349,45 @@ class StorageBackend(ABC):
         """
         pass
 
+    # Continue-As-New Chain Operations
+
+    @abstractmethod
+    async def update_run_continuation(
+        self,
+        run_id: str,
+        continued_to_run_id: str,
+    ) -> None:
+        """
+        Update the continuation link for a workflow run.
+
+        Called when a workflow continues as new to link the current
+        run to the new run.
+
+        Args:
+            run_id: Current workflow run identifier
+            continued_to_run_id: New workflow run identifier
+        """
+        pass
+
+    @abstractmethod
+    async def get_workflow_chain(
+        self,
+        run_id: str,
+    ) -> list[WorkflowRun]:
+        """
+        Get all runs in a continue-as-new chain.
+
+        Given any run_id in a chain, returns all runs in the chain
+        ordered from oldest to newest.
+
+        Args:
+            run_id: Any run ID in the chain
+
+        Returns:
+            List of WorkflowRun ordered from first to last in the chain
+        """
+        pass
+
     # Child Workflow Operations
 
     @abstractmethod

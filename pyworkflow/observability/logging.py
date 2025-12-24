@@ -142,13 +142,13 @@ def _get_json_format() -> str:
         Format string for JSON structured logging
     """
     return (
-        "{{\"timestamp\":\"{time:YYYY-MM-DD HH:mm:ss.SSS}\","
-        "\"level\":\"{level}\","
-        "\"logger\":\"{name}\","
-        "\"function\":\"{function}\","
-        "\"line\":{line},"
-        "\"message\":\"{message}\","
-        "\"extra\":{extra}}}"
+        '{{"timestamp":"{time:YYYY-MM-DD HH:mm:ss.SSS}",'
+        '"level":"{level}",'
+        '"logger":"{name}",'
+        '"function":"{function}",'
+        '"line":{line},'
+        '"message":"{message}",'
+        '"extra":{extra}}}'
     )
 
 

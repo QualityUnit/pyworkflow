@@ -82,7 +82,7 @@ async def send_notification(data: dict) -> dict:
 
 @workflow(
     recover_on_worker_loss=True,  # Enable automatic recovery (default for durable)
-    max_recovery_attempts=5,       # Allow up to 5 recovery attempts
+    max_recovery_attempts=5,  # Allow up to 5 recovery attempts
 )
 async def data_pipeline(data_id: str) -> dict:
     """
@@ -106,9 +106,9 @@ async def data_pipeline(data_id: str) -> dict:
     - Kill the worker during step 3 (transform_data) which takes longest
     - Start a new worker and watch it recover
     """
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Starting data pipeline for {data_id}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     data = await fetch_data(data_id)
     print(f"  -> Fetch complete: {data['records']} records\n")
@@ -134,9 +134,9 @@ async def data_pipeline(data_id: str) -> dict:
     data = await send_notification(data)
     print("  -> Notification sent\n")
 
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print("Pipeline completed successfully!")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     return data
 

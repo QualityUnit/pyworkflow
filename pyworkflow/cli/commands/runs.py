@@ -129,7 +129,9 @@ async def list_runs(
                     "Run ID": run.run_id,
                     "Workflow": run.workflow_name,
                     "Status": run.status.value,
-                    "Started": run.started_at.strftime("%Y-%m-%d %H:%M:%S") if run.started_at else "-",
+                    "Started": run.started_at.strftime("%Y-%m-%d %H:%M:%S")
+                    if run.started_at
+                    else "-",
                     "Duration": run.duration,
                 }
                 for run in runs_list
@@ -214,7 +216,9 @@ async def run_status(ctx: click.Context, run_id: str) -> None:
                 "Status": run.status.value,
                 "Created": run.created_at.strftime("%Y-%m-%d %H:%M:%S") if run.created_at else "-",
                 "Started": run.started_at.strftime("%Y-%m-%d %H:%M:%S") if run.started_at else "-",
-                "Completed": run.completed_at.strftime("%Y-%m-%d %H:%M:%S") if run.completed_at else "-",
+                "Completed": run.completed_at.strftime("%Y-%m-%d %H:%M:%S")
+                if run.completed_at
+                else "-",
                 "Duration": duration_str,
             }
 
@@ -231,7 +235,9 @@ async def run_status(ctx: click.Context, run_id: str) -> None:
             if run.result:
                 try:
                     result = json.loads(run.result)
-                    data["Result"] = json.dumps(result, indent=2) if not isinstance(result, str) else result
+                    data["Result"] = (
+                        json.dumps(result, indent=2) if not isinstance(result, str) else result
+                    )
                 except Exception:
                     data["Result"] = run.result
 
@@ -361,7 +367,7 @@ async def run_logs(
                 if event.data:
                     data_str = json.dumps(event.data, indent=6)
                     # Indent each line of the JSON
-                    data_lines = data_str.split('\n')
+                    data_lines = data_str.split("\n")
                     print(f"   Data: {data_lines[0]}")
                     for line in data_lines[1:]:
                         print(f"   {line}")

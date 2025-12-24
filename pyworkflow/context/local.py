@@ -319,9 +319,7 @@ class LocalContext(WorkflowContext):
 
         # Hard limit check - fail immediately
         if event_count >= config.event_hard_limit:
-            raise EventLimitExceededError(
-                self._run_id, event_count, config.event_hard_limit
-            )
+            raise EventLimitExceededError(self._run_id, event_count, config.event_hard_limit)
 
         # Soft limit check with interval warnings
         if event_count >= config.event_soft_limit:
@@ -585,9 +583,7 @@ class LocalContext(WorkflowContext):
             Event payload
         """
         if not self._durable:
-            raise NotImplementedError(
-                "wait_for_event requires durable mode with storage"
-            )
+            raise NotImplementedError("wait_for_event requires durable mode with storage")
 
         hook_id = f"hook_{event_name}_{self._step_counter}"
         self._step_counter += 1

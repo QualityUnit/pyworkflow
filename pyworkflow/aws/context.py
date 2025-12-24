@@ -146,9 +146,7 @@ class AWSWorkflowContext(WorkflowContext):
                     import concurrent.futures
 
                     with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(
-                            asyncio.run, step_fn(*args, **kwargs)
-                        )
+                        future = executor.submit(asyncio.run, step_fn(*args, **kwargs))
                         return future.result()
                 else:
                     # No running loop - use asyncio.run()

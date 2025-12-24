@@ -35,9 +35,7 @@ T = TypeVar("T")
 StepFunction = Callable[..., T | Coroutine[Any, Any, T]]
 
 # Global context variable - the implicit context
-_current_context: ContextVar[WorkflowContext | None] = ContextVar(
-    "workflow_context", default=None
-)
+_current_context: ContextVar[WorkflowContext | None] = ContextVar("workflow_context", default=None)
 
 
 def get_context() -> WorkflowContext:

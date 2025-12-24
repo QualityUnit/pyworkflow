@@ -71,6 +71,7 @@ class Event:
 
 # Event creation helpers for common event types
 
+
 def create_workflow_started_event(
     run_id: str,
     workflow_name: str,
@@ -293,6 +294,7 @@ def create_hook_created_event(
     actual_expires_at = expires_at
     if timeout_seconds and not expires_at:
         from datetime import UTC, timedelta
+
         actual_expires_at = datetime.now(UTC) + timedelta(seconds=timeout_seconds)
 
     return Event(

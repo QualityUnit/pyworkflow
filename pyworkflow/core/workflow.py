@@ -105,8 +105,12 @@ def workflow(
         wrapper.__workflow_durable__ = durable  # None = use config default
         wrapper.__workflow_max_duration__ = max_duration
         wrapper.__workflow_metadata__ = metadata or {}
-        wrapper.__workflow_recover_on_worker_loss__ = recover_on_worker_loss  # None = use config default
-        wrapper.__workflow_max_recovery_attempts__ = max_recovery_attempts  # None = use config default
+        wrapper.__workflow_recover_on_worker_loss__ = (
+            recover_on_worker_loss  # None = use config default
+        )
+        wrapper.__workflow_max_recovery_attempts__ = (
+            max_recovery_attempts  # None = use config default
+        )
 
         return wrapper
 

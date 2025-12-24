@@ -205,6 +205,7 @@ class TestWorkflowExecution:
         initial_token = set_context(initial_ctx)
 
         try:
+
             @workflow()
             async def nested_workflow():
                 ctx = get_context()

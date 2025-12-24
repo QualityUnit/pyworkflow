@@ -230,7 +230,9 @@ def _prompt_for_arguments(params: list[dict[str, Any]]) -> dict[str, Any]:
 
         try:
             # Handle boolean type with confirm prompt
-            if type_hint is bool or (hasattr(type_hint, "__name__") and type_hint.__name__ == "bool"):
+            if type_hint is bool or (
+                hasattr(type_hint, "__name__") and type_hint.__name__ == "bool"
+            ):
                 default_val = default if has_default else False
                 value = inquirer.confirm(
                     message=name,
@@ -243,7 +245,9 @@ def _prompt_for_arguments(params: list[dict[str, Any]]) -> dict[str, Any]:
                 kwargs[name] = value
 
             # Handle int type with number prompt
-            elif type_hint is int or (hasattr(type_hint, "__name__") and type_hint.__name__ == "int"):
+            elif type_hint is int or (
+                hasattr(type_hint, "__name__") and type_hint.__name__ == "int"
+            ):
                 # InquirerPy number prompt needs a valid number or None, not empty string
                 default_val = default if has_default and default is not None else None
                 value_str = inquirer.number(
@@ -261,7 +265,9 @@ def _prompt_for_arguments(params: list[dict[str, Any]]) -> dict[str, Any]:
                     kwargs[name] = default
 
             # Handle float type with number prompt
-            elif type_hint is float or (hasattr(type_hint, "__name__") and type_hint.__name__ == "float"):
+            elif type_hint is float or (
+                hasattr(type_hint, "__name__") and type_hint.__name__ == "float"
+            ):
                 # InquirerPy number prompt needs a valid number or None, not empty string
                 default_val = default if has_default and default is not None else None
                 value_str = inquirer.number(
@@ -343,7 +349,9 @@ async def _prompt_for_arguments_async(params: list[dict[str, Any]]) -> dict[str,
 
         try:
             # Handle boolean type with confirm prompt
-            if type_hint is bool or (hasattr(type_hint, "__name__") and type_hint.__name__ == "bool"):
+            if type_hint is bool or (
+                hasattr(type_hint, "__name__") and type_hint.__name__ == "bool"
+            ):
                 default_val = default if has_default else False
                 value = await inquirer.confirm(
                     message=name,
@@ -356,7 +364,9 @@ async def _prompt_for_arguments_async(params: list[dict[str, Any]]) -> dict[str,
                 kwargs[name] = value
 
             # Handle int type with number prompt
-            elif type_hint is int or (hasattr(type_hint, "__name__") and type_hint.__name__ == "int"):
+            elif type_hint is int or (
+                hasattr(type_hint, "__name__") and type_hint.__name__ == "int"
+            ):
                 # InquirerPy number prompt needs a valid number or None, not empty string
                 default_val = default if has_default and default is not None else None
                 value_str = await inquirer.number(
@@ -374,7 +384,9 @@ async def _prompt_for_arguments_async(params: list[dict[str, Any]]) -> dict[str,
                     kwargs[name] = default
 
             # Handle float type with number prompt
-            elif type_hint is float or (hasattr(type_hint, "__name__") and type_hint.__name__ == "float"):
+            elif type_hint is float or (
+                hasattr(type_hint, "__name__") and type_hint.__name__ == "float"
+            ):
                 # InquirerPy number prompt needs a valid number or None, not empty string
                 default_val = default if has_default and default is not None else None
                 value_str = await inquirer.number(
@@ -488,6 +500,7 @@ class SpinnerDisplay:
         if self._original_settings and self._stdin_fd is not None:
             try:
                 import termios
+
                 termios.tcsetattr(self._stdin_fd, termios.TCSADRAIN, self._original_settings)
             except Exception:
                 pass
@@ -603,7 +616,11 @@ class SpinnerDisplay:
             # Show result if present (for completed events) - no truncation
             if "result" in event.data:
                 result = event.data["result"]
-                result_str = json.dumps(result, default=str, indent=2) if not isinstance(result, str) else result
+                result_str = (
+                    json.dumps(result, default=str, indent=2)
+                    if not isinstance(result, str)
+                    else result
+                )
                 # Handle multi-line results with proper indentation
                 result_lines = result_str.split("\n")
                 if len(result_lines) == 1:
@@ -653,6 +670,7 @@ class SpinnerDisplay:
         """Get terminal height."""
         try:
             import shutil
+
             return shutil.get_terminal_size().lines
         except Exception:
             return 24  # Default
@@ -670,15 +688,21 @@ class SpinnerDisplay:
 
             # Spinner line with status
             frame = SPINNER_FRAMES[self.frame_index]
-            status_color = Colors.BLUE if self.status == RunStatus.RUNNING else (
-                Colors.GREEN if self.status == RunStatus.COMPLETED else (
-                    Colors.RED if self.status == RunStatus.FAILED else Colors.YELLOW
+            status_color = (
+                Colors.BLUE
+                if self.status == RunStatus.RUNNING
+                else (
+                    Colors.GREEN
+                    if self.status == RunStatus.COMPLETED
+                    else (Colors.RED if self.status == RunStatus.FAILED else Colors.YELLOW)
                 )
             )
             elapsed_str = f"{self.elapsed:.1f}s"
             event_count = len(self.events)
             mode_indicator = f" {Colors.PRIMARY}[DETAIL]{RESET}" if self.detail_mode else ""
-            lines.append(f"{status_color}{frame}{RESET} {self.message} ({elapsed_str}) {DIM}[{event_count} events]{RESET}{mode_indicator}")
+            lines.append(
+                f"{status_color}{frame}{RESET} {self.message} ({elapsed_str}) {DIM}[{event_count} events]{RESET}{mode_indicator}"
+            )
             lines.append("")
 
             # Events section - show ALL events
@@ -703,7 +727,7 @@ class SpinnerDisplay:
                     # Show indicator that there are more events
                     hidden_count = len(all_event_lines) - max_event_lines + 1
                     lines.append(f"  {DIM}... ({hidden_count} earlier lines){RESET}")
-                    all_event_lines = all_event_lines[-max_event_lines + 1:]
+                    all_event_lines = all_event_lines[-max_event_lines + 1 :]
 
                 lines.extend(all_event_lines)
                 lines.append("")
@@ -978,7 +1002,9 @@ def workflow_info(ctx: click.Context, workflow_name: str) -> None:
             "Max Duration": workflow_meta.max_duration or "None",
             "Function": workflow_meta.original_func.__name__,
             "Module": workflow_meta.original_func.__module__,
-            "Metadata": json.dumps(workflow_meta.metadata, indent=2) if workflow_meta.metadata else "{}",
+            "Metadata": json.dumps(workflow_meta.metadata, indent=2)
+            if workflow_meta.metadata
+            else "{}",
         }
 
         if workflow_meta.original_func.__doc__:
@@ -1220,7 +1246,9 @@ async def run_workflow(
             print_warning("Workflow was cancelled")
         else:
             # Still running (user interrupted watch)
-            print_info(f"Workflow still running. Check status with: pyworkflow runs status {run_id}")
+            print_info(
+                f"Workflow still running. Check status with: pyworkflow runs status {run_id}"
+            )
 
     except click.Abort:
         raise

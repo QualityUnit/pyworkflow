@@ -127,8 +127,8 @@ async def main():
     print('sleep("5s")     - 5 seconds')
     print('sleep("2m")     - 2 minutes')
     print('sleep("1h")     - 1 hour')
-    print('sleep(30)       - 30 seconds (int)')
-    print('sleep(timedelta(seconds=10)) - 10 seconds')
+    print("sleep(30)       - 30 seconds (int)")
+    print("sleep(timedelta(seconds=10)) - 10 seconds")
 
     print("\n=== Difference from Durable Mode ===")
     print("Transient: sleep() blocks using asyncio.sleep()")

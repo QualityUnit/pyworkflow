@@ -77,6 +77,7 @@ def aws_workflow_handler(workflow_fn: F) -> Callable[[dict[str, Any], Any], Any]
         _has_aws_sdk = True
     except ImportError:
         _has_aws_sdk = False
+
         def durable_execution(f):
             return f  # no-op decorator
 
@@ -123,9 +124,7 @@ def aws_workflow_handler(workflow_fn: F) -> Callable[[dict[str, Any], Any], Any]
                     import concurrent.futures
 
                     with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(
-                            asyncio.run, workflow_fn(**event)
-                        )
+                        future = executor.submit(asyncio.run, workflow_fn(**event))
                         result = future.result()
                 else:
                     # Normal Lambda execution

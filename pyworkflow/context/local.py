@@ -93,6 +93,10 @@ class LocalContext(WorkflowContext):
         self._cancellation_blocked: bool = False
         self._cancellation_reason: str | None = None
 
+        # Child workflow state
+        self._child_results: Dict[str, Dict[str, Any]] = {}
+        self._pending_children: Dict[str, str] = {}  # child_id -> child_run_id
+
         # Replay state if resuming
         if event_log:
             self._is_replaying = True
@@ -133,6 +137,52 @@ class LocalContext(WorkflowContext):
             elif event.type == EventType.CANCELLATION_REQUESTED:
                 self._cancellation_requested = True
                 self._cancellation_reason = event.data.get("reason")
+
+            # Child workflow events
+            elif event.type == EventType.CHILD_WORKFLOW_STARTED:
+                child_id = event.data.get("child_id")
+                child_run_id = event.data.get("child_run_id")
+                if child_id and child_run_id:
+                    self._pending_children[child_id] = child_run_id
+
+            elif event.type == EventType.CHILD_WORKFLOW_COMPLETED:
+                child_id = event.data.get("child_id")
+                child_run_id = event.data.get("child_run_id")
+                result = deserialize(event.data.get("result"))
+                if child_id:
+                    self._child_results[child_id] = {
+                        "child_run_id": child_run_id,
+                        "result": result,
+                        "__failed__": False,
+                    }
+                    self._pending_children.pop(child_id, None)
+
+            elif event.type == EventType.CHILD_WORKFLOW_FAILED:
+                child_id = event.data.get("child_id")
+                child_run_id = event.data.get("child_run_id")
+                error = event.data.get("error")
+                error_type = event.data.get("error_type")
+                if child_id:
+                    self._child_results[child_id] = {
+                        "child_run_id": child_run_id,
+                        "error": error,
+                        "error_type": error_type,
+                        "__failed__": True,
+                    }
+                    self._pending_children.pop(child_id, None)
+
+            elif event.type == EventType.CHILD_WORKFLOW_CANCELLED:
+                child_id = event.data.get("child_id")
+                child_run_id = event.data.get("child_run_id")
+                reason = event.data.get("reason")
+                if child_id:
+                    self._child_results[child_id] = {
+                        "child_run_id": child_run_id,
+                        "error": f"Cancelled: {reason}",
+                        "error_type": "CancellationError",
+                        "__failed__": True,
+                    }
+                    self._pending_children.pop(child_id, None)
 
     @property
     def is_durable(self) -> bool:
@@ -259,6 +309,67 @@ class LocalContext(WorkflowContext):
     def get_hook_result(self, hook_id: str) -> Any:
         """Get a cached hook result."""
         return self._hook_results.get(hook_id)
+
+    # =========================================================================
+    # Child workflow state management
+    # =========================================================================
+
+    @property
+    def pending_children(self) -> Dict[str, str]:
+        """Get pending child workflows (child_id -> child_run_id)."""
+        return self._pending_children
+
+    @property
+    def child_results(self) -> Dict[str, Dict[str, Any]]:
+        """Get child workflow results."""
+        return self._child_results
+
+    def has_child_result(self, child_id: str) -> bool:
+        """Check if a child workflow result exists."""
+        return child_id in self._child_results
+
+    def get_child_result(self, child_id: str) -> Dict[str, Any]:
+        """Get cached child workflow result."""
+        return self._child_results.get(child_id, {})
+
+    def cache_child_result(
+        self,
+        child_id: str,
+        child_run_id: str,
+        result: Any,
+        failed: bool = False,
+        error: Optional[str] = None,
+        error_type: Optional[str] = None,
+    ) -> None:
+        """
+        Cache a child workflow result.
+
+        Args:
+            child_id: Deterministic child identifier
+            child_run_id: The child workflow's run ID
+            result: The result (if successful)
+            failed: Whether the child failed
+            error: Error message (if failed)
+            error_type: Exception type (if failed)
+        """
+        if failed:
+            self._child_results[child_id] = {
+                "child_run_id": child_run_id,
+                "error": error,
+                "error_type": error_type,
+                "__failed__": True,
+            }
+        else:
+            self._child_results[child_id] = {
+                "child_run_id": child_run_id,
+                "result": result,
+                "__failed__": False,
+            }
+        self._pending_children.pop(child_id, None)
+
+    def add_pending_child(self, child_id: str, child_run_id: str) -> None:
+        """Add a pending child workflow."""
+        self._pending_children[child_id] = child_run_id
 
     # =========================================================================
     # Event log access (for EventReplayer compatibility)

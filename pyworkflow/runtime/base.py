@@ -114,6 +114,39 @@ class Runtime(ABC):
         # Subclasses override if they support async scheduling
         pass
 
+    @abstractmethod
+    async def start_child_workflow(
+        self,
+        workflow_func: Callable[..., Any],
+        args: tuple,
+        kwargs: dict,
+        child_run_id: str,
+        workflow_name: str,
+        storage: "StorageBackend",
+        parent_run_id: str,
+        child_id: str,
+        wait_for_completion: bool,
+    ) -> None:
+        """
+        Start a child workflow execution (fire-and-forget).
+
+        Child workflows run in the background and notify the parent
+        when completed/failed. If wait_for_completion=True, the parent
+        will be resumed when the child finishes.
+
+        Args:
+            workflow_func: The child workflow function to execute
+            args: Positional arguments for the child workflow
+            kwargs: Keyword arguments for the child workflow
+            child_run_id: Unique identifier for the child run
+            workflow_name: Name of the child workflow
+            storage: Storage backend
+            parent_run_id: Run ID of the parent workflow
+            child_id: Deterministic child ID for replay
+            wait_for_completion: Whether parent is waiting for child to complete
+        """
+        pass
+
     @property
     @abstractmethod
     def name(self) -> str:

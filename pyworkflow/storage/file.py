@@ -520,3 +520,46 @@ class FileStorageBackend(StorageBackend):
                     cancel_file.unlink()
 
         await asyncio.to_thread(_clear)
+
+    # Child Workflow Operations
+
+    async def get_children(
+        self,
+        parent_run_id: str,
+        status: Optional[RunStatus] = None,
+    ) -> List[WorkflowRun]:
+        """Get all child workflow runs for a parent workflow."""
+
+        def _list() -> List[dict]:
+            children = []
+            for run_file in self.runs_dir.glob("*.json"):
+                data = json.loads(run_file.read_text())
+
+                # Filter by parent_run_id
+                if data.get("parent_run_id") != parent_run_id:
+                    continue
+
+                # Filter by status if provided
+                if status and data.get("status") != status.value:
+                    continue
+
+                children.append(data)
+
+            # Sort by created_at
+            children.sort(key=lambda r: r.get("created_at", ""))
+            return children
+
+        child_data_list = await asyncio.to_thread(_list)
+        return [WorkflowRun.from_dict(data) for data in child_data_list]
+
+    async def get_parent(self, run_id: str) -> Optional[WorkflowRun]:
+        """Get the parent workflow run for a child workflow."""
+        run = await self.get_run(run_id)
+        if run and run.parent_run_id:
+            return await self.get_run(run.parent_run_id)
+        return None
+
+    async def get_nesting_depth(self, run_id: str) -> int:
+        """Get the nesting depth for a workflow."""
+        run = await self.get_run(run_id)
+        return run.nesting_depth if run else 0

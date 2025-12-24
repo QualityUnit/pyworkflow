@@ -349,6 +349,52 @@ class StorageBackend(ABC):
         """
         pass
 
+    # Child Workflow Operations
+
+    @abstractmethod
+    async def get_children(
+        self,
+        parent_run_id: str,
+        status: Optional[RunStatus] = None,
+    ) -> List[WorkflowRun]:
+        """
+        Get all child workflow runs for a parent workflow.
+
+        Args:
+            parent_run_id: Parent workflow run ID
+            status: Optional filter by status
+
+        Returns:
+            List of child WorkflowRun instances
+        """
+        pass
+
+    @abstractmethod
+    async def get_parent(self, run_id: str) -> Optional[WorkflowRun]:
+        """
+        Get the parent workflow run for a child workflow.
+
+        Args:
+            run_id: Child workflow run ID
+
+        Returns:
+            Parent WorkflowRun if exists, None if this is a root workflow
+        """
+        pass
+
+    @abstractmethod
+    async def get_nesting_depth(self, run_id: str) -> int:
+        """
+        Get the nesting depth for a workflow.
+
+        Args:
+            run_id: Workflow run ID
+
+        Returns:
+            Nesting depth (0=root, 1=child, 2=grandchild, max 3)
+        """
+        pass
+
     # Lifecycle
 
     async def connect(self) -> None:

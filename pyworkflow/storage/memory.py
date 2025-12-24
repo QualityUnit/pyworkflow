@@ -296,6 +296,41 @@ class InMemoryStorageBackend(StorageBackend):
         with self._lock:
             self._cancellation_flags.pop(run_id, None)
 
+    # Child Workflow Operations
+
+    async def get_children(
+        self,
+        parent_run_id: str,
+        status: Optional[RunStatus] = None,
+    ) -> List[WorkflowRun]:
+        """Get all child workflow runs for a parent workflow."""
+        with self._lock:
+            children = [
+                run for run in self._runs.values() if run.parent_run_id == parent_run_id
+            ]
+
+            if status:
+                children = [c for c in children if c.status == status]
+
+            # Sort by created_at
+            children.sort(key=lambda r: r.created_at)
+
+            return children
+
+    async def get_parent(self, run_id: str) -> Optional[WorkflowRun]:
+        """Get the parent workflow run for a child workflow."""
+        with self._lock:
+            run = self._runs.get(run_id)
+            if run and run.parent_run_id:
+                return self._runs.get(run.parent_run_id)
+            return None
+
+    async def get_nesting_depth(self, run_id: str) -> int:
+        """Get the nesting depth for a workflow."""
+        with self._lock:
+            run = self._runs.get(run_id)
+            return run.nesting_depth if run else 0
+
     # Utility methods
 
     def clear(self) -> None:

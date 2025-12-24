@@ -253,6 +253,32 @@ class LocalRuntime(Runtime):
 
             raise
 
+    async def schedule_resume(
+        self,
+        run_id: str,
+        storage: "StorageBackend",
+    ) -> None:
+        """
+        Schedule immediate workflow resumption.
+
+        For local runtime, this directly calls resume_workflow since
+        execution happens in-process.
+        """
+        logger.info(
+            f"Scheduling immediate workflow resume: {run_id}",
+            run_id=run_id,
+        )
+
+        try:
+            await self.resume_workflow(run_id, storage)
+        except Exception as e:
+            logger.error(
+                f"Failed to resume workflow: {e}",
+                run_id=run_id,
+                exc_info=True,
+            )
+            raise
+
     async def schedule_wake(
         self,
         run_id: str,

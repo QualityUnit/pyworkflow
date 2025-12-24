@@ -668,6 +668,9 @@ async def _recover_workflow_on_worker(
         # Cancel all running children (TERMINATE policy)
         await _handle_parent_completion(run_id, RunStatus.FAILED, storage)
 
+        # Cancel all running children (TERMINATE policy)
+        await _handle_parent_completion(run_id, RunStatus.FAILED, storage)
+
         logger.error(
             f"Workflow failed during recovery: {workflow_name}",
             run_id=run_id,
@@ -924,6 +927,9 @@ async def _start_workflow_on_worker(
         # Cancel all running children (TERMINATE policy)
         await _handle_parent_completion(run_id, RunStatus.FAILED, storage)
 
+        # Cancel all running children (TERMINATE policy)
+        await _handle_parent_completion(run_id, RunStatus.FAILED, storage)
+
         logger.error(
             f"Workflow failed on worker: {workflow_name}",
             run_id=run_id,
@@ -1158,6 +1164,9 @@ async def _resume_workflow_on_worker(
     except Exception as e:
         # Workflow failed
         await storage.update_run_status(run_id=run_id, status=RunStatus.FAILED, error=str(e))
+
+        # Cancel all running children (TERMINATE policy)
+        await _handle_parent_completion(run_id, RunStatus.FAILED, storage)
 
         # Cancel all running children (TERMINATE policy)
         await _handle_parent_completion(run_id, RunStatus.FAILED, storage)

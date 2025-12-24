@@ -386,6 +386,9 @@ class LocalRuntime(Runtime):
             # Cancel all running children (TERMINATE policy)
             await _handle_parent_completion_local(run_id, RunStatus.FAILED, storage)
 
+            # Cancel all running children (TERMINATE policy)
+            await _handle_parent_completion_local(run_id, RunStatus.FAILED, storage)
+
             logger.error(
                 f"Workflow failed on resume: {run.workflow_name}",
                 run_id=run_id,

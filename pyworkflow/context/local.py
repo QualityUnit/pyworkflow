@@ -97,6 +97,10 @@ class LocalContext(WorkflowContext):
         self._child_results: Dict[str, Dict[str, Any]] = {}
         self._pending_children: Dict[str, str] = {}  # child_id -> child_run_id
 
+        # Child workflow state
+        self._child_results: Dict[str, Dict[str, Any]] = {}
+        self._pending_children: Dict[str, str] = {}  # child_id -> child_run_id
+
         # Replay state if resuming
         if event_log:
             self._is_replaying = True

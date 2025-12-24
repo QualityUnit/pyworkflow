@@ -7,7 +7,7 @@ These schemas define the structure of data stored in various storage backends.
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
 
 
 class RunStatus(Enum):

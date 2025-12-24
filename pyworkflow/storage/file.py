@@ -23,7 +23,6 @@ import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import List, Optional
 
 from filelock import FileLock
 
@@ -85,7 +84,7 @@ class FileStorageBackend(StorageBackend):
 
         await asyncio.to_thread(_write)
 
-    async def get_run(self, run_id: str) -> Optional[WorkflowRun]:
+    async def get_run(self, run_id: str) -> WorkflowRun | None:
         """Retrieve a workflow run by ID."""
         run_file = self.runs_dir / f"{run_id}.json"
 
@@ -95,7 +94,7 @@ class FileStorageBackend(StorageBackend):
         lock_file = self.locks_dir / f"{run_id}.lock"
         lock = FileLock(str(lock_file))
 
-        def _read() -> Optional[dict]:
+        def _read() -> dict | None:
             with lock:
                 if not run_file.exists():
                     return None
@@ -108,10 +107,10 @@ class FileStorageBackend(StorageBackend):
         data = await asyncio.to_thread(_read)
         return WorkflowRun.from_dict(data) if data else None
 
-    async def get_run_by_idempotency_key(self, key: str) -> Optional[WorkflowRun]:
+    async def get_run_by_idempotency_key(self, key: str) -> WorkflowRun | None:
         """Retrieve a workflow run by idempotency key."""
 
-        def _search() -> Optional[dict]:
+        def _search() -> dict | None:
             for run_file in self.runs_dir.glob("*.json"):
                 data = json.loads(run_file.read_text())
                 if data.get("idempotency_key") == key:
@@ -125,8 +124,8 @@ class FileStorageBackend(StorageBackend):
         self,
         run_id: str,
         status: RunStatus,
-        result: Optional[str] = None,
-        error: Optional[str] = None,
+        result: str | None = None,
+        error: str | None = None,
     ) -> None:
         """Update workflow run status."""
         run_file = self.runs_dir / f"{run_id}.json"
@@ -181,14 +180,14 @@ class FileStorageBackend(StorageBackend):
 
     async def list_runs(
         self,
-        workflow_name: Optional[str] = None,
-        status: Optional[RunStatus] = None,
+        workflow_name: str | None = None,
+        status: RunStatus | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[WorkflowRun]:
+    ) -> list[WorkflowRun]:
         """List workflow runs with optional filtering."""
 
-        def _list() -> List[dict]:
+        def _list() -> list[dict]:
             runs = []
             for run_file in self.runs_dir.glob("*.json"):
                 data = json.loads(run_file.read_text())
@@ -248,15 +247,15 @@ class FileStorageBackend(StorageBackend):
     async def get_events(
         self,
         run_id: str,
-        event_types: Optional[List[str]] = None,
-    ) -> List[Event]:
+        event_types: list[str] | None = None,
+    ) -> list[Event]:
         """Retrieve all events for a workflow run."""
         events_file = self.events_dir / f"{run_id}.jsonl"
 
         if not events_file.exists():
             return []
 
-        def _read() -> List[Event]:
+        def _read() -> list[Event]:
             events = []
             with events_file.open("r") as f:
                 for line in f:
@@ -280,19 +279,17 @@ class FileStorageBackend(StorageBackend):
                         )
                     )
 
-            return sorted(events, key=lambda e: e.sequence)
+            return sorted(events, key=lambda e: e.sequence or 0)
 
         return await asyncio.to_thread(_read)
 
     async def get_latest_event(
         self,
         run_id: str,
-        event_type: Optional[str] = None,
-    ) -> Optional[Event]:
+        event_type: str | None = None,
+    ) -> Event | None:
         """Get the latest event for a run."""
-        events = await self.get_events(
-            run_id, event_types=[event_type] if event_type else None
-        )
+        events = await self.get_events(run_id, event_types=[event_type] if event_type else None)
         return events[-1] if events else None
 
     # Step Operations
@@ -311,7 +308,7 @@ class FileStorageBackend(StorageBackend):
 
         await asyncio.to_thread(_write)
 
-    async def get_step(self, step_id: str) -> Optional[StepExecution]:
+    async def get_step(self, step_id: str) -> StepExecution | None:
         """Retrieve a step execution by ID."""
         step_file = self.steps_dir / f"{step_id}.json"
 
@@ -328,8 +325,8 @@ class FileStorageBackend(StorageBackend):
         self,
         step_id: str,
         status: str,
-        result: Optional[str] = None,
-        error: Optional[str] = None,
+        result: str | None = None,
+        error: str | None = None,
     ) -> None:
         """Update step execution status."""
         step_file = self.steps_dir / f"{step_id}.json"
@@ -355,10 +352,10 @@ class FileStorageBackend(StorageBackend):
 
         await asyncio.to_thread(_update)
 
-    async def list_steps(self, run_id: str) -> List[StepExecution]:
+    async def list_steps(self, run_id: str) -> list[StepExecution]:
         """List all steps for a workflow run."""
 
-        def _list() -> List[dict]:
+        def _list() -> list[dict]:
             steps = []
             for step_file in self.steps_dir.glob("*.json"):
                 data = json.loads(step_file.read_text())
@@ -402,7 +399,7 @@ class FileStorageBackend(StorageBackend):
 
         await asyncio.to_thread(_write)
 
-    async def get_hook(self, hook_id: str) -> Optional[Hook]:
+    async def get_hook(self, hook_id: str) -> Hook | None:
         """Retrieve a hook by ID."""
         hook_file = self.hooks_dir / f"{hook_id}.json"
 
@@ -415,10 +412,10 @@ class FileStorageBackend(StorageBackend):
         data = await asyncio.to_thread(_read)
         return Hook.from_dict(data)
 
-    async def get_hook_by_token(self, token: str) -> Optional[Hook]:
+    async def get_hook_by_token(self, token: str) -> Hook | None:
         """Retrieve a hook by its token."""
 
-        def _lookup() -> Optional[str]:
+        def _lookup() -> str | None:
             index = self._load_token_index()
             return index.get(token)
 
@@ -431,7 +428,7 @@ class FileStorageBackend(StorageBackend):
         self,
         hook_id: str,
         status: HookStatus,
-        payload: Optional[str] = None,
+        payload: str | None = None,
     ) -> None:
         """Update hook status and optionally payload."""
         hook_file = self.hooks_dir / f"{hook_id}.json"
@@ -459,14 +456,14 @@ class FileStorageBackend(StorageBackend):
 
     async def list_hooks(
         self,
-        run_id: Optional[str] = None,
-        status: Optional[HookStatus] = None,
+        run_id: str | None = None,
+        status: HookStatus | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Hook]:
+    ) -> list[Hook]:
         """List hooks with optional filtering."""
 
-        def _list() -> List[dict]:
+        def _list() -> list[dict]:
             hooks = []
             for hook_file in self.hooks_dir.glob("*.json"):
                 data = json.loads(hook_file.read_text())

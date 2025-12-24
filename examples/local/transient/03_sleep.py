@@ -72,13 +72,13 @@ async def rate_limited_workflow(task_id: str) -> dict:
     task = await start_task(task_id)
 
     # Simulate rate limiting between API calls
-    print(f"  Rate limiting: waiting 2 seconds before next API call...")
+    print("  Rate limiting: waiting 2 seconds before next API call...")
     await sleep("2s")
 
     task = await process_task(task)
 
     # Another rate limit delay
-    print(f"  Rate limiting: waiting 2 seconds before final call...")
+    print("  Rate limiting: waiting 2 seconds before final call...")
     await sleep("2s")
 
     task = await complete_task(task)
@@ -127,8 +127,8 @@ async def main():
     print('sleep("5s")     - 5 seconds')
     print('sleep("2m")     - 2 minutes')
     print('sleep("1h")     - 1 hour')
-    print('sleep(30)       - 30 seconds (int)')
-    print('sleep(timedelta(seconds=10)) - 10 seconds')
+    print("sleep(30)       - 30 seconds (int)")
+    print("sleep(timedelta(seconds=10)) - 10 seconds")
 
     print("\n=== Difference from Durable Mode ===")
     print("Transient: sleep() blocks using asyncio.sleep()")

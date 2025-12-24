@@ -17,15 +17,16 @@ Usage:
     ... )
 """
 
-from dataclasses import dataclass, field
+import warnings
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from pyworkflow.storage.base import StorageBackend
 
 
-def _load_yaml_config() -> Dict[str, Any]:
+def _load_yaml_config() -> dict[str, Any]:
     """
     Load configuration from pyworkflow.config.yaml in current directory.
 
@@ -48,7 +49,7 @@ def _load_yaml_config() -> Dict[str, Any]:
         return {}
 
 
-def _create_storage_from_config(storage_config: Dict[str, Any]) -> Optional["StorageBackend"]:
+def _create_storage_from_config(storage_config: dict[str, Any]) -> Optional["StorageBackend"]:
     """Create a storage backend from config dictionary."""
     if not storage_config:
         return None
@@ -72,6 +73,9 @@ class PyWorkflowConfig:
         storage: Storage backend instance for durable workflows
         celery_broker: Celery broker URL (for celery runtime)
         aws_region: AWS region (for lambda runtimes)
+        event_soft_limit: Log warning when event count reaches this (default: 10000)
+        event_hard_limit: Fail workflow when event count reaches this (default: 50000)
+        event_warning_interval: Log warning every N events after soft limit (default: 100)
     """
 
     # Defaults (can be overridden per-workflow)
@@ -80,13 +84,21 @@ class PyWorkflowConfig:
     default_retries: int = 3
 
     # Fault tolerance defaults
-    default_recover_on_worker_loss: Optional[bool] = None  # None = True for durable, False for transient
+    default_recover_on_worker_loss: bool | None = (
+        None  # None = True for durable, False for transient
+    )
     default_max_recovery_attempts: int = 3
 
     # Infrastructure (app-level only)
     storage: Optional["StorageBackend"] = None
-    celery_broker: Optional[str] = None
-    aws_region: Optional[str] = None
+    celery_broker: str | None = None
+    aws_region: str | None = None
+
+    # Event limit settings (WARNING: Do not modify unless you understand the implications)
+    # These limits prevent runaway workflows from consuming excessive resources
+    event_soft_limit: int = 10_000  # Log warning at this count
+    event_hard_limit: int = 50_000  # Fail workflow at this count
+    event_warning_interval: int = 100  # Log warning every N events after soft limit
 
 
 def _config_from_yaml() -> PyWorkflowConfig:
@@ -116,7 +128,7 @@ def _config_from_yaml() -> PyWorkflowConfig:
 
 
 # Global singleton
-_config: Optional[PyWorkflowConfig] = None
+_config: PyWorkflowConfig | None = None
 _config_loaded_from_yaml: bool = False
 
 
@@ -135,6 +147,14 @@ def configure(**kwargs: Any) -> None:
         celery_broker: Celery broker URL
         aws_region: AWS region
 
+    Event Limit Settings (Advanced - modify with caution):
+        event_soft_limit: Log warning when event count reaches this (default: 10000)
+        event_hard_limit: Fail workflow when event count reaches this (default: 50000)
+        event_warning_interval: Log warning every N events after soft limit (default: 100)
+
+    WARNING: Modifying event limits is not recommended. These defaults are carefully
+    chosen to prevent runaway workflows from consuming excessive resources.
+
     Example:
         >>> import pyworkflow
         >>> from pyworkflow.storage import InMemoryStorageBackend
@@ -149,11 +169,22 @@ def configure(**kwargs: Any) -> None:
     if _config is None:
         _config = PyWorkflowConfig()
 
+    # Warn if user is modifying event limits
+    event_limit_keys = {"event_soft_limit", "event_hard_limit", "event_warning_interval"}
+    modified_limits = event_limit_keys & set(kwargs.keys())
+    if modified_limits:
+        warnings.warn(
+            f"Modifying event limits ({', '.join(sorted(modified_limits))}) is not recommended. "
+            "These defaults are carefully chosen to prevent runaway workflows.",
+            UserWarning,
+            stacklevel=2,
+        )
+
     for key, value in kwargs.items():
         if hasattr(_config, key):
             setattr(_config, key, value)
         else:
-            valid_keys = [f for f in PyWorkflowConfig.__dataclass_fields__.keys()]
+            valid_keys = list(PyWorkflowConfig.__dataclass_fields__.keys())
             raise ValueError(
                 f"Unknown config option: {key}. Valid options: {', '.join(valid_keys)}"
             )

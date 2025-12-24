@@ -15,8 +15,8 @@ Supports multiple runtimes:
 
 import functools
 import hashlib
-import uuid
-from typing import Any, Callable, Dict, List, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
 from loguru import logger
 
@@ -28,11 +28,10 @@ from pyworkflow.engine.events import (
     create_step_failed_event,
     create_step_started_event,
 )
-from pyworkflow.serialization.decoder import deserialize
 from pyworkflow.serialization.encoder import serialize, serialize_args, serialize_kwargs
 
 
-def _get_aws_context() -> Optional[Any]:
+def _get_aws_context() -> Any | None:
     """
     Get the current AWS workflow context if running in AWS environment.
 
@@ -48,11 +47,11 @@ def _get_aws_context() -> Optional[Any]:
 
 
 def step(
-    name: Optional[str] = None,
+    name: str | None = None,
     max_retries: int = 3,
-    retry_delay: Union[str, int, List[int]] = "exponential",
-    timeout: Optional[int] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    retry_delay: str | int | list[int] = "exponential",
+    timeout: int | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> Callable:
     """
     Decorator to mark functions as workflow steps.
@@ -97,18 +96,14 @@ def step(
             # Check if running in AWS Durable Lambda context
             aws_ctx = _get_aws_context()
             if aws_ctx is not None:
-                logger.debug(
-                    f"Step {step_name} running in AWS context, delegating to AWS SDK"
-                )
+                logger.debug(f"Step {step_name} running in AWS context, delegating to AWS SDK")
                 # Delegate to AWS context for checkpointed execution
                 return aws_ctx.execute_step(func, *args, step_name=step_name, **kwargs)
 
             # Check if we're in a workflow context
             if not has_context():
                 # Called outside workflow - execute directly
-                logger.debug(
-                    f"Step {step_name} called outside workflow, executing directly"
-                )
+                logger.debug(f"Step {step_name} called outside workflow, executing directly")
                 return await func(*args, **kwargs)
 
             ctx = get_context()
@@ -171,6 +166,9 @@ def step(
             else:
                 current_attempt = 1
 
+            # Validate event limits before executing step
+            await ctx.validate_event_limits()
+
             # Record step start event
             start_event = create_step_started_event(
                 run_id=ctx.run_id,
@@ -180,7 +178,7 @@ def step(
                 kwargs=serialize_kwargs(**kwargs),
                 attempt=current_attempt,
             )
-            await ctx.storage.record_event(start_event)
+            await ctx.storage.record_event(start_event)  # type: ignore[union-attr]
 
             logger.info(
                 f"Executing step: {step_name} (attempt {current_attempt}/{max_retries + 1})",
@@ -201,7 +199,7 @@ def step(
                 completion_event = create_step_completed_event(
                     run_id=ctx.run_id, step_id=step_id, result=serialize(result)
                 )
-                await ctx.storage.record_event(completion_event)
+                await ctx.storage.record_event(completion_event)  # type: ignore[union-attr]
 
                 # Cache result for replay
                 ctx.cache_step_result(step_id, result)
@@ -235,7 +233,7 @@ def step(
                     is_retryable=False,
                     attempt=current_attempt,
                 )
-                await ctx.storage.record_event(failure_event)
+                await ctx.storage.record_event(failure_event)  # type: ignore[union-attr]
 
                 # Clear retry state
                 ctx.clear_retry_state(step_id)
@@ -253,9 +251,10 @@ def step(
                     next_attempt = current_attempt + 1
 
                     # Calculate retry delay
-                    if is_retryable_error and e.retry_after is not None:
+                    delay_seconds: float
+                    if isinstance(e, RetryableError) and e.retry_after is not None:
                         # Use RetryableError's specified delay
-                        delay_seconds = e.get_retry_delay_seconds()
+                        delay_seconds = float(e.get_retry_delay_seconds() or 0)
                     else:
                         # Use step's configured retry delay strategy
                         delay_seconds = _get_retry_delay(retry_delay, current_attempt - 1)
@@ -284,7 +283,7 @@ def step(
                         is_retryable=True,
                         attempt=current_attempt,
                     )
-                    await ctx.storage.record_event(failure_event)
+                    await ctx.storage.record_event(failure_event)  # type: ignore[union-attr]
 
                     # Record STEP_RETRYING event
                     from pyworkflow.engine.events import create_step_retrying_event
@@ -300,7 +299,7 @@ def step(
                     retrying_event.data["resume_at"] = resume_at.isoformat()
                     retrying_event.data["retry_strategy"] = str(retry_delay)
                     retrying_event.data["max_retries"] = max_retries
-                    await ctx.storage.record_event(retrying_event)
+                    await ctx.storage.record_event(retrying_event)  # type: ignore[union-attr]
 
                     # Update retry state in context
                     ctx.set_retry_state(
@@ -342,7 +341,7 @@ def step(
                         is_retryable=True,
                         attempt=current_attempt,
                     )
-                    await ctx.storage.record_event(failure_event)
+                    await ctx.storage.record_event(failure_event)  # type: ignore[union-attr]
 
                     ctx.clear_retry_state(step_id)
 
@@ -366,12 +365,12 @@ def step(
         )
 
         # Store metadata on wrapper
-        wrapper.__step__ = True
-        wrapper.__step_name__ = step_name
-        wrapper.__step_max_retries__ = max_retries
-        wrapper.__step_retry_delay__ = retry_delay
-        wrapper.__step_timeout__ = timeout
-        wrapper.__step_metadata__ = metadata or {}
+        wrapper.__step__ = True  # type: ignore[attr-defined]
+        wrapper.__step_name__ = step_name  # type: ignore[attr-defined]
+        wrapper.__step_max_retries__ = max_retries  # type: ignore[attr-defined]
+        wrapper.__step_retry_delay__ = retry_delay  # type: ignore[attr-defined]
+        wrapper.__step_timeout__ = timeout  # type: ignore[attr-defined]
+        wrapper.__step_metadata__ = metadata or {}  # type: ignore[attr-defined]
 
         return wrapper
 
@@ -384,7 +383,7 @@ async def _execute_with_retries(
     kwargs: dict,
     step_name: str,
     max_retries: int,
-    retry_delay: Union[str, int, List[int]],
+    retry_delay: str | int | list[int],
 ) -> Any:
     """
     Execute a step function with retry logic (for transient mode).
@@ -405,7 +404,7 @@ async def _execute_with_retries(
     """
     import asyncio
 
-    last_error = None
+    last_error: Exception | None = None
 
     for attempt in range(max_retries + 1):
         try:
@@ -436,10 +435,11 @@ async def _execute_with_retries(
                     error=str(e),
                 )
 
+    assert last_error is not None  # mypy: guaranteed by loop logic
     raise last_error
 
 
-def _get_retry_delay(retry_delay: Union[str, int, List[int]], attempt: int) -> float:
+def _get_retry_delay(retry_delay: str | int | list[int], attempt: int) -> float:
     """
     Calculate retry delay based on strategy.
 

@@ -8,7 +8,7 @@ context interface while leveraging AWS native checkpointing and durability.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, List, Optional, Union
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -44,7 +44,7 @@ class AWSContext(WorkflowContext):
 
     def __init__(
         self,
-        aws_context: "DurableContext",
+        aws_context: DurableContext,
         run_id: str = "aws_run",
         workflow_name: str = "aws_workflow",
     ) -> None:
@@ -61,7 +61,7 @@ class AWSContext(WorkflowContext):
         self._step_counter = 0
 
     @property
-    def aws_context(self) -> "DurableContext":
+    def aws_context(self) -> DurableContext:
         """Get the underlying AWS DurableContext."""
         return self._aws_ctx
 
@@ -73,7 +73,7 @@ class AWSContext(WorkflowContext):
         self,
         func: StepFunction,
         *args: Any,
-        name: Optional[str] = None,
+        name: str | None = None,
         **kwargs: Any,
     ) -> Any:
         """
@@ -131,7 +131,7 @@ class AWSContext(WorkflowContext):
     # Sleep
     # =========================================================================
 
-    async def sleep(self, duration: Union[str, int, float]) -> None:
+    async def sleep(self, duration: str | int | float) -> None:
         """
         Sleep using AWS native wait (no compute charges).
 
@@ -143,10 +143,7 @@ class AWSContext(WorkflowContext):
         Args:
             duration: Sleep duration
         """
-        if isinstance(duration, str):
-            duration_seconds = parse_duration(duration)
-        else:
-            duration_seconds = int(duration)
+        duration_seconds = parse_duration(duration) if isinstance(duration, str) else int(duration)
 
         logger.debug(f"[aws] Sleeping: {duration_seconds}s")
 
@@ -167,7 +164,7 @@ class AWSContext(WorkflowContext):
     # Parallel execution
     # =========================================================================
 
-    async def parallel(self, *tasks) -> List[Any]:
+    async def parallel(self, *tasks: Any) -> list[Any]:
         """
         Execute tasks in parallel using AWS context.parallel().
 
@@ -192,7 +189,7 @@ class AWSContext(WorkflowContext):
     async def wait_for_event(
         self,
         event_name: str,
-        timeout: Optional[Union[str, int]] = None,
+        timeout: str | int | None = None,
     ) -> Any:
         """
         Wait for an external event using AWS callbacks.
@@ -211,9 +208,7 @@ class AWSContext(WorkflowContext):
         # Parse timeout
         timeout_seconds = None
         if timeout:
-            timeout_seconds = (
-                parse_duration(timeout) if isinstance(timeout, str) else int(timeout)
-            )
+            timeout_seconds = parse_duration(timeout) if isinstance(timeout, str) else int(timeout)
 
         try:
             from aws_durable_execution_sdk_python.config import CallbackConfig

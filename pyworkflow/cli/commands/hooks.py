@@ -1,31 +1,31 @@
 """Hook management commands."""
 
 import json
-import click
-from typing import Any, Dict, List, Optional
+from typing import Any
 
+import click
 from InquirerPy import inquirer
 
-from pyworkflow.storage.schemas import HookStatus
-from pyworkflow.cli.utils.async_helpers import async_command
-from pyworkflow.cli.utils.storage import create_storage
 from pyworkflow.cli.output.formatters import (
-    format_table,
     format_json,
-    format_plain,
     format_key_value,
-    print_success,
+    format_plain,
+    format_table,
+    print_breadcrumb,
     print_error,
     print_info,
-    print_breadcrumb,
+    print_success,
 )
 from pyworkflow.cli.output.styles import (
+    DIM,
     PYWORKFLOW_STYLE,
+    RESET,
     SYMBOLS,
     Colors,
-    RESET,
-    DIM,
 )
+from pyworkflow.cli.utils.async_helpers import async_command
+from pyworkflow.cli.utils.storage import create_storage
+from pyworkflow.storage.schemas import HookStatus
 
 
 @click.group(name="hooks")
@@ -34,7 +34,7 @@ def hooks() -> None:
     pass
 
 
-def _build_hook_choices(hooks_list: List[Any]) -> List[Dict[str, str]]:
+def _build_hook_choices(hooks_list: list[Any]) -> list[dict[str, str]]:
     """Build choices list for hook selection."""
     choices = []
     for hook in hooks_list:
@@ -46,7 +46,7 @@ def _build_hook_choices(hooks_list: List[Any]) -> List[Dict[str, str]]:
     return choices
 
 
-async def _select_pending_hook_async(storage: Any) -> Optional[str]:
+async def _select_pending_hook_async(storage: Any) -> str | None:
     """
     Display an interactive menu to select a pending hook.
 
@@ -65,7 +65,7 @@ async def _select_pending_hook_async(storage: Any) -> Optional[str]:
     choices = _build_hook_choices(hooks_list)
 
     try:
-        result = await inquirer.select(
+        result = await inquirer.select(  # type: ignore[func-returns-value]
             message="Select hook to resume",
             choices=choices,
             style=PYWORKFLOW_STYLE,
@@ -79,7 +79,7 @@ async def _select_pending_hook_async(storage: Any) -> Optional[str]:
         return None
 
 
-async def _prompt_for_payload_async(hook: Any) -> Dict[str, Any]:
+async def _prompt_for_payload_async(hook: Any) -> dict[str, Any]:
     """
     Interactively prompt for payload fields based on hook's schema.
 
@@ -92,7 +92,7 @@ async def _prompt_for_payload_async(hook: Any) -> Dict[str, Any]:
     # If no schema, prompt for raw JSON
     if not hook.payload_schema:
         try:
-            raw = await inquirer.text(
+            raw = await inquirer.text(  # type: ignore[func-returns-value]
                 message="Enter payload (JSON)",
                 default="{}",
                 style=PYWORKFLOW_STYLE,
@@ -109,7 +109,7 @@ async def _prompt_for_payload_async(hook: Any) -> Dict[str, Any]:
     properties = schema.get("properties", {})
     required = set(schema.get("required", []))
 
-    payload = {}
+    payload: dict[str, Any] = {}
 
     for field_name, field_schema in properties.items():
         field_type = field_schema.get("type", "string")
@@ -127,7 +127,7 @@ async def _prompt_for_payload_async(hook: Any) -> Dict[str, Any]:
             # Handle boolean type with confirm prompt
             if field_type == "boolean":
                 default_val = default if default is not None else False
-                value = await inquirer.confirm(
+                value = await inquirer.confirm(  # type: ignore[func-returns-value]
                     message=field_name,
                     default=default_val,
                     style=PYWORKFLOW_STYLE,
@@ -140,7 +140,7 @@ async def _prompt_for_payload_async(hook: Any) -> Dict[str, Any]:
             # Handle integer type with number prompt
             elif field_type == "integer":
                 default_val = default if default is not None else None
-                value = await inquirer.number(
+                value = await inquirer.number(  # type: ignore[func-returns-value]
                     message=field_name,
                     default=default_val,
                     style=PYWORKFLOW_STYLE,
@@ -157,7 +157,7 @@ async def _prompt_for_payload_async(hook: Any) -> Dict[str, Any]:
             # Handle number/float type with number prompt
             elif field_type == "number":
                 default_val = default if default is not None else None
-                value = await inquirer.number(
+                value = await inquirer.number(  # type: ignore[func-returns-value]
                     message=field_name,
                     default=default_val,
                     style=PYWORKFLOW_STYLE,
@@ -178,7 +178,7 @@ async def _prompt_for_payload_async(hook: Any) -> Dict[str, Any]:
                 else:
                     default_str = ""
 
-                value_str = await inquirer.text(
+                value_str = await inquirer.text(  # type: ignore[func-returns-value]
                     message=field_name,
                     default=default_str,
                     style=PYWORKFLOW_STYLE,
@@ -229,8 +229,8 @@ async def _prompt_for_payload_async(hook: Any) -> Dict[str, Any]:
 @async_command
 async def list_hooks_cmd(
     ctx: click.Context,
-    run_id: Optional[str],
-    status: Optional[str],
+    run_id: str | None,
+    status: str | None,
     limit: int,
 ) -> None:
     """
@@ -299,8 +299,12 @@ async def list_hooks_cmd(
                     "Name": hook.name or "-",
                     "Status": hook.status.value,
                     "Run ID": hook.run_id,
-                    "Created": hook.created_at.strftime("%Y-%m-%d %H:%M") if hook.created_at else "-",
-                    "Expires": hook.expires_at.strftime("%Y-%m-%d %H:%M") if hook.expires_at else "-",
+                    "Created": hook.created_at.strftime("%Y-%m-%d %H:%M")
+                    if hook.created_at
+                    else "-",
+                    "Expires": hook.expires_at.strftime("%Y-%m-%d %H:%M")
+                    if hook.expires_at
+                    else "-",
                 }
                 for hook in hooks_list
             ]
@@ -372,9 +376,15 @@ async def hook_info_cmd(ctx: click.Context, token: str) -> None:
                 "Run ID": hook.run_id,
                 "Name": hook.name or "-",
                 "Status": hook.status.value,
-                "Created": hook.created_at.strftime("%Y-%m-%d %H:%M:%S") if hook.created_at else "-",
-                "Expires": hook.expires_at.strftime("%Y-%m-%d %H:%M:%S") if hook.expires_at else "-",
-                "Received": hook.received_at.strftime("%Y-%m-%d %H:%M:%S") if hook.received_at else "-",
+                "Created": hook.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                if hook.created_at
+                else "-",
+                "Expires": hook.expires_at.strftime("%Y-%m-%d %H:%M:%S")
+                if hook.expires_at
+                else "-",
+                "Received": hook.received_at.strftime("%Y-%m-%d %H:%M:%S")
+                if hook.received_at
+                else "-",
             }
 
             # Show payload if received
@@ -479,7 +489,9 @@ async def hooks_by_run_cmd(ctx: click.Context, run_id: str) -> None:
                 print(f"{Colors.bold(f'{i}. {hook.name or hook.hook_id}')}")
                 print(f"   Token: {hook.token}")
                 print(f"   Status: {status_color}{hook.status.value}{RESET}")
-                print(f"   Created: {hook.created_at.strftime('%Y-%m-%d %H:%M:%S') if hook.created_at else '-'}")
+                print(
+                    f"   Created: {hook.created_at.strftime('%Y-%m-%d %H:%M:%S') if hook.created_at else '-'}"
+                )
 
                 if hook.expires_at:
                     print(f"   Expires: {hook.expires_at.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -518,11 +530,13 @@ async def hooks_by_run_cmd(ctx: click.Context, run_id: str) -> None:
 @hooks.command(name="resume")
 @click.argument("token", required=False)
 @click.option(
-    "--payload", "-p",
+    "--payload",
+    "-p",
     help="JSON payload to send (skip interactive prompt)",
 )
 @click.option(
-    "--payload-file", "-f",
+    "--payload-file",
+    "-f",
     type=click.Path(exists=True),
     help="Read payload from JSON file",
 )
@@ -530,9 +544,9 @@ async def hooks_by_run_cmd(ctx: click.Context, run_id: str) -> None:
 @async_command
 async def resume_hook_cmd(
     ctx: click.Context,
-    token: Optional[str],
-    payload: Optional[str],
-    payload_file: Optional[str],
+    token: str | None,
+    payload: str | None,
+    payload_file: str | None,
 ) -> None:
     """
     Resume a pending hook with payload.
@@ -584,7 +598,7 @@ async def resume_hook_cmd(
 
         # Step 2: Get payload
         if payload_file:
-            with open(payload_file, "r") as f:
+            with open(payload_file) as f:
                 payload_data = json.load(f)
         elif payload:
             try:
@@ -605,11 +619,13 @@ async def resume_hook_cmd(
 
         # Output result
         if output == "json":
-            format_json({
-                "run_id": result.run_id,
-                "hook_id": result.hook_id,
-                "status": result.status,
-            })
+            format_json(
+                {
+                    "run_id": result.run_id,
+                    "hook_id": result.hook_id,
+                    "status": result.status,
+                }
+            )
         else:
             print_success(f"Hook resumed: {result.hook_id}")
             print_info(f"Run ID: {result.run_id}")

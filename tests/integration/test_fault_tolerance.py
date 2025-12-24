@@ -4,24 +4,23 @@ Integration tests for fault tolerance features.
 Tests cover the full workflow recovery flow after simulated worker failures.
 """
 
-import pytest
 from datetime import UTC, datetime
 
+import pytest
+
 from pyworkflow import (
-    workflow,
-    step,
-    configure,
     reset_config,
+    workflow,
 )
-from pyworkflow.storage.memory import InMemoryStorageBackend
-from pyworkflow.storage.schemas import RunStatus, WorkflowRun
 from pyworkflow.engine.events import (
     EventType,
-    create_workflow_started_event,
     create_step_completed_event,
     create_workflow_interrupted_event,
+    create_workflow_started_event,
 )
 from pyworkflow.serialization.encoder import serialize, serialize_args, serialize_kwargs
+from pyworkflow.storage.memory import InMemoryStorageBackend
+from pyworkflow.storage.schemas import RunStatus, WorkflowRun
 
 
 @pytest.fixture
@@ -335,6 +334,7 @@ class TestWorkflowDecoratorRecoveryConfig:
 
     def test_workflow_decorator_stores_recovery_config(self):
         """@workflow decorator should store recovery config on wrapper."""
+
         @workflow(
             name="test_recovery_config_1",
             recover_on_worker_loss=True,
@@ -348,6 +348,7 @@ class TestWorkflowDecoratorRecoveryConfig:
 
     def test_workflow_decorator_defaults_none(self):
         """@workflow decorator should default recovery config to None when called with ()."""
+
         @workflow(name="test_recovery_config_2")
         async def my_workflow():
             pass
@@ -357,6 +358,7 @@ class TestWorkflowDecoratorRecoveryConfig:
 
     def test_workflow_decorator_disable_recovery(self):
         """@workflow decorator can disable recovery."""
+
         @workflow(name="test_recovery_config_3", recover_on_worker_loss=False)
         async def my_workflow():
             pass

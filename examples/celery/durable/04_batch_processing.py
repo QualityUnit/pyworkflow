@@ -80,6 +80,7 @@ async def batch_workflow(batch_id: str, limit: int = 100) -> dict:
 async def main() -> None:
     """Run the batch processing workflow example."""
     import argparse
+
     import pyworkflow
 
     parser = argparse.ArgumentParser(description="Batch Processing Workflow")
@@ -97,4 +98,5 @@ async def main() -> None:
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

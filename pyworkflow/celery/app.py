@@ -13,7 +13,6 @@ garbage collector and Celery's saferepr module. It does not affect functionality
 """
 
 import os
-from typing import List, Optional
 
 from celery import Celery
 from kombu import Exchange, Queue
@@ -21,7 +20,7 @@ from kombu import Exchange, Queue
 from pyworkflow.observability.logging import configure_logging
 
 
-def discover_workflows(modules: Optional[List[str]] = None) -> None:
+def discover_workflows(modules: list[str] | None = None) -> None:
     """
     Discover and import workflow modules to register workflows with Celery workers.
 
@@ -59,8 +58,8 @@ def discover_workflows(modules: Optional[List[str]] = None) -> None:
 
 
 def create_celery_app(
-    broker_url: Optional[str] = None,
-    result_backend: Optional[str] = None,
+    broker_url: str | None = None,
+    result_backend: str | None = None,
     app_name: str = "pyworkflow",
 ) -> Celery:
     """

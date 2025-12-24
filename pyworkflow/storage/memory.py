@@ -12,7 +12,6 @@ Note: All data is lost when the process exits.
 
 import threading
 from datetime import UTC, datetime
-from typing import Dict, List, Optional
 
 from pyworkflow.engine.events import Event
 from pyworkflow.storage.base import StorageBackend
@@ -31,17 +30,17 @@ class InMemoryStorageBackend(StorageBackend):
         >>> pyworkflow.configure(storage=storage)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize empty storage."""
-        self._runs: Dict[str, WorkflowRun] = {}
-        self._events: Dict[str, List[Event]] = {}
-        self._steps: Dict[str, StepExecution] = {}
-        self._hooks: Dict[str, Hook] = {}
-        self._idempotency_index: Dict[str, str] = {}  # key -> run_id
-        self._token_index: Dict[str, str] = {}  # token -> hook_id
-        self._cancellation_flags: Dict[str, bool] = {}  # run_id -> cancelled
+        self._runs: dict[str, WorkflowRun] = {}
+        self._events: dict[str, list[Event]] = {}
+        self._steps: dict[str, StepExecution] = {}
+        self._hooks: dict[str, Hook] = {}
+        self._idempotency_index: dict[str, str] = {}  # key -> run_id
+        self._token_index: dict[str, str] = {}  # token -> hook_id
+        self._cancellation_flags: dict[str, bool] = {}  # run_id -> cancelled
         self._lock = threading.RLock()
-        self._event_sequences: Dict[str, int] = {}  # run_id -> next sequence
+        self._event_sequences: dict[str, int] = {}  # run_id -> next sequence
 
     # Workflow Run Operations
 
@@ -56,12 +55,12 @@ class InMemoryStorageBackend(StorageBackend):
             if run.idempotency_key:
                 self._idempotency_index[run.idempotency_key] = run.run_id
 
-    async def get_run(self, run_id: str) -> Optional[WorkflowRun]:
+    async def get_run(self, run_id: str) -> WorkflowRun | None:
         """Retrieve a workflow run by ID."""
         with self._lock:
             return self._runs.get(run_id)
 
-    async def get_run_by_idempotency_key(self, key: str) -> Optional[WorkflowRun]:
+    async def get_run_by_idempotency_key(self, key: str) -> WorkflowRun | None:
         """Retrieve a workflow run by idempotency key."""
         with self._lock:
             run_id = self._idempotency_index.get(key)
@@ -73,8 +72,8 @@ class InMemoryStorageBackend(StorageBackend):
         self,
         run_id: str,
         status: RunStatus,
-        result: Optional[str] = None,
-        error: Optional[str] = None,
+        result: str | None = None,
+        error: str | None = None,
     ) -> None:
         """Update workflow run status and optionally result/error."""
         with self._lock:
@@ -103,11 +102,11 @@ class InMemoryStorageBackend(StorageBackend):
 
     async def list_runs(
         self,
-        workflow_name: Optional[str] = None,
-        status: Optional[RunStatus] = None,
+        workflow_name: str | None = None,
+        status: RunStatus | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[WorkflowRun]:
+    ) -> list[WorkflowRun]:
         """List workflow runs with optional filtering."""
         with self._lock:
             runs = list(self._runs.values())
@@ -145,26 +144,26 @@ class InMemoryStorageBackend(StorageBackend):
     async def get_events(
         self,
         run_id: str,
-        event_types: Optional[List[str]] = None,
-    ) -> List[Event]:
+        event_types: list[str] | None = None,
+    ) -> list[Event]:
         """Retrieve all events for a workflow run, ordered by sequence."""
         with self._lock:
             events = list(self._events.get(run_id, []))
 
             # Filter by event types
             if event_types:
-                events = [e for e in events if e.event_type in event_types]
+                events = [e for e in events if e.type in event_types]
 
             # Sort by sequence
-            events.sort(key=lambda e: e.sequence)
+            events.sort(key=lambda e: e.sequence or 0)
 
             return events
 
     async def get_latest_event(
         self,
         run_id: str,
-        event_type: Optional[str] = None,
-    ) -> Optional[Event]:
+        event_type: str | None = None,
+    ) -> Event | None:
         """Get the latest event for a run, optionally filtered by type."""
         with self._lock:
             events = self._events.get(run_id, [])
@@ -173,13 +172,13 @@ class InMemoryStorageBackend(StorageBackend):
 
             # Filter by event type
             if event_type:
-                events = [e for e in events if e.event_type == event_type]
+                events = [e for e in events if e.type.value == event_type]
 
             if not events:
                 return None
 
             # Return event with highest sequence
-            return max(events, key=lambda e: e.sequence)
+            return max(events, key=lambda e: e.sequence or 0)
 
     # Step Operations
 
@@ -188,7 +187,7 @@ class InMemoryStorageBackend(StorageBackend):
         with self._lock:
             self._steps[step.step_id] = step
 
-    async def get_step(self, step_id: str) -> Optional[StepExecution]:
+    async def get_step(self, step_id: str) -> StepExecution | None:
         """Retrieve a step execution by ID."""
         with self._lock:
             return self._steps.get(step_id)
@@ -197,8 +196,8 @@ class InMemoryStorageBackend(StorageBackend):
         self,
         step_id: str,
         status: str,
-        result: Optional[str] = None,
-        error: Optional[str] = None,
+        result: str | None = None,
+        error: str | None = None,
     ) -> None:
         """Update step execution status."""
         with self._lock:
@@ -213,7 +212,7 @@ class InMemoryStorageBackend(StorageBackend):
                 if error is not None:
                     step.error = error
 
-    async def list_steps(self, run_id: str) -> List[StepExecution]:
+    async def list_steps(self, run_id: str) -> list[StepExecution]:
         """List all steps for a workflow run."""
         with self._lock:
             return [s for s in self._steps.values() if s.run_id == run_id]
@@ -226,12 +225,12 @@ class InMemoryStorageBackend(StorageBackend):
             self._hooks[hook.hook_id] = hook
             self._token_index[hook.token] = hook.hook_id
 
-    async def get_hook(self, hook_id: str) -> Optional[Hook]:
+    async def get_hook(self, hook_id: str) -> Hook | None:
         """Retrieve a hook by ID."""
         with self._lock:
             return self._hooks.get(hook_id)
 
-    async def get_hook_by_token(self, token: str) -> Optional[Hook]:
+    async def get_hook_by_token(self, token: str) -> Hook | None:
         """Retrieve a hook by its token."""
         with self._lock:
             hook_id = self._token_index.get(token)
@@ -243,7 +242,7 @@ class InMemoryStorageBackend(StorageBackend):
         self,
         hook_id: str,
         status: HookStatus,
-        payload: Optional[str] = None,
+        payload: str | None = None,
     ) -> None:
         """Update hook status and optionally payload."""
         with self._lock:
@@ -257,11 +256,11 @@ class InMemoryStorageBackend(StorageBackend):
 
     async def list_hooks(
         self,
-        run_id: Optional[str] = None,
-        status: Optional[HookStatus] = None,
+        run_id: str | None = None,
+        status: HookStatus | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Hook]:
+    ) -> list[Hook]:
         """List hooks with optional filtering."""
         with self._lock:
             hooks = list(self._hooks.values())

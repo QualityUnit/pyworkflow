@@ -150,6 +150,13 @@ async def main():
 | `storage` | `StorageBackend` | `None` | Storage backend instance |
 | `celery_broker` | `str` | `None` | Celery broker URL |
 | `aws_region` | `str` | `None` | AWS region (for Lambda runtimes) |
+| `event_soft_limit` | `int` | `10,000` | Event count to start logging warnings |
+| `event_hard_limit` | `int` | `50,000` | Event count to terminate workflow |
+| `event_warning_interval` | `int` | `100` | Events between warnings after soft limit |
+
+<Warning>
+  **Event limit settings should not be modified** unless you fully understand the implications. See [Limitations](/concepts/limitations) for details.
+</Warning>
 
 ### Storage Backends
 

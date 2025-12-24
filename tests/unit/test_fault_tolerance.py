@@ -9,16 +9,17 @@ Tests cover:
 - Recovery config options
 """
 
-import pytest
 from datetime import UTC, datetime
 
+import pytest
+
+from pyworkflow.config import PyWorkflowConfig
 from pyworkflow.engine.events import (
-    EventType,
     Event,
+    EventType,
     create_workflow_interrupted_event,
 )
 from pyworkflow.storage.schemas import RunStatus, WorkflowRun
-from pyworkflow.config import PyWorkflowConfig
 
 
 class TestWorkflowInterruptedEvent:
@@ -197,7 +198,9 @@ class TestRecoveryConfig:
         """Config should have correct default values."""
         config = PyWorkflowConfig()
 
-        assert config.default_recover_on_worker_loss is None  # None = True for durable, False for transient
+        assert (
+            config.default_recover_on_worker_loss is None
+        )  # None = True for durable, False for transient
         assert config.default_max_recovery_attempts == 3
 
     def test_config_custom_values(self):
@@ -249,10 +252,6 @@ class TestReplayWorkflowInterrupted:
         """Replayer should handle WORKFLOW_INTERRUPTED in a sequence of events."""
         from pyworkflow.context import LocalContext
         from pyworkflow.engine.replay import EventReplayer
-        from pyworkflow.engine.events import (
-            create_workflow_started_event,
-            create_step_completed_event,
-        )
         from pyworkflow.serialization.encoder import serialize
 
         ctx = LocalContext(

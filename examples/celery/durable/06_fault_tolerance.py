@@ -37,6 +37,7 @@ Check status:
 """
 
 import asyncio
+
 from pyworkflow import sleep, step, workflow
 
 
@@ -81,7 +82,7 @@ async def send_notification(data: dict) -> dict:
 
 @workflow(
     recover_on_worker_loss=True,  # Enable automatic recovery (default for durable)
-    max_recovery_attempts=5,       # Allow up to 5 recovery attempts
+    max_recovery_attempts=5,  # Allow up to 5 recovery attempts
 )
 async def data_pipeline(data_id: str) -> dict:
     """
@@ -105,9 +106,9 @@ async def data_pipeline(data_id: str) -> dict:
     - Kill the worker during step 3 (transform_data) which takes longest
     - Start a new worker and watch it recover
     """
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Starting data pipeline for {data_id}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     data = await fetch_data(data_id)
     print(f"  -> Fetch complete: {data['records']} records\n")
@@ -128,14 +129,14 @@ async def data_pipeline(data_id: str) -> dict:
     await sleep("10s")
 
     data = await load_data(data)
-    print(f"  -> Load complete\n")
+    print("  -> Load complete\n")
 
     data = await send_notification(data)
-    print(f"  -> Notification sent\n")
+    print("  -> Notification sent\n")
 
-    print(f"{'='*60}")
-    print(f"Pipeline completed successfully!")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}")
+    print("Pipeline completed successfully!")
+    print(f"{'=' * 60}\n")
 
     return data
 
@@ -175,6 +176,7 @@ async def critical_pipeline(data_id: str) -> dict:
 async def main() -> None:
     """Run the fault tolerance example."""
     import argparse
+
     import pyworkflow
 
     parser = argparse.ArgumentParser(description="Data Pipeline with Fault Tolerance")
@@ -197,7 +199,7 @@ async def main() -> None:
         run_id = await pyworkflow.start(data_pipeline, args.data_id)
 
     print(f"\nWorkflow started with run_id: {run_id}")
-    print(f"\nMonitor with:")
+    print("\nMonitor with:")
     print(f"  pyworkflow runs status {run_id}")
     print(f"  pyworkflow runs logs {run_id}")
 

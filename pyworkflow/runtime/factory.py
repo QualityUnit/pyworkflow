@@ -6,16 +6,13 @@ This module provides:
 - Validation of runtime + durable combinations
 """
 
-from typing import Dict, Type
-
 from pyworkflow.runtime.base import Runtime
 
-
 # Runtime registry
-_runtimes: Dict[str, Type[Runtime]] = {}
+_runtimes: dict[str, type[Runtime]] = {}
 
 
-def register_runtime(name: str, runtime_class: Type[Runtime]) -> None:
+def register_runtime(name: str, runtime_class: type[Runtime]) -> None:
     """
     Register a runtime implementation.
 
@@ -73,7 +70,7 @@ def validate_runtime_durable(runtime: Runtime, durable: bool) -> None:
         )
 
 
-def list_runtimes() -> Dict[str, Type[Runtime]]:
+def list_runtimes() -> dict[str, type[Runtime]]:
     """
     List all registered runtimes.
 

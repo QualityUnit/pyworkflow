@@ -1,15 +1,15 @@
 """Environment setup command for PyWorkflow."""
 
 import os
+
 import click
-from typing import Optional
 
 from pyworkflow.cli.output.formatters import (
-    format_key_value,
     format_json,
-    print_success,
+    format_key_value,
     print_error,
     print_info,
+    print_success,
     print_warning,
 )
 
@@ -34,7 +34,7 @@ from pyworkflow.cli.output.formatters import (
 def setup(
     ctx: click.Context,
     broker: str,
-    broker_url: Optional[str],
+    broker_url: str | None,
     check: bool,
 ) -> None:
     """
@@ -108,7 +108,9 @@ def setup(
 
     # Get storage config
     storage_type = ctx.obj.get("storage_type") or config.get("storage", {}).get("type", "file")
-    storage_path = ctx.obj.get("storage_path") or config.get("storage", {}).get("base_path", "./workflow_data")
+    storage_path = ctx.obj.get("storage_path") or config.get("storage", {}).get(
+        "base_path", "./workflow_data"
+    )
     config_data["Storage Backend"] = storage_type
     if storage_type == "file":
         config_data["Storage Path"] = storage_path
@@ -170,7 +172,7 @@ def setup(
 def _check_celery_installed() -> bool:
     """Check if Celery is installed."""
     try:
-        import celery
+        import celery  # noqa: F401
 
         return True
     except ImportError:

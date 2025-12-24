@@ -6,7 +6,6 @@ across different backends (File, Redis, SQLite, PostgreSQL).
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
 
 from pyworkflow.engine.events import Event
 from pyworkflow.storage.schemas import Hook, HookStatus, RunStatus, StepExecution, WorkflowRun
@@ -40,7 +39,7 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def get_run(self, run_id: str) -> Optional[WorkflowRun]:
+    async def get_run(self, run_id: str) -> WorkflowRun | None:
         """
         Retrieve a workflow run by ID.
 
@@ -53,7 +52,7 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def get_run_by_idempotency_key(self, key: str) -> Optional[WorkflowRun]:
+    async def get_run_by_idempotency_key(self, key: str) -> WorkflowRun | None:
         """
         Retrieve a workflow run by idempotency key.
 
@@ -70,8 +69,8 @@ class StorageBackend(ABC):
         self,
         run_id: str,
         status: RunStatus,
-        result: Optional[str] = None,
-        error: Optional[str] = None,
+        result: str | None = None,
+        error: str | None = None,
     ) -> None:
         """
         Update workflow run status and optionally result/error.
@@ -104,11 +103,11 @@ class StorageBackend(ABC):
     @abstractmethod
     async def list_runs(
         self,
-        workflow_name: Optional[str] = None,
-        status: Optional[RunStatus] = None,
+        workflow_name: str | None = None,
+        status: RunStatus | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[WorkflowRun]:
+    ) -> list[WorkflowRun]:
         """
         List workflow runs with optional filtering.
 
@@ -142,8 +141,8 @@ class StorageBackend(ABC):
     async def get_events(
         self,
         run_id: str,
-        event_types: Optional[List[str]] = None,
-    ) -> List[Event]:
+        event_types: list[str] | None = None,
+    ) -> list[Event]:
         """
         Retrieve all events for a workflow run, ordered by sequence.
 
@@ -160,8 +159,8 @@ class StorageBackend(ABC):
     async def get_latest_event(
         self,
         run_id: str,
-        event_type: Optional[str] = None,
-    ) -> Optional[Event]:
+        event_type: str | None = None,
+    ) -> Event | None:
         """
         Get the latest event for a run, optionally filtered by type.
 
@@ -187,7 +186,7 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def get_step(self, step_id: str) -> Optional[StepExecution]:
+    async def get_step(self, step_id: str) -> StepExecution | None:
         """
         Retrieve a step execution by ID.
 
@@ -204,8 +203,8 @@ class StorageBackend(ABC):
         self,
         step_id: str,
         status: str,
-        result: Optional[str] = None,
-        error: Optional[str] = None,
+        result: str | None = None,
+        error: str | None = None,
     ) -> None:
         """
         Update step execution status.
@@ -219,7 +218,7 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def list_steps(self, run_id: str) -> List[StepExecution]:
+    async def list_steps(self, run_id: str) -> list[StepExecution]:
         """
         List all steps for a workflow run.
 
@@ -244,7 +243,7 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def get_hook(self, hook_id: str) -> Optional[Hook]:
+    async def get_hook(self, hook_id: str) -> Hook | None:
         """
         Retrieve a hook by ID.
 
@@ -257,7 +256,7 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def get_hook_by_token(self, token: str) -> Optional[Hook]:
+    async def get_hook_by_token(self, token: str) -> Hook | None:
         """
         Retrieve a hook by its token.
 
@@ -274,7 +273,7 @@ class StorageBackend(ABC):
         self,
         hook_id: str,
         status: HookStatus,
-        payload: Optional[str] = None,
+        payload: str | None = None,
     ) -> None:
         """
         Update hook status and optionally payload.
@@ -289,11 +288,11 @@ class StorageBackend(ABC):
     @abstractmethod
     async def list_hooks(
         self,
-        run_id: Optional[str] = None,
-        status: Optional[HookStatus] = None,
+        run_id: str | None = None,
+        status: HookStatus | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Hook]:
+    ) -> list[Hook]:
         """
         List hooks with optional filtering.
 

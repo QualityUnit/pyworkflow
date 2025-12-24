@@ -7,7 +7,7 @@ Uses events for idempotency checks (no separate hook storage needed).
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Optional, Tuple
+from typing import Any
 
 from loguru import logger
 
@@ -20,12 +20,11 @@ from pyworkflow.core.exceptions import (
 from pyworkflow.engine.events import EventType
 from pyworkflow.storage.base import StorageBackend
 
-
 # Token format separator
 HOOK_TOKEN_SEPARATOR = ":"
 
 
-def parse_hook_token(token: str) -> Tuple[str, str]:
+def parse_hook_token(token: str) -> tuple[str, str]:
     """
     Parse a composite hook token into run_id and hook_id.
 
@@ -74,7 +73,7 @@ async def resume_hook(
     token: str,
     payload: Any,
     *,
-    storage: Optional[StorageBackend] = None,
+    storage: StorageBackend | None = None,
 ) -> ResumeResult:
     """
     Resume a suspended workflow with a payload.
@@ -117,6 +116,7 @@ async def resume_hook(
     # Get storage backend
     if storage is None:
         from pyworkflow import get_storage
+
         storage = get_storage()
 
     if storage is None:
@@ -139,9 +139,8 @@ async def resume_hook(
         if event.type == EventType.HOOK_CREATED:
             if event.data.get("hook_id") == hook_id:
                 hook_created_event = event
-        elif event.type == EventType.HOOK_RECEIVED:
-            if event.data.get("hook_id") == hook_id:
-                hook_received_event = event
+        elif event.type == EventType.HOOK_RECEIVED and event.data.get("hook_id") == hook_id:
+            hook_received_event = event
 
     # Check if hook was created
     if hook_created_event is None:
@@ -188,29 +187,20 @@ async def resume_hook(
         payload=serialized_payload,
     )
 
-    # Schedule workflow resumption via Celery
+    # Schedule workflow resumption via configured runtime
+    from pyworkflow.config import get_config
+    from pyworkflow.runtime import get_runtime
+
+    config = get_config()
+    runtime = get_runtime(config.default_runtime)
+
     try:
-        from pyworkflow.celery.tasks import resume_workflow_task
-
-        # Get storage config for Celery task
-        from pyworkflow.storage.config import storage_to_config
-
-        storage_config = storage_to_config(storage)
-
-        resume_workflow_task.apply_async(
-            args=[run_id],
-            kwargs={"storage_config": storage_config},
-        )
-
-        logger.info(
-            f"Scheduled workflow resumption: {run_id}",
+        await runtime.schedule_resume(run_id, storage)
+    except Exception as e:
+        logger.warning(
+            f"Failed to schedule workflow resumption: {e}",
             run_id=run_id,
             hook_id=hook_id,
-        )
-    except ImportError:
-        logger.warning(
-            "Celery not available - workflow will resume on next poll",
-            run_id=run_id,
         )
 
     return ResumeResult(

@@ -9,8 +9,9 @@ The Celery runtime is ideal for:
 """
 
 import os
+from collections.abc import Callable
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from loguru import logger
 
@@ -35,8 +36,8 @@ class CeleryRuntime(Runtime):
 
     def __init__(
         self,
-        broker_url: Optional[str] = None,
-        result_backend: Optional[str] = None,
+        broker_url: str | None = None,
+        result_backend: str | None = None,
     ):
         """
         Initialize Celery runtime.
@@ -45,11 +46,15 @@ class CeleryRuntime(Runtime):
             broker_url: Celery broker URL (default: from env or redis://localhost:6379/0)
             result_backend: Result backend URL (default: from env or redis://localhost:6379/1)
         """
-        self._broker_url = broker_url or os.getenv(
-            "PYWORKFLOW_CELERY_BROKER", "redis://localhost:6379/0"
+        self._broker_url: str = (
+            broker_url
+            or os.getenv("PYWORKFLOW_CELERY_BROKER", "redis://localhost:6379/0")
+            or "redis://localhost:6379/0"
         )
-        self._result_backend = result_backend or os.getenv(
-            "PYWORKFLOW_CELERY_RESULT_BACKEND", "redis://localhost:6379/1"
+        self._result_backend: str = (
+            result_backend
+            or os.getenv("PYWORKFLOW_CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
+            or "redis://localhost:6379/1"
         )
 
     @property
@@ -75,7 +80,7 @@ class CeleryRuntime(Runtime):
         """Get the configured result backend URL."""
         return self._result_backend
 
-    def _get_storage_config(self, storage: Optional["StorageBackend"]) -> Optional[dict]:
+    def _get_storage_config(self, storage: Optional["StorageBackend"]) -> dict | None:
         """
         Convert storage backend to configuration dict for Celery tasks.
 
@@ -108,9 +113,9 @@ class CeleryRuntime(Runtime):
         workflow_name: str,
         storage: Optional["StorageBackend"],
         durable: bool,
-        idempotency_key: Optional[str] = None,
-        max_duration: Optional[str] = None,
-        metadata: Optional[dict] = None,
+        idempotency_key: str | None = None,
+        max_duration: str | None = None,
+        metadata: dict | None = None,
     ) -> str:
         """
         Start a workflow execution by dispatching to Celery workers.
@@ -192,6 +197,36 @@ class CeleryRuntime(Runtime):
 
         # Return None since the actual result will be available asynchronously
         return None
+
+    async def schedule_resume(
+        self,
+        run_id: str,
+        storage: "StorageBackend",
+    ) -> None:
+        """
+        Schedule immediate workflow resumption via Celery task.
+
+        This is called by resume_hook() to trigger workflow resumption
+        after a hook event is received.
+        """
+        from pyworkflow.celery.tasks import resume_workflow_task
+
+        logger.info(
+            f"Scheduling workflow resume via Celery: {run_id}",
+            run_id=run_id,
+        )
+
+        storage_config = self._get_storage_config(storage)
+
+        resume_workflow_task.apply_async(
+            args=[run_id],
+            kwargs={"storage_config": storage_config},
+        )
+
+        logger.info(
+            f"Workflow resume scheduled: {run_id}",
+            run_id=run_id,
+        )
 
     async def schedule_wake(
         self,

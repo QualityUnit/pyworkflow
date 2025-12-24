@@ -12,7 +12,7 @@ These tasks enable:
 import asyncio
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from celery import Task
 from celery.exceptions import WorkerLostError
@@ -25,7 +25,7 @@ from pyworkflow.core.exceptions import (
     RetryableError,
     SuspensionSignal,
 )
-from pyworkflow.core.registry import get_workflow, get_workflow_by_func
+from pyworkflow.core.registry import WorkflowMetadata, get_workflow
 from pyworkflow.core.workflow import execute_workflow_with_context
 from pyworkflow.engine.events import (
     create_workflow_cancelled_event,
@@ -90,14 +90,14 @@ class WorkflowTask(Task):
     queue="pyworkflow.steps",
 )
 def execute_step_task(
-    self,
+    self: WorkflowTask,
     step_name: str,
     args_json: str,
     kwargs_json: str,
     run_id: str,
     step_id: str,
     max_retries: int = 3,
-    storage_config: Optional[Dict[str, Any]] = None,
+    storage_config: dict[str, Any] | None = None,
 ) -> Any:
     """
     Execute a workflow step in a Celery worker.
@@ -192,8 +192,8 @@ def start_workflow_task(
     args_json: str,
     kwargs_json: str,
     run_id: str,
-    storage_config: Optional[Dict[str, Any]] = None,
-    idempotency_key: Optional[str] = None,
+    storage_config: dict[str, Any] | None = None,
+    idempotency_key: str | None = None,
 ) -> str:
     """
     Start a workflow execution.
@@ -245,7 +245,7 @@ def start_workflow_task(
 async def _handle_workflow_recovery(
     run: WorkflowRun,
     storage: StorageBackend,
-    worker_id: Optional[str] = None,
+    worker_id: str | None = None,
 ) -> bool:
     """
     Handle workflow recovery from worker failure.
@@ -264,7 +264,7 @@ async def _handle_workflow_recovery(
     # Check if recovery is enabled for this workflow
     if not run.recover_on_worker_loss:
         logger.warning(
-            f"Workflow recovery disabled, marking as failed",
+            "Workflow recovery disabled, marking as failed",
             run_id=run.run_id,
             workflow_name=run.workflow_name,
         )
@@ -279,7 +279,7 @@ async def _handle_workflow_recovery(
     new_attempts = run.recovery_attempts + 1
     if new_attempts > run.max_recovery_attempts:
         logger.error(
-            f"Workflow exceeded max recovery attempts",
+            "Workflow exceeded max recovery attempts",
             run_id=run.run_id,
             workflow_name=run.workflow_name,
             recovery_attempts=run.recovery_attempts,
@@ -314,7 +314,7 @@ async def _handle_workflow_recovery(
     await storage.update_run_recovery_attempts(run.run_id, new_attempts)
 
     logger.info(
-        f"Workflow recovery initiated",
+        "Workflow recovery initiated",
         run_id=run.run_id,
         workflow_name=run.workflow_name,
         recovery_attempt=new_attempts,
@@ -326,9 +326,9 @@ async def _handle_workflow_recovery(
 
 async def _recover_workflow_on_worker(
     run: WorkflowRun,
-    workflow_meta,
+    workflow_meta: WorkflowMetadata,
     storage: StorageBackend,
-    storage_config: Optional[Dict[str, Any]] = None,
+    storage_config: dict[str, Any] | None = None,
 ) -> str:
     """
     Recover a workflow after worker failure.
@@ -410,7 +410,7 @@ async def _recover_workflow_on_worker(
         if resume_at:
             schedule_workflow_resumption(run_id, resume_at, storage_config=storage_config)
             logger.info(
-                f"Scheduled automatic workflow resumption",
+                "Scheduled automatic workflow resumption",
                 run_id=run_id,
                 resume_at=resume_at.isoformat(),
             )
@@ -419,9 +419,7 @@ async def _recover_workflow_on_worker(
 
     except Exception as e:
         # Workflow failed during recovery
-        await storage.update_run_status(
-            run_id=run_id, status=RunStatus.FAILED, error=str(e)
-        )
+        await storage.update_run_status(run_id=run_id, status=RunStatus.FAILED, error=str(e))
 
         logger.error(
             f"Workflow failed during recovery: {workflow_name}",
@@ -435,13 +433,13 @@ async def _recover_workflow_on_worker(
 
 
 async def _start_workflow_on_worker(
-    workflow_meta,
+    workflow_meta: WorkflowMetadata,
     args: tuple,
     kwargs: dict,
     storage: StorageBackend,
-    storage_config: Optional[Dict[str, Any]] = None,
-    idempotency_key: Optional[str] = None,
-    run_id: Optional[str] = None,
+    storage_config: dict[str, Any] | None = None,
+    idempotency_key: str | None = None,
+    run_id: str | None = None,
 ) -> str:
     """
     Internal function to start workflow on Celery worker.
@@ -458,7 +456,6 @@ async def _start_workflow_on_worker(
         idempotency_key: Optional idempotency key
         run_id: Pre-generated run ID (if None, generates a new one)
     """
-    from pyworkflow.core.exceptions import WorkflowAlreadyRunningError
     from pyworkflow.config import get_config
 
     workflow_name = workflow_meta.name
@@ -543,9 +540,11 @@ async def _start_workflow_on_worker(
 
     # Determine recovery settings
     # Priority: workflow decorator > global config > defaults based on durable mode
-    recover_on_worker_loss = getattr(workflow_meta.func, '__workflow_recover_on_worker_loss__', None)
-    max_recovery_attempts = getattr(workflow_meta.func, '__workflow_max_recovery_attempts__', None)
-    is_durable = getattr(workflow_meta.func, '__workflow_durable__', True)
+    recover_on_worker_loss = getattr(
+        workflow_meta.func, "__workflow_recover_on_worker_loss__", None
+    )
+    max_recovery_attempts = getattr(workflow_meta.func, "__workflow_max_recovery_attempts__", None)
+    is_durable = getattr(workflow_meta.func, "__workflow_durable__", True)
 
     if recover_on_worker_loss is None:
         recover_on_worker_loss = config.default_recover_on_worker_loss
@@ -567,7 +566,7 @@ async def _start_workflow_on_worker(
         input_kwargs=serialize_kwargs(**kwargs),
         idempotency_key=idempotency_key,
         max_duration=workflow_meta.max_duration,
-        metadata=workflow_meta.metadata,
+        metadata=workflow_meta.metadata or {},
         recovery_attempts=0,
         max_recovery_attempts=max_recovery_attempts,
         recover_on_worker_loss=recover_on_worker_loss,
@@ -646,7 +645,7 @@ async def _start_workflow_on_worker(
         if resume_at:
             schedule_workflow_resumption(run_id, resume_at, storage_config=storage_config)
             logger.info(
-                f"Scheduled automatic workflow resumption",
+                "Scheduled automatic workflow resumption",
                 run_id=run_id,
                 resume_at=resume_at.isoformat(),
             )
@@ -655,9 +654,7 @@ async def _start_workflow_on_worker(
 
     except Exception as e:
         # Workflow failed
-        await storage.update_run_status(
-            run_id=run_id, status=RunStatus.FAILED, error=str(e)
-        )
+        await storage.update_run_status(run_id=run_id, status=RunStatus.FAILED, error=str(e))
 
         logger.error(
             f"Workflow failed on worker: {workflow_name}",
@@ -676,8 +673,8 @@ async def _start_workflow_on_worker(
 )
 def resume_workflow_task(
     run_id: str,
-    storage_config: Optional[Dict[str, Any]] = None,
-) -> Optional[Any]:
+    storage_config: dict[str, Any] | None = None,
+) -> Any | None:
     """
     Resume a suspended workflow.
 
@@ -709,9 +706,9 @@ def resume_workflow_task(
 
 async def _complete_pending_sleeps(
     run_id: str,
-    events: List[Any],
+    events: list[Any],
     storage: StorageBackend,
-) -> List[Any]:
+) -> list[Any]:
     """
     Record SLEEP_COMPLETED events for any pending sleeps.
 
@@ -760,8 +757,8 @@ async def _complete_pending_sleeps(
 async def _resume_workflow_on_worker(
     run_id: str,
     storage: StorageBackend,
-    storage_config: Optional[Dict[str, Any]] = None,
-) -> Optional[Any]:
+    storage_config: dict[str, Any] | None = None,
+) -> Any | None:
     """
     Internal function to resume workflow on Celery worker.
 
@@ -777,7 +774,7 @@ async def _resume_workflow_on_worker(
     # Check if workflow was cancelled while suspended
     if run.status == RunStatus.CANCELLED:
         logger.info(
-            f"Workflow was cancelled while suspended, skipping resume",
+            "Workflow was cancelled while suspended, skipping resume",
             run_id=run_id,
             workflow_name=run.workflow_name,
         )
@@ -877,7 +874,7 @@ async def _resume_workflow_on_worker(
         if resume_at:
             schedule_workflow_resumption(run_id, resume_at, storage_config=storage_config)
             logger.info(
-                f"Scheduled automatic workflow resumption",
+                "Scheduled automatic workflow resumption",
                 run_id=run_id,
                 resume_at=resume_at.isoformat(),
             )
@@ -886,9 +883,7 @@ async def _resume_workflow_on_worker(
 
     except Exception as e:
         # Workflow failed
-        await storage.update_run_status(
-            run_id=run_id, status=RunStatus.FAILED, error=str(e)
-        )
+        await storage.update_run_status(run_id=run_id, status=RunStatus.FAILED, error=str(e))
 
         logger.error(
             f"Workflow failed on resume on worker: {run.workflow_name}",
@@ -901,7 +896,7 @@ async def _resume_workflow_on_worker(
         raise
 
 
-def _get_storage_backend(config: Optional[Dict[str, Any]] = None) -> StorageBackend:
+def _get_storage_backend(config: dict[str, Any] | None = None) -> StorageBackend:
     """
     Get storage backend from configuration.
 
@@ -915,7 +910,7 @@ def _get_storage_backend(config: Optional[Dict[str, Any]] = None) -> StorageBack
 def schedule_workflow_resumption(
     run_id: str,
     resume_at: datetime,
-    storage_config: Optional[Dict[str, Any]] = None,
+    storage_config: dict[str, Any] | None = None,
 ) -> None:
     """
     Schedule automatic workflow resumption after sleep.
@@ -932,7 +927,7 @@ def schedule_workflow_resumption(
     delay_seconds = max(0, int((resume_at - now).total_seconds()))
 
     logger.info(
-        f"Scheduling workflow resumption",
+        "Scheduling workflow resumption",
         run_id=run_id,
         resume_at=resume_at.isoformat(),
         delay_seconds=delay_seconds,

@@ -11,10 +11,9 @@ Supports duration strings like:
 
 import re
 from datetime import datetime, timedelta
-from typing import Union
 
 
-def parse_duration(duration: Union[str, int, timedelta, datetime]) -> int:
+def parse_duration(duration: str | int | timedelta | datetime) -> int:
     """
     Parse duration to seconds.
 
@@ -158,7 +157,7 @@ def format_duration(seconds: int) -> str:
     return f"{weeks}w"
 
 
-def duration_to_timedelta(duration: Union[str, int]) -> timedelta:
+def duration_to_timedelta(duration: str | int) -> timedelta:
     """
     Convert duration to Python timedelta.
 

@@ -23,7 +23,6 @@ from pyworkflow import (
 )
 from pyworkflow.storage import FileStorageBackend
 
-
 # Execution counter to track step calls
 execution_count = 0
 
@@ -83,14 +82,11 @@ async def main():
         # First call with idempotency key
         print("First call: Creating order with idempotency_key='order-unique-123'...\n")
         run_id_1 = await start(
-            order_workflow,
-            "order-unique-123",
-            99.99,
-            idempotency_key="order-unique-123"
+            order_workflow, "order-unique-123", 99.99, idempotency_key="order-unique-123"
         )
 
         run_1 = await get_workflow_run(run_id_1)
-        print(f"\nFirst call completed:")
+        print("\nFirst call completed:")
         print(f"  Run ID: {run_id_1}")
         print(f"  Status: {run_1.status.value}")
         print(f"  Result: {run_1.result}")
@@ -100,14 +96,11 @@ async def main():
         print("\n" + "=" * 60)
         print("\nSecond call: Same idempotency_key='order-unique-123'...\n")
         run_id_2 = await start(
-            order_workflow,
-            "order-unique-123",
-            99.99,
-            idempotency_key="order-unique-123"
+            order_workflow, "order-unique-123", 99.99, idempotency_key="order-unique-123"
         )
 
         run_2 = await get_workflow_run(run_id_2)
-        print(f"\nSecond call result:")
+        print("\nSecond call result:")
         print(f"  Run ID: {run_id_2}")
         print(f"  Status: {run_2.status.value}")
         print(f"  Result: {run_2.result}")
@@ -128,14 +121,11 @@ async def main():
         print("\n" + "=" * 60)
         print("\nThird call: Different idempotency_key='order-unique-456'...\n")
         run_id_3 = await start(
-            order_workflow,
-            "order-unique-456",
-            149.99,
-            idempotency_key="order-unique-456"
+            order_workflow, "order-unique-456", 149.99, idempotency_key="order-unique-456"
         )
 
         run_3 = await get_workflow_run(run_id_3)
-        print(f"\nThird call result:")
+        print("\nThird call result:")
         print(f"  Run ID: {run_id_3}")
         print(f"  Status: {run_3.status.value}")
         print(f"  Execution count: {execution_count} (incremented!)")

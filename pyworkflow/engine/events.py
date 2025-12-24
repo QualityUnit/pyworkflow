@@ -5,11 +5,11 @@ All workflow state changes are recorded as events in an append-only log.
 Events enable deterministic replay for fault tolerance and resumption.
 """
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Dict, Optional
-import uuid
+from typing import Any
 
 
 class EventType(Enum):
@@ -58,8 +58,8 @@ class Event:
     run_id: str = ""
     type: EventType = EventType.WORKFLOW_STARTED
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
-    data: Dict[str, Any] = field(default_factory=dict)
-    sequence: Optional[int] = None  # Assigned by storage layer
+    data: dict[str, Any] = field(default_factory=dict)
+    sequence: int | None = None  # Assigned by storage layer
 
     def __post_init__(self) -> None:
         """Validate event after initialization."""
@@ -71,12 +71,13 @@ class Event:
 
 # Event creation helpers for common event types
 
+
 def create_workflow_started_event(
     run_id: str,
     workflow_name: str,
     args: Any,
     kwargs: Any,
-    metadata: Optional[Dict[str, Any]] = None,
+    metadata: dict[str, Any] | None = None,
 ) -> Event:
     """Create a workflow started event."""
     return Event(
@@ -101,7 +102,7 @@ def create_workflow_completed_event(run_id: str, result: Any) -> Event:
 
 
 def create_workflow_failed_event(
-    run_id: str, error: str, error_type: str, traceback: Optional[str] = None
+    run_id: str, error: str, error_type: str, traceback: str | None = None
 ) -> Event:
     """Create a workflow failed event."""
     return Event(
@@ -118,9 +119,9 @@ def create_workflow_failed_event(
 def create_workflow_interrupted_event(
     run_id: str,
     reason: str,
-    worker_id: Optional[str] = None,
-    last_event_sequence: Optional[int] = None,
-    error: Optional[str] = None,
+    worker_id: str | None = None,
+    last_event_sequence: int | None = None,
+    error: str | None = None,
     recovery_attempt: int = 1,
     recoverable: bool = True,
 ) -> Event:
@@ -197,7 +198,7 @@ def create_step_failed_event(
     error_type: str,
     is_retryable: bool,
     attempt: int,
-    traceback: Optional[str] = None,
+    traceback: str | None = None,
 ) -> Event:
     """Create a step failed event."""
     return Event(
@@ -218,8 +219,8 @@ def create_step_retrying_event(
     run_id: str,
     step_id: str,
     attempt: int,
-    retry_after: Optional[str] = None,
-    error: Optional[str] = None,
+    retry_after: str | None = None,
+    error: str | None = None,
 ) -> Event:
     """Create a step retrying event."""
     return Event(
@@ -239,7 +240,7 @@ def create_sleep_started_event(
     sleep_id: str,
     duration_seconds: int,
     resume_at: datetime,
-    name: Optional[str] = None,
+    name: str | None = None,
 ) -> Event:
     """Create a sleep started event."""
     return Event(
@@ -268,10 +269,10 @@ def create_hook_created_event(
     hook_id: str,
     token: str = "",
     url: str = "",
-    expires_at: Optional[datetime] = None,
-    name: Optional[str] = None,
-    hook_name: Optional[str] = None,
-    timeout_seconds: Optional[int] = None,
+    expires_at: datetime | None = None,
+    name: str | None = None,
+    hook_name: str | None = None,
+    timeout_seconds: int | None = None,
 ) -> Event:
     """
     Create a hook created event.
@@ -293,6 +294,7 @@ def create_hook_created_event(
     actual_expires_at = expires_at
     if timeout_seconds and not expires_at:
         from datetime import UTC, timedelta
+
         actual_expires_at = datetime.now(UTC) + timedelta(seconds=timeout_seconds)
 
     return Event(
@@ -331,8 +333,8 @@ def create_hook_expired_event(run_id: str, hook_id: str) -> Event:
 
 def create_cancellation_requested_event(
     run_id: str,
-    reason: Optional[str] = None,
-    requested_by: Optional[str] = None,
+    reason: str | None = None,
+    requested_by: str | None = None,
 ) -> Event:
     """
     Create a cancellation requested event.
@@ -361,7 +363,7 @@ def create_cancellation_requested_event(
 
 def create_workflow_cancelled_event(
     run_id: str,
-    reason: Optional[str] = None,
+    reason: str | None = None,
     cleanup_completed: bool = False,
 ) -> Event:
     """
@@ -393,7 +395,7 @@ def create_step_cancelled_event(
     run_id: str,
     step_id: str,
     step_name: str,
-    reason: Optional[str] = None,
+    reason: str | None = None,
 ) -> Event:
     """
     Create a step cancelled event.

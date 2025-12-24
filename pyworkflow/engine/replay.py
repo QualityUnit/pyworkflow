@@ -5,8 +5,6 @@ The replay engine processes the event log to rebuild workflow state,
 enabling fault tolerance and resumption after crashes or suspensions.
 """
 
-from typing import List
-
 from loguru import logger
 
 from pyworkflow.context import LocalContext
@@ -23,7 +21,7 @@ class EventReplayer:
     - Sleep completion status
     """
 
-    async def replay(self, ctx: LocalContext, events: List[Event]) -> None:
+    async def replay(self, ctx: LocalContext, events: list[Event]) -> None:
         """
         Replay events to restore workflow state.
 
@@ -189,7 +187,7 @@ class EventReplayer:
         step_id = event.data.get("step_id")
         next_attempt = event.data.get("attempt")
         resume_at_str = event.data.get("resume_at")
-        retry_after = event.data.get("retry_after")
+        event.data.get("retry_after")
         max_retries = event.data.get("max_retries", 3)
         retry_delay = event.data.get("retry_strategy", "exponential")
         last_error = event.data.get("error", "")
@@ -251,7 +249,7 @@ class EventReplayer:
         ctx.request_cancellation(reason=reason)
 
         logger.info(
-            f"Cancellation requested for workflow",
+            "Cancellation requested for workflow",
             run_id=ctx.run_id,
             reason=reason,
             requested_by=requested_by,
@@ -262,7 +260,7 @@ class EventReplayer:
 _replayer = EventReplayer()
 
 
-async def replay_events(ctx: LocalContext, events: List[Event]) -> None:
+async def replay_events(ctx: LocalContext, events: list[Event]) -> None:
     """
     Replay events to restore workflow state.
 

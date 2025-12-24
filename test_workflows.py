@@ -1,6 +1,6 @@
 """Test workflows for CLI testing."""
 
-from pyworkflow import workflow, step
+from pyworkflow import step, workflow
 
 
 @step()

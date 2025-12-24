@@ -2,12 +2,12 @@
 
 import tomllib
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
 
 from loguru import logger
 
 
-def find_config_file() -> Optional[Path]:
+def find_config_file() -> Path | None:
     """
     Find configuration file in current directory or parents.
 
@@ -54,7 +54,7 @@ def find_config_file() -> Optional[Path]:
     return None
 
 
-def load_config() -> Dict[str, Any]:
+def load_config() -> dict[str, Any]:
     """
     Load CLI configuration from file.
 
@@ -95,7 +95,7 @@ def load_config() -> Dict[str, Any]:
 
 
 def get_config_value(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     *keys: str,
     default: Any = None,
 ) -> Any:
@@ -119,7 +119,7 @@ def get_config_value(
         # With default
         timeout = get_config_value(config, "timeout", default=30)  # 30
     """
-    value = config
+    value: Any = config
     for key in keys:
         if isinstance(value, dict):
             value = value.get(key)

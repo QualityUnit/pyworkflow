@@ -18,16 +18,12 @@ from pyworkflow import (
     CancellationError,
     RunStatus,
     cancel_workflow,
-    hook,
     shield,
-    sleep,
-    start,
     step,
-    workflow,
 )
+from pyworkflow.engine.events import EventType
 from pyworkflow.storage.memory import InMemoryStorageBackend
 from pyworkflow.storage.schemas import WorkflowRun
-from pyworkflow.engine.events import EventType
 
 
 class TestCancelWorkflowFunction:
@@ -60,9 +56,7 @@ class TestCancelWorkflowFunction:
 
         # Check cancellation event was recorded
         events = await storage.get_events("run_123")
-        cancellation_events = [
-            e for e in events if e.type == EventType.CANCELLATION_REQUESTED
-        ]
+        cancellation_events = [e for e in events if e.type == EventType.CANCELLATION_REQUESTED]
         assert len(cancellation_events) == 1
         assert cancellation_events[0].data["reason"] == "User cancelled"
 
@@ -174,7 +168,7 @@ class TestCancellationCheckPoints:
     @pytest.mark.asyncio
     async def test_step_checks_cancellation(self):
         """Test that step execution checks for cancellation."""
-        from pyworkflow.context import LocalContext, set_context, reset_context
+        from pyworkflow.context import LocalContext, reset_context, set_context
 
         @step()
         async def my_step():
@@ -203,7 +197,7 @@ class TestShieldIntegration:
     @pytest.mark.asyncio
     async def test_shield_allows_cleanup(self):
         """Test shield() allows cleanup operations to complete."""
-        from pyworkflow.context import LocalContext, set_context, reset_context
+        from pyworkflow.context import LocalContext, reset_context, set_context
 
         cleanup_completed = False
 
@@ -310,7 +304,7 @@ class TestCancellationErrorHandling:
     @pytest.mark.asyncio
     async def test_workflow_can_catch_cancellation_for_cleanup(self):
         """Test that workflows can catch CancellationError for cleanup."""
-        from pyworkflow.context import LocalContext, set_context, reset_context
+        from pyworkflow.context import LocalContext
 
         cleanup_called = False
 

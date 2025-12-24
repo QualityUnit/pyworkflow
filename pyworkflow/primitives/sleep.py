@@ -8,7 +8,6 @@ the delay period.
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Optional, Union
 
 from loguru import logger
 
@@ -17,8 +16,8 @@ from pyworkflow.utils.duration import parse_duration
 
 
 async def sleep(
-    duration: Union[str, int, float, timedelta, datetime],
-    name: Optional[str] = None,
+    duration: str | int | float | timedelta | datetime,
+    name: str | None = None,
 ) -> None:
     """
     Suspend workflow execution for a specified duration.
@@ -75,7 +74,7 @@ async def sleep(
     await asyncio.sleep(duration_seconds)
 
 
-def _calculate_resume_time(duration: Union[str, int, float, timedelta, datetime]) -> datetime:
+def _calculate_resume_time(duration: str | int | float | timedelta | datetime) -> datetime:
     """Calculate when the sleep should resume."""
     if isinstance(duration, datetime):
         return duration
@@ -84,7 +83,7 @@ def _calculate_resume_time(duration: Union[str, int, float, timedelta, datetime]
     return datetime.now(UTC) + timedelta(seconds=delay_seconds)
 
 
-def _calculate_delay_seconds(duration: Union[str, int, float, timedelta, datetime]) -> int:
+def _calculate_delay_seconds(duration: str | int | float | timedelta | datetime) -> int:
     """Calculate delay in seconds."""
     if isinstance(duration, datetime):
         now = datetime.now(UTC)

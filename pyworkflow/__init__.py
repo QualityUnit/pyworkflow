@@ -34,23 +34,15 @@ __version__ = "0.1.0"
 # Configuration
 from pyworkflow.config import configure, get_config, get_storage, reset_config
 
-# Core decorators and primitives
-from pyworkflow.core.step import step
-from pyworkflow.core.workflow import workflow
-from pyworkflow.primitives.define_hook import TypedHook, define_hook
-from pyworkflow.primitives.hooks import hook
-from pyworkflow.primitives.resume_hook import ResumeResult, resume_hook
-from pyworkflow.primitives.shield import shield
-from pyworkflow.primitives.sleep import sleep
-
-# Execution engine
-from pyworkflow.engine.executor import (
-    ConfigurationError,
-    cancel_workflow,
-    get_workflow_events,
-    get_workflow_run,
-    resume,
-    start,
+# Context API (new unified context via contextvars)
+from pyworkflow.context import (
+    LocalContext,
+    MockContext,
+    WorkflowContext,
+    get_context,
+    has_context,
+    reset_context,
+    set_context,
 )
 
 # Exceptions
@@ -68,17 +60,6 @@ from pyworkflow.core.exceptions import (
     WorkflowNotFoundError,
 )
 
-# Context API (new unified context via contextvars)
-from pyworkflow.context import (
-    WorkflowContext,
-    LocalContext,
-    MockContext,
-    get_context,
-    has_context,
-    set_context,
-    reset_context,
-)
-
 # Registry functions
 from pyworkflow.core.registry import (
     get_step,
@@ -87,14 +68,19 @@ from pyworkflow.core.registry import (
     list_workflows,
 )
 
-# Storage backends
-from pyworkflow.storage.base import StorageBackend
-from pyworkflow.storage.file import FileStorageBackend
-from pyworkflow.storage.memory import InMemoryStorageBackend
-from pyworkflow.storage.schemas import RunStatus, WorkflowRun
+# Core decorators and primitives
+from pyworkflow.core.step import step
+from pyworkflow.core.workflow import workflow
 
-# Runtime
-from pyworkflow.runtime import Runtime, LocalRuntime, get_runtime, register_runtime
+# Execution engine
+from pyworkflow.engine.executor import (
+    ConfigurationError,
+    cancel_workflow,
+    get_workflow_events,
+    get_workflow_run,
+    resume,
+    start,
+)
 
 # Logging and observability
 from pyworkflow.observability.logging import (
@@ -103,6 +89,20 @@ from pyworkflow.observability.logging import (
     configure_logging,
     get_logger,
 )
+from pyworkflow.primitives.define_hook import TypedHook, define_hook
+from pyworkflow.primitives.hooks import hook
+from pyworkflow.primitives.resume_hook import ResumeResult, resume_hook
+from pyworkflow.primitives.shield import shield
+from pyworkflow.primitives.sleep import sleep
+
+# Runtime
+from pyworkflow.runtime import LocalRuntime, Runtime, get_runtime, register_runtime
+
+# Storage backends
+from pyworkflow.storage.base import StorageBackend
+from pyworkflow.storage.file import FileStorageBackend
+from pyworkflow.storage.memory import InMemoryStorageBackend
+from pyworkflow.storage.schemas import RunStatus, WorkflowRun
 
 __all__ = [
     # Version

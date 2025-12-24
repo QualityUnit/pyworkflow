@@ -1,7 +1,5 @@
 """Styles and themes for PyWorkflow CLI using InquirerPy."""
 
-from typing import Dict
-
 from InquirerPy.utils import get_style
 
 # Primary brand color
@@ -72,7 +70,7 @@ class Colors:
 
 
 # Status color mapping
-STATUS_COLORS: Dict[str, str] = {
+STATUS_COLORS: dict[str, str] = {
     "completed": Colors.GREEN,
     "running": Colors.BLUE,
     "suspended": Colors.YELLOW,
@@ -86,7 +84,7 @@ STATUS_COLORS: Dict[str, str] = {
 }
 
 # Event type color mapping
-EVENT_COLORS: Dict[str, str] = {
+EVENT_COLORS: dict[str, str] = {
     "workflow_started": Colors.BLUE,
     "workflow_completed": Colors.GREEN,
     "workflow_failed": Colors.RED,

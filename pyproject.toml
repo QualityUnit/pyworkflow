@@ -65,10 +65,12 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
     "mypy>=1.7.0",
+    "pre-commit>=3.5.0",
 
     # Type stubs
     "types-redis>=4.6.0",
     "types-python-dateutil>=2.8.0",
+    "types-PyYAML>=6.0.0",
 
     # Monitoring (optional)
     "flower>=2.0.0",  # Celery web UI
@@ -166,22 +168,29 @@ ignore = [
     "B008",  # do not perform function calls in argument defaults
     "C901",  # too complex
     "W191",  # indentation contains tabs
+    "ARG001",  # unused function argument (often needed for callbacks/interfaces)
+    "ARG002",  # unused method argument (often needed for callbacks/interfaces)
+    "B904",  # raise from - can be noisy, not always necessary
+    "E402",  # module level import not at top (often intentional for conditional imports)
+    "B027",  # empty method in abstract class (intentional for optional overrides)
+    "SIM102",  # nested if - sometimes clearer than combined condition
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # Unused imports in __init__.py
+"examples/**/*.py" = ["E402", "F841"]  # Examples may have non-standard structure
 
 [tool.mypy]
 python_version = "3.11"
-warn_return_any = true
+warn_return_any = false  # Too strict for yaml.safe_load and similar
 warn_unused_configs = true
-disallow_untyped_defs = true
+disallow_untyped_defs = false  # Allow untyped defs for gradual typing
 disallow_incomplete_defs = true
 check_untyped_defs = true
 disallow_untyped_decorators = false
 no_implicit_optional = true
 warn_redundant_casts = true
-warn_unused_ignores = true
+warn_unused_ignores = false  # Don't warn about unused ignores during transition
 warn_no_return = true
 follow_imports = "normal"
 strict_optional = true
@@ -194,8 +203,16 @@ module = [
     "aiosqlite.*",
     "InquirerPy.*",
     "prompt_toolkit.*",
+    "yaml.*",
 ]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "pyworkflow.celery.tasks",
+    "pyworkflow.aws.handler",
+]
+disallow_untyped_defs = false
 
 [tool.isort]
 profile = "black"

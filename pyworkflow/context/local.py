@@ -11,9 +11,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Type, Union
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel
@@ -58,9 +58,9 @@ class LocalContext(WorkflowContext):
         self,
         run_id: str = "local_run",
         workflow_name: str = "local_workflow",
-        storage: Optional[Any] = None,
+        storage: Any | None = None,
         durable: bool = True,
-        event_log: Optional[List[Any]] = None,
+        event_log: list[Any] | None = None,
     ) -> None:
         """
         Initialize local context.
@@ -78,19 +78,20 @@ class LocalContext(WorkflowContext):
         self._event_log = event_log or []
 
         # Execution state
-        self._step_results: Dict[str, Any] = {}
-        self._completed_sleeps: Set[str] = set()
-        self._pending_sleeps: Dict[str, Any] = {}
-        self._hook_results: Dict[str, Any] = {}
-        self._pending_hooks: Dict[str, Any] = {}
+        self._step_results: dict[str, Any] = {}
+        self._completed_sleeps: set[str] = set()
+        self._pending_sleeps: dict[str, Any] = {}
+        self._hook_results: dict[str, Any] = {}
+        self._pending_hooks: dict[str, Any] = {}
         self._step_counter = 0
-        self._retry_states: Dict[str, Dict[str, Any]] = {}
+        self._retry_states: dict[str, dict[str, Any]] = {}
         self._is_replaying = False
+        self._last_warning_count: int = 0  # Track last event count for warning interval
 
         # Cancellation state
         self._cancellation_requested: bool = False
         self._cancellation_blocked: bool = False
-        self._cancellation_reason: Optional[str] = None
+        self._cancellation_reason: str | None = None
 
         # Replay state if resuming
         if event_log:
@@ -98,7 +99,7 @@ class LocalContext(WorkflowContext):
             self._replay_events(event_log)
             self._is_replaying = False
 
-    def _replay_events(self, events: List[Any]) -> None:
+    def _replay_events(self, events: list[Any]) -> None:
         """Replay events to restore state."""
         from pyworkflow.engine.events import EventType
         from pyworkflow.serialization.decoder import deserialize
@@ -138,8 +139,13 @@ class LocalContext(WorkflowContext):
         return self._durable
 
     @property
-    def storage(self) -> Optional[Any]:
+    def storage(self) -> Any | None:
         """Get the storage backend."""
+        return self._storage
+
+    def _get_storage(self) -> Any:
+        """Get storage backend, asserting it's not None (for durable mode)."""
+        assert self._storage is not None, "Storage not available in transient mode"
         return self._storage
 
     @property
@@ -172,7 +178,7 @@ class LocalContext(WorkflowContext):
     # Retry state management (for @step decorator compatibility)
     # =========================================================================
 
-    def get_retry_state(self, step_id: str) -> Optional[Dict[str, Any]]:
+    def get_retry_state(self, step_id: str) -> dict[str, Any] | None:
         """Get retry state for a step."""
         return self._retry_states.get(step_id)
 
@@ -204,7 +210,7 @@ class LocalContext(WorkflowContext):
     # =========================================================================
 
     @property
-    def pending_sleeps(self) -> Dict[str, Any]:
+    def pending_sleeps(self) -> dict[str, Any]:
         """Get pending sleeps (sleep_id -> resume_at)."""
         return self._pending_sleeps
 
@@ -225,7 +231,7 @@ class LocalContext(WorkflowContext):
         return sleep_id in self._completed_sleeps
 
     @property
-    def completed_sleeps(self) -> Set[str]:
+    def completed_sleeps(self) -> set[str]:
         """Get the set of completed sleep IDs."""
         return self._completed_sleeps
 
@@ -234,7 +240,7 @@ class LocalContext(WorkflowContext):
     # =========================================================================
 
     @property
-    def pending_hooks(self) -> Dict[str, Any]:
+    def pending_hooks(self) -> dict[str, Any]:
         """Get pending hooks."""
         return self._pending_hooks
 
@@ -259,29 +265,79 @@ class LocalContext(WorkflowContext):
     # =========================================================================
 
     @property
-    def event_log(self) -> List[Any]:
+    def event_log(self) -> list[Any]:
         """Get the event log."""
         return self._event_log
 
     @event_log.setter
-    def event_log(self, events: List[Any]) -> None:
+    def event_log(self, events: list[Any]) -> None:
         """Set the event log."""
         self._event_log = events
 
     @property
-    def step_results(self) -> Dict[str, Any]:
+    def step_results(self) -> dict[str, Any]:
         """Get step results."""
         return self._step_results
 
     @property
-    def hook_results(self) -> Dict[str, Any]:
+    def hook_results(self) -> dict[str, Any]:
         """Get hook results."""
         return self._hook_results
 
     @property
-    def retry_state(self) -> Dict[str, Dict[str, Any]]:
+    def retry_state(self) -> dict[str, dict[str, Any]]:
         """Get retry states."""
         return self._retry_states
+
+    # =========================================================================
+    # Event limit validation
+    # =========================================================================
+
+    async def validate_event_limits(self) -> None:
+        """
+        Validate event count against configured soft/hard limits.
+
+        - Soft limit: Log warning, then every N events after
+        - Hard limit: Raise EventLimitExceededError
+
+        Called before recording new events to prevent runaway workflows.
+
+        Raises:
+            EventLimitExceededError: If event count exceeds hard limit
+        """
+        if not self._durable or self._storage is None:
+            return  # Skip validation for transient mode
+
+        from pyworkflow.config import get_config
+        from pyworkflow.core.exceptions import EventLimitExceededError
+
+        config = get_config()
+
+        # Get current event count from storage
+        events = await self._get_storage().get_events(self._run_id)
+        event_count = len(events)
+
+        # Hard limit check - fail immediately
+        if event_count >= config.event_hard_limit:
+            raise EventLimitExceededError(self._run_id, event_count, config.event_hard_limit)
+
+        # Soft limit check with interval warnings
+        if event_count >= config.event_soft_limit:
+            # Calculate if we should log a warning
+            should_warn = (
+                self._last_warning_count == 0  # First warning
+                or event_count >= self._last_warning_count + config.event_warning_interval
+            )
+
+            if should_warn:
+                logger.warning(
+                    f"Workflow approaching event limit: {event_count}/{config.event_hard_limit}",
+                    run_id=self._run_id,
+                    event_count=event_count,
+                    soft_limit=config.event_soft_limit,
+                    hard_limit=config.event_hard_limit,
+                )
+                self._last_warning_count = event_count
 
     # =========================================================================
     # Step execution
@@ -291,7 +347,7 @@ class LocalContext(WorkflowContext):
         self,
         func: StepFunction,
         *args: Any,
-        name: Optional[str] = None,
+        name: str | None = None,
         **kwargs: Any,
     ) -> Any:
         """
@@ -314,7 +370,7 @@ class LocalContext(WorkflowContext):
         Returns:
             Result of the step function
         """
-        step_name = name or getattr(func, "__name__", "step")
+        step_name: str = name or getattr(func, "__name__", None) or "step"
 
         if not self._durable:
             # Transient mode - execute directly
@@ -382,7 +438,7 @@ class LocalContext(WorkflowContext):
             kwargs=serialize_kwargs(**kwargs),
             attempt=1,
         )
-        await self._storage.record_event(event)
+        await self._get_storage().record_event(event)
 
     async def _record_step_complete(self, step_id: str, result: Any) -> None:
         """Record step completed event."""
@@ -394,7 +450,7 @@ class LocalContext(WorkflowContext):
             step_id=step_id,
             result=serialize(result),
         )
-        await self._storage.record_event(event)
+        await self._get_storage().record_event(event)
 
     async def _record_step_failed(self, step_id: str, error: Exception) -> None:
         """Record step failed event."""
@@ -408,13 +464,13 @@ class LocalContext(WorkflowContext):
             is_retryable=True,
             attempt=1,
         )
-        await self._storage.record_event(event)
+        await self._get_storage().record_event(event)
 
     # =========================================================================
     # Sleep
     # =========================================================================
 
-    async def sleep(self, duration: Union[str, int, float]) -> None:
+    async def sleep(self, duration: str | int | float) -> None:
         """
         Sleep for the specified duration.
 
@@ -430,10 +486,7 @@ class LocalContext(WorkflowContext):
             duration: Sleep duration (string like "5m" or seconds)
         """
         # Parse duration
-        if isinstance(duration, str):
-            duration_seconds = parse_duration(duration)
-        else:
-            duration_seconds = int(duration)
+        duration_seconds = parse_duration(duration) if isinstance(duration, str) else int(duration)
 
         if not self._durable:
             # Transient mode - just sleep
@@ -460,6 +513,9 @@ class LocalContext(WorkflowContext):
             logger.debug(f"Sleep {sleep_id} time elapsed, continuing")
             self._completed_sleeps.add(sleep_id)
             return
+
+        # Validate event limits before recording sleep event
+        await self.validate_event_limits()
 
         # Record sleep started and suspend
         await self._record_sleep_start(sleep_id, duration_seconds, resume_at)
@@ -492,13 +548,13 @@ class LocalContext(WorkflowContext):
             duration_seconds=duration_seconds,
             resume_at=datetime.fromtimestamp(resume_at, tz=UTC),
         )
-        await self._storage.record_event(event)
+        await self._get_storage().record_event(event)
 
     # =========================================================================
     # Parallel execution
     # =========================================================================
 
-    async def parallel(self, *tasks) -> List[Any]:
+    async def parallel(self, *tasks: Any) -> list[Any]:
         """Execute multiple tasks in parallel."""
         return list(await asyncio.gather(*tasks))
 
@@ -509,7 +565,7 @@ class LocalContext(WorkflowContext):
     async def wait_for_event(
         self,
         event_name: str,
-        timeout: Optional[Union[str, int]] = None,
+        timeout: str | int | None = None,
     ) -> Any:
         """
         Wait for an external event.
@@ -527,9 +583,7 @@ class LocalContext(WorkflowContext):
             Event payload
         """
         if not self._durable:
-            raise NotImplementedError(
-                "wait_for_event requires durable mode with storage"
-            )
+            raise NotImplementedError("wait_for_event requires durable mode with storage")
 
         hook_id = f"hook_{event_name}_{self._step_counter}"
         self._step_counter += 1
@@ -554,7 +608,7 @@ class LocalContext(WorkflowContext):
         )
 
     async def _record_hook_created(
-        self, hook_id: str, event_name: str, timeout: Optional[Union[str, int]]
+        self, hook_id: str, event_name: str, timeout: str | int | None
     ) -> None:
         """Record hook created event."""
         from pyworkflow.engine.events import create_hook_created_event
@@ -569,14 +623,14 @@ class LocalContext(WorkflowContext):
             hook_name=event_name,
             timeout_seconds=timeout_seconds,
         )
-        await self._storage.record_event(event)
+        await self._get_storage().record_event(event)
 
     async def hook(
         self,
         name: str,
-        timeout: Optional[int] = None,
-        on_created: Optional[Callable[[str], Awaitable[None]]] = None,
-        payload_schema: Optional[Type[BaseModel]] = None,
+        timeout: int | None = None,
+        on_created: Callable[[str], Awaitable[None]] | None = None,
+        payload_schema: type[BaseModel] | None = None,
     ) -> Any:
         """
         Wait for an external event (webhook, approval, callback).
@@ -631,6 +685,9 @@ class LocalContext(WorkflowContext):
         if timeout:
             expires_at = datetime.now(UTC) + timedelta(seconds=timeout)
 
+        # Validate event limits before recording hook event
+        await self.validate_event_limits()
+
         # Record HOOK_CREATED event (this is the source of truth for hook existence)
         from pyworkflow.engine.events import create_hook_created_event
 
@@ -642,7 +699,7 @@ class LocalContext(WorkflowContext):
             timeout_seconds=timeout,
             expires_at=expires_at,
         )
-        await self._storage.record_event(event)
+        await self._get_storage().record_event(event)
 
         # Convert Pydantic model to JSON schema if provided
         schema_json = None
@@ -660,7 +717,7 @@ class LocalContext(WorkflowContext):
             expires_at=expires_at,
             payload_schema=schema_json,
         )
-        await self._storage.create_hook(hook_record)
+        await self._get_storage().create_hook(hook_record)
 
         # Track pending hook locally
         self._pending_hooks[hook_id] = {
@@ -699,7 +756,7 @@ class LocalContext(WorkflowContext):
         """
         return self._cancellation_requested
 
-    def request_cancellation(self, reason: Optional[str] = None) -> None:
+    def request_cancellation(self, reason: str | None = None) -> None:
         """
         Mark this workflow as cancelled.
 
@@ -712,7 +769,7 @@ class LocalContext(WorkflowContext):
         self._cancellation_requested = True
         self._cancellation_reason = reason
         logger.info(
-            f"Cancellation requested for workflow",
+            "Cancellation requested for workflow",
             run_id=self._run_id,
             reason=reason,
         )
@@ -731,7 +788,7 @@ class LocalContext(WorkflowContext):
             from pyworkflow.core.exceptions import CancellationError
 
             logger.info(
-                f"Cancellation check triggered - raising CancellationError",
+                "Cancellation check triggered - raising CancellationError",
                 run_id=self._run_id,
                 reason=self._cancellation_reason,
             )
@@ -751,7 +808,7 @@ class LocalContext(WorkflowContext):
         return self._cancellation_blocked
 
     @property
-    def cancellation_reason(self) -> Optional[str]:
+    def cancellation_reason(self) -> str | None:
         """
         Get the reason for cancellation, if any.
 

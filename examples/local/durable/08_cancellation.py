@@ -19,7 +19,6 @@ from pyworkflow import (
     configure,
     get_workflow_run,
     reset_config,
-    resume,
     shield,
     sleep,
     start,
@@ -81,13 +80,13 @@ async def order_workflow(order_id: str) -> dict:
         order = await reserve_inventory(order_id)
 
         # Simulate waiting for approval
-        print(f"  [Workflow] Waiting 5s for approval (can be cancelled here)...")
+        print("  [Workflow] Waiting 5s for approval (can be cancelled here)...")
         await sleep("5s")
 
         order = await charge_payment(order)
 
         # Another wait - e.g., for warehouse processing
-        print(f"  [Workflow] Waiting 5s for warehouse (can be cancelled here)...")
+        print("  [Workflow] Waiting 5s for warehouse (can be cancelled here)...")
         await sleep("5s")
 
         order = await create_shipment(order)
@@ -95,14 +94,14 @@ async def order_workflow(order_id: str) -> dict:
 
     except CancellationError as e:
         print(f"\n  [Workflow] Cancellation detected! Reason: {e.reason}")
-        print(f"  [Workflow] Performing cleanup...")
+        print("  [Workflow] Performing cleanup...")
 
         # Use shield() to ensure cleanup completes even if cancelled again
         async with shield():
             await release_inventory(order_id)
             await refund_payment(order_id)
 
-        print(f"  [Workflow] Cleanup complete, re-raising CancellationError")
+        print("  [Workflow] Cleanup complete, re-raising CancellationError")
         raise  # Re-raise to mark workflow as cancelled
 
 
@@ -118,7 +117,7 @@ async def example_cancel_suspended_workflow(storage):
     print(f"Workflow status: {run.status.value}")
 
     if run.status.value == "suspended":
-        print(f"\nWorkflow is suspended (sleeping). Cancelling...")
+        print("\nWorkflow is suspended (sleeping). Cancelling...")
 
         # Cancel the suspended workflow
         cancelled = await cancel_workflow(
@@ -147,12 +146,12 @@ async def example_cancel_running_workflow(storage):
             print(f"  [Step 1] Starting job {job_id}...")
             await asyncio.sleep(0.1)
 
-            print(f"  [Step 2] Processing (cancellation checked here)...")
+            print("  [Step 2] Processing (cancellation checked here)...")
             # Note: In real scenario, ctx.check_cancellation() would be called
             # by @step decorator before execution
             await asyncio.sleep(0.1)
 
-            print(f"  [Step 3] Finalizing...")
+            print("  [Step 3] Finalizing...")
             return {"job_id": job_id, "status": "done"}
 
         except CancellationError as e:
@@ -167,7 +166,7 @@ async def example_cancel_running_workflow(storage):
 
     # If it completed before we could cancel, that's OK
     if run.status.value != "completed":
-        print(f"\nCancelling workflow...")
+        print("\nCancelling workflow...")
         cancelled = await cancel_workflow(
             run_id,
             reason="Test cancellation",
@@ -197,7 +196,7 @@ async def example_cancel_already_completed(storage):
     print(f"Workflow status: {run.status.value}")
 
     # Try to cancel
-    print(f"Attempting to cancel completed workflow...")
+    print("Attempting to cancel completed workflow...")
     cancelled = await cancel_workflow(run_id, storage=storage)
 
     print(f"Cancellation result: {cancelled}")

@@ -21,7 +21,6 @@ from pyworkflow import (
     workflow,
 )
 
-
 # Global counter to track API call attempts
 attempt_count = 0
 
@@ -44,11 +43,11 @@ async def call_flaky_api(request: dict) -> dict:
 
     if attempt_count < 3:
         # Simulate temporary failure
-        print(f"    ✗ API call failed (timeout)")
+        print("    ✗ API call failed (timeout)")
         raise Exception(f"API timeout - connection refused (attempt {attempt_count})")
 
     # Third attempt succeeds
-    print(f"    ✓ API call successful!")
+    print("    ✓ API call successful!")
     return {**request, "api_response": "success", "attempts": attempt_count}
 
 

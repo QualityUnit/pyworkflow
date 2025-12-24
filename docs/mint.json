@@ -59,7 +59,9 @@
         "concepts/sleep",
         "concepts/hooks",
         "concepts/cancellation",
-        "concepts/fault-tolerance"
+        "concepts/fault-tolerance",
+        "concepts/fault-tolerance",
+        "concepts/limitations"
       ]
     },
     {

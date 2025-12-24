@@ -8,8 +8,9 @@ Runtimes are responsible for:
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from pyworkflow.storage.base import StorageBackend
@@ -33,9 +34,9 @@ class Runtime(ABC):
         workflow_name: str,
         storage: Optional["StorageBackend"],
         durable: bool,
-        idempotency_key: Optional[str] = None,
-        max_duration: Optional[str] = None,
-        metadata: Optional[dict] = None,
+        idempotency_key: str | None = None,
+        max_duration: str | None = None,
+        metadata: dict | None = None,
     ) -> str:
         """
         Start a new workflow execution.
@@ -90,6 +91,27 @@ class Runtime(ABC):
             wake_time: When to resume the workflow
             storage: Storage backend
         """
+        pass
+
+    async def schedule_resume(
+        self,
+        run_id: str,
+        storage: "StorageBackend",
+    ) -> None:
+        """
+        Schedule a workflow to be resumed immediately.
+
+        This is called by resume_hook() after recording the hook event.
+        Each runtime implements this differently:
+        - CeleryRuntime: Schedules an async Celery task
+        - LocalRuntime: No-op (workflow resumes on next execution/poll)
+
+        Args:
+            run_id: The run_id of the workflow to resume
+            storage: Storage backend
+        """
+        # Default implementation: no-op
+        # Subclasses override if they support async scheduling
         pass
 
     @property

@@ -90,7 +90,7 @@ async def main():
         print(f"  {event.sequence}: {event.type.value}")
 
     # Show stored files
-    print(f"\n=== Stored Files ===")
+    print("\n=== Stored Files ===")
     for root, dirs, files in os.walk(data_dir):
         # Skip hidden directories (.locks)
         dirs[:] = [d for d in dirs if not d.startswith(".")]
@@ -104,7 +104,7 @@ async def main():
     event_log_path = data_dir / "events" / f"{run_id}.jsonl"
     if event_log_path.exists():
         print(f"\n=== Event Log File Contents ({event_log_path.name}) ===")
-        with open(event_log_path, "r") as f:
+        with open(event_log_path) as f:
             for i, line in enumerate(f, 1):
                 event_data = json.loads(line.strip())
                 event_type = event_data.get("type", "unknown")

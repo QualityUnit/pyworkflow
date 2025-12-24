@@ -30,8 +30,6 @@ Check workflow status:
     pyworkflow runs status <run_id>
 """
 
-from typing import Optional
-
 from pydantic import BaseModel
 
 from pyworkflow import define_hook, hook, step, workflow
@@ -44,9 +42,10 @@ class ApprovalPayload(BaseModel):
     This schema is stored with the hook and used by the CLI
     to prompt for field values interactively.
     """
+
     approved: bool
     reviewer: str
-    comments: Optional[str] = None
+    comments: str | None = None
 
 
 # Create typed hook - schema is stored for CLI resume
@@ -89,7 +88,9 @@ async def simple_approval_workflow(order_id: str) -> dict:
     async def on_hook_created(token: str):
         """Called when hook is created - log the token for CLI use."""
         print(f"[Hook] Created with token: {token}")
-        print(f"[Hook] Resume with: pyworkflow hooks resume {token} --payload '{{\"approved\": true}}'")
+        print(
+            f"[Hook] Resume with: pyworkflow hooks resume {token} --payload '{{\"approved\": true}}'"
+        )
 
     # Wait for external approval
     # Token is auto-generated in composite format: run_id:hook_id
@@ -122,8 +123,10 @@ async def approval_workflow(order_id: str) -> dict:
     async def on_hook_created(token: str):
         """Called when hook is created - log for CLI use."""
         print(f"[Hook] Typed hook created with token: {token}")
-        print(f"[Hook] Run: pyworkflow hooks resume")
-        print(f"[Hook] Or:  pyworkflow hooks resume {token} --payload '{{\"approved\": true, \"reviewer\": \"admin@example.com\"}}'")
+        print("[Hook] Run: pyworkflow hooks resume")
+        print(
+            f'[Hook] Or:  pyworkflow hooks resume {token} --payload \'{{"approved": true, "reviewer": "admin@example.com"}}\''
+        )
 
     # Wait for typed approval - payload validated against ApprovalPayload
     # CLI will prompt for: approved (bool), reviewer (str), comments (str, optional)
@@ -132,7 +135,9 @@ async def approval_workflow(order_id: str) -> dict:
         on_created=on_hook_created,
     )
 
-    print(f"[Workflow] Received approval: approved={approval.approved}, reviewer={approval.reviewer}")
+    print(
+        f"[Workflow] Received approval: approved={approval.approved}, reviewer={approval.reviewer}"
+    )
 
     if approval.approved:
         return await fulfill_order(order)
@@ -155,6 +160,7 @@ async def multi_approval_workflow(order_id: str) -> dict:
     async def log_token(name: str):
         async def _log(token: str):
             print(f"[Hook] {name} hook created: {token}")
+
         return _log
 
     # First approval: Manager
@@ -166,7 +172,9 @@ async def multi_approval_workflow(order_id: str) -> dict:
     )
 
     if not manager_approval.get("approved"):
-        return await cancel_order(order, f"Manager rejected: {manager_approval.get('reason', 'No reason')}")
+        return await cancel_order(
+            order, f"Manager rejected: {manager_approval.get('reason', 'No reason')}"
+        )
 
     order["manager_approved"] = True
     order["manager"] = manager_approval.get("approver", "unknown")
@@ -180,7 +188,9 @@ async def multi_approval_workflow(order_id: str) -> dict:
     )
 
     if not finance_approval.get("approved"):
-        return await cancel_order(order, f"Finance rejected: {finance_approval.get('reason', 'No reason')}")
+        return await cancel_order(
+            order, f"Finance rejected: {finance_approval.get('reason', 'No reason')}"
+        )
 
     order["finance_approved"] = True
     order["finance_reviewer"] = finance_approval.get("approver", "unknown")
@@ -197,4 +207,5 @@ async def main() -> None:
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

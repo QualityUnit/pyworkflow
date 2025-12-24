@@ -1,26 +1,24 @@
 """Workflow run management commands."""
 
 import json
-import click
-from typing import Optional
 from datetime import datetime
+
+import click
 
 import pyworkflow
 from pyworkflow import RunStatus
-from pyworkflow.cli.utils.async_helpers import async_command
-from pyworkflow.cli.utils.storage import create_storage
 from pyworkflow.cli.output.formatters import (
-    format_table,
     format_json,
-    format_plain,
     format_key_value,
-    format_status,
-    format_event_type,
-    print_success,
+    format_plain,
+    format_table,
     print_error,
     print_info,
+    print_success,
     print_warning,
 )
+from pyworkflow.cli.utils.async_helpers import async_command
+from pyworkflow.cli.utils.storage import create_storage
 
 
 @click.group(name="runs")
@@ -49,8 +47,8 @@ def runs() -> None:
 @async_command
 async def list_runs(
     ctx: click.Context,
-    workflow: Optional[str],
-    status: Optional[str],
+    workflow: str | None,
+    status: str | None,
     limit: int,
 ) -> None:
     """
@@ -94,16 +92,17 @@ async def list_runs(
             print_info("No workflow runs found")
             return
 
-        # Calculate durations
+        # Calculate durations (stored as dynamic attribute for display)
+        durations: dict[str, str] = {}
         for run in runs_list:
             if run.started_at and run.completed_at:
-                duration = (run.completed_at - run.started_at).total_seconds()
-                run.duration = f"{duration:.1f}s"
+                dur = (run.completed_at - run.started_at).total_seconds()
+                durations[run.run_id] = f"{dur:.1f}s"
             elif run.started_at:
-                duration = (datetime.now() - run.started_at.replace(tzinfo=None)).total_seconds()
-                run.duration = f"{duration:.1f}s (ongoing)"
+                dur = (datetime.now() - run.started_at.replace(tzinfo=None)).total_seconds()
+                durations[run.run_id] = f"{dur:.1f}s (ongoing)"
             else:
-                run.duration = "-"
+                durations[run.run_id] = "-"
 
         # Format output
         if output == "json":
@@ -115,7 +114,7 @@ async def list_runs(
                     "created_at": run.created_at.isoformat() if run.created_at else None,
                     "started_at": run.started_at.isoformat() if run.started_at else None,
                     "completed_at": run.completed_at.isoformat() if run.completed_at else None,
-                    "duration": run.duration,
+                    "duration": durations.get(run.run_id, "-"),
                 }
                 for run in runs_list
             ]
@@ -131,8 +130,10 @@ async def list_runs(
                     "Run ID": run.run_id,
                     "Workflow": run.workflow_name,
                     "Status": run.status.value,
-                    "Started": run.started_at.strftime("%Y-%m-%d %H:%M:%S") if run.started_at else "-",
-                    "Duration": run.duration,
+                    "Started": run.started_at.strftime("%Y-%m-%d %H:%M:%S")
+                    if run.started_at
+                    else "-",
+                    "Duration": durations.get(run.run_id, "-"),
                 }
                 for run in runs_list
             ]
@@ -216,7 +217,9 @@ async def run_status(ctx: click.Context, run_id: str) -> None:
                 "Status": run.status.value,
                 "Created": run.created_at.strftime("%Y-%m-%d %H:%M:%S") if run.created_at else "-",
                 "Started": run.started_at.strftime("%Y-%m-%d %H:%M:%S") if run.started_at else "-",
-                "Completed": run.completed_at.strftime("%Y-%m-%d %H:%M:%S") if run.completed_at else "-",
+                "Completed": run.completed_at.strftime("%Y-%m-%d %H:%M:%S")
+                if run.completed_at
+                else "-",
                 "Duration": duration_str,
             }
 
@@ -226,15 +229,17 @@ async def run_status(ctx: click.Context, run_id: str) -> None:
                     kwargs = json.loads(run.input_kwargs)
                     if kwargs:
                         data["Input Arguments"] = json.dumps(kwargs, indent=2)
-                except:
+                except Exception:
                     pass
 
             # Add result or error
             if run.result:
                 try:
                     result = json.loads(run.result)
-                    data["Result"] = json.dumps(result, indent=2) if not isinstance(result, str) else result
-                except:
+                    data["Result"] = (
+                        json.dumps(result, indent=2) if not isinstance(result, str) else result
+                    )
+                except Exception:
                     data["Result"] = run.result
 
             if run.error:
@@ -265,7 +270,7 @@ async def run_status(ctx: click.Context, run_id: str) -> None:
 async def run_logs(
     ctx: click.Context,
     run_id: str,
-    event_filter: Optional[str],
+    event_filter: str | None,
 ) -> None:
     """
     Show workflow execution event log.
@@ -328,7 +333,7 @@ async def run_logs(
             format_plain(lines)
 
         else:  # table (displays as list with full data)
-            from pyworkflow.cli.output.styles import Colors, RESET, DIM
+            from pyworkflow.cli.output.styles import DIM, RESET, Colors
 
             print(f"\n{Colors.PRIMARY}{Colors.bold(f'Event Log: {run_id}')}{RESET}")
             print(f"{DIM}{'─' * 60}{RESET}")
@@ -363,7 +368,7 @@ async def run_logs(
                 if event.data:
                     data_str = json.dumps(event.data, indent=6)
                     # Indent each line of the JSON
-                    data_lines = data_str.split('\n')
+                    data_lines = data_str.split("\n")
                     print(f"   Data: {data_lines[0]}")
                     for line in data_lines[1:]:
                         print(f"   {line}")
@@ -403,7 +408,7 @@ async def cancel_run(
     run_id: str,
     wait: bool,
     timeout: int,
-    reason: Optional[str],
+    reason: str | None,
 ) -> None:
     """
     Cancel a running or suspended workflow.
@@ -470,12 +475,12 @@ async def cancel_run(
                 if run and run.status == RunStatus.CANCELLED:
                     print_success(f"Workflow cancelled successfully: {run_id}")
                 else:
-                    print_warning(f"Cancellation requested but workflow may still be running")
+                    print_warning("Cancellation requested but workflow may still be running")
             else:
                 print_success(f"Cancellation requested for workflow: {run_id}")
                 print_info("Use --wait to wait for cancellation to complete")
         else:
-            print_warning(f"Could not cancel workflow (may already be in terminal state)")
+            print_warning("Could not cancel workflow (may already be in terminal state)")
 
         # Output in different formats
         if output == "json":

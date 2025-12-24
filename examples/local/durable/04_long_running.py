@@ -58,10 +58,10 @@ async def batch_workflow(batch_id: str) -> dict:
     """Long-running batch processing workflow with sleep."""
     batch = await prepare_batch(batch_id)
 
-    print(f"  Sleeping for 5 seconds (workflow will suspend)...")
+    print("  Sleeping for 5 seconds (workflow will suspend)...")
     await sleep("5s")  # Suspends workflow here
 
-    print(f"  Resuming after sleep...")
+    print("  Resuming after sleep...")
     batch = await process_batch(batch)
     batch = await finalize_batch(batch)
     return batch
@@ -87,20 +87,20 @@ async def main():
         print(f"\nWorkflow status after sleep: {run.status.value}")
 
         if run.status.value == "suspended":
-            print(f"Workflow is suspended (waiting for sleep to complete)")
+            print("Workflow is suspended (waiting for sleep to complete)")
 
             # Wait for sleep duration, then resume
-            print(f"\nWaiting 5 seconds for sleep to complete...")
+            print("\nWaiting 5 seconds for sleep to complete...")
             await asyncio.sleep(5)
 
             print(f"Resuming workflow {run_id}...\n")
             result = await resume(run_id)
 
-            print(f"\nWorkflow completed!")
+            print("\nWorkflow completed!")
             print(f"Result: {result}")
         else:
             # Workflow already completed (sleep was short enough)
-            print(f"Workflow completed without suspension")
+            print("Workflow completed without suspension")
             print(f"Result: {run.result}")
 
         # Final status check

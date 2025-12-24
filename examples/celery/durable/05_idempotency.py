@@ -44,7 +44,7 @@ async def charge_payment(payment: dict) -> dict:
     Idempotency keys ensure duplicate requests don't double-charge.
     """
     print(f"[Step] CHARGING payment {payment['payment_id']} for ${payment['amount']:.2f}...")
-    print(f"[Step] (In production, this would call Stripe/PayPal with idempotency key)")
+    print("[Step] (In production, this would call Stripe/PayPal with idempotency key)")
     return {**payment, "charged": True, "transaction_id": f"txn_{payment['payment_id']}"}
 
 
@@ -81,6 +81,7 @@ async def payment_workflow(payment_id: str, amount: float) -> dict:
 async def main() -> None:
     """Run the payment workflow example with idempotency."""
     import argparse
+
     import pyworkflow
 
     parser = argparse.ArgumentParser(description="Payment Workflow with Idempotency")
@@ -107,4 +108,5 @@ async def main() -> None:
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

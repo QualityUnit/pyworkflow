@@ -8,7 +8,7 @@ import base64
 import json
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Any, List, Tuple
+from typing import Any
 
 import cloudpickle
 
@@ -110,7 +110,7 @@ def deserialize(json_str: str) -> Any:
     return json.loads(json_str, object_hook=enhanced_json_decoder)
 
 
-def deserialize_args(json_str: str) -> Tuple[Any, ...]:
+def deserialize_args(json_str: str) -> tuple[Any, ...]:
     """
     Deserialize JSON string to tuple of arguments.
 

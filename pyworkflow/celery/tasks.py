@@ -842,36 +842,11 @@ def _get_storage_backend(config: Optional[Dict[str, Any]] = None) -> StorageBack
     """
     Get storage backend from configuration.
 
-    Args:
-        config: Storage configuration dict with 'type' and other parameters
-
-    Returns:
-        Storage backend instance
+    This is an alias for config_to_storage for backward compatibility.
     """
-    if not config:
-        # Default to FileStorageBackend
-        from pyworkflow.storage.file import FileStorageBackend
+    from pyworkflow.storage.config import config_to_storage
 
-        return FileStorageBackend()
-
-    storage_type = config.get("type", "file")
-
-    if storage_type == "file":
-        from pyworkflow.storage.file import FileStorageBackend
-
-        return FileStorageBackend(base_path=config.get("base_path"))
-
-    elif storage_type == "redis":
-        from pyworkflow.storage.redis import RedisStorageBackend
-
-        return RedisStorageBackend(
-            host=config.get("host", "localhost"),
-            port=config.get("port", 6379),
-            db=config.get("db", 0),
-        )
-
-    else:
-        raise ValueError(f"Unknown storage type: {storage_type}")
+    return config_to_storage(config)
 
 
 def schedule_workflow_resumption(

@@ -219,8 +219,8 @@ class Hook:
 
     hook_id: str
     run_id: str
-    url: str
     token: str
+    url: str = ""  # Optional webhook URL
     status: HookStatus = HookStatus.PENDING
 
     # Timestamps
@@ -257,8 +257,8 @@ class Hook:
         return cls(
             hook_id=data["hook_id"],
             run_id=data["run_id"],
-            url=data["url"],
             token=data["token"],
+            url=data.get("url", ""),
             status=HookStatus(data["status"]),
             created_at=datetime.fromisoformat(data["created_at"]),
             received_at=(

@@ -8,7 +8,7 @@ any side effects. Tracks all operations for verification.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 from loguru import logger
 
@@ -47,6 +47,7 @@ class MockContext(WorkflowContext):
         skip_sleeps: bool = True,
         mock_results: Optional[Dict[str, Any]] = None,
         mock_events: Optional[Dict[str, Any]] = None,
+        mock_hooks: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Initialize mock context.
@@ -57,16 +58,19 @@ class MockContext(WorkflowContext):
             skip_sleeps: If True, sleeps return immediately
             mock_results: Dict of step_name -> result for mocking step results
             mock_events: Dict of event_name -> payload for mocking events
+            mock_hooks: Dict of hook_name -> payload for mocking hook results
         """
         super().__init__(run_id=run_id, workflow_name=workflow_name)
         self._skip_sleeps = skip_sleeps
         self._mock_results = mock_results or {}
         self._mock_events = mock_events or {}
+        self._mock_hooks = mock_hooks or {}
 
         # Tracking
         self._steps: List[Dict[str, Any]] = []
         self._sleeps: List[Dict[str, Any]] = []
         self._events: List[Dict[str, Any]] = []
+        self._hooks: List[Dict[str, Any]] = []
         self._parallel_calls: List[int] = []
 
     # =========================================================================
@@ -107,6 +111,21 @@ class MockContext(WorkflowContext):
     def events(self) -> List[Dict[str, Any]]:
         """Get all event waits."""
         return self._events.copy()
+
+    @property
+    def hooks(self) -> List[Dict[str, Any]]:
+        """Get all hook waits."""
+        return self._hooks.copy()
+
+    @property
+    def hook_count(self) -> int:
+        """Get number of hook calls."""
+        return len(self._hooks)
+
+    @property
+    def hook_names(self) -> List[str]:
+        """Get names of all hooks."""
+        return [h["name"] for h in self._hooks]
 
     # =========================================================================
     # Step execution
@@ -232,6 +251,50 @@ class MockContext(WorkflowContext):
         # Return default mock data
         return {"event": event_name, "mock": True}
 
+    async def hook(
+        self,
+        name: str,
+        timeout: Optional[int] = None,
+        on_created: Optional[Callable[[str], Awaitable[None]]] = None,
+    ) -> Any:
+        """
+        Wait for an external event (hook).
+
+        Returns mock hook payload if configured, otherwise returns a default dict.
+
+        Args:
+            name: Hook name
+            timeout: Optional timeout in seconds (tracked but not enforced)
+            on_created: Optional callback called with token (for testing)
+
+        Returns:
+            Mock hook payload
+        """
+        # Generate mock composite token: run_id:hook_name_counter
+        self._hook_counter = getattr(self, "_hook_counter", 0) + 1
+        hook_id = f"hook_{name}_{self._hook_counter}"
+        actual_token = f"{self._run_id}:{hook_id}"
+
+        # Track the call
+        self._hooks.append({
+            "name": name,
+            "token": actual_token,
+            "timeout": timeout,
+        })
+
+        logger.debug(f"[mock] Waiting for hook: {name} (token={actual_token[:20]}...)")
+
+        # Call on_created callback if provided
+        if on_created is not None:
+            await on_created(actual_token)
+
+        # Check for mock hook payload
+        if name in self._mock_hooks:
+            return self._mock_hooks[name]
+
+        # Return default mock data
+        return {"hook": name, "mock": True}
+
     # =========================================================================
     # Utility methods
     # =========================================================================
@@ -241,6 +304,7 @@ class MockContext(WorkflowContext):
         self._steps.clear()
         self._sleeps.clear()
         self._events.clear()
+        self._hooks.clear()
         self._parallel_calls.clear()
 
     def assert_step_called(self, step_name: str, times: Optional[int] = None) -> None:

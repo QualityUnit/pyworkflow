@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 from abc import ABC, abstractmethod
 from contextvars import ContextVar, Token
-from typing import Any, Callable, Coroutine, List, Optional, TypeVar, Union
+from typing import Any, Awaitable, Callable, Coroutine, List, Optional, TypeVar, Union
 
 from loguru import logger
 
@@ -177,6 +177,33 @@ class WorkflowContext(ABC):
             duration: Sleep duration as:
                 - str: Duration string ("5s", "10m", "1h", "1d")
                 - int/float: Duration in seconds
+        """
+        ...
+
+    @abstractmethod
+    async def hook(
+        self,
+        name: str,
+        timeout: Optional[int] = None,
+        on_created: Optional[Callable[[str], Awaitable[None]]] = None,
+    ) -> Any:
+        """
+        Wait for an external event (webhook, approval, callback).
+
+        The workflow suspends until resume_hook() is called with the token.
+        Token is auto-generated in format "run_id:hook_id".
+
+        Args:
+            name: Human-readable name for the hook (for logging/debugging)
+            timeout: Optional timeout in seconds. None means wait forever.
+            on_created: Optional async callback called with token when hook is created.
+
+        Returns:
+            The payload passed to resume_hook()
+
+        Raises:
+            HookExpiredError: If timeout is reached before resume
+            NotImplementedError: If context doesn't support hooks (transient mode)
         """
         ...
 

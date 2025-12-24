@@ -263,12 +263,35 @@ def create_sleep_completed_event(run_id: str, sleep_id: str) -> Event:
 def create_hook_created_event(
     run_id: str,
     hook_id: str,
-    url: str,
-    token: str,
+    token: str = "",
+    url: str = "",
     expires_at: Optional[datetime] = None,
     name: Optional[str] = None,
+    hook_name: Optional[str] = None,
+    timeout_seconds: Optional[int] = None,
 ) -> Event:
-    """Create a hook created event."""
+    """
+    Create a hook created event.
+
+    Args:
+        run_id: Workflow run ID
+        hook_id: Unique hook identifier
+        token: Security token for resuming the hook
+        url: Optional webhook URL
+        expires_at: Optional expiration datetime
+        name: Optional hook name (alias: hook_name)
+        hook_name: Alias for name (for backwards compatibility)
+        timeout_seconds: Alternative to expires_at (converted internally)
+    """
+    # Handle aliases
+    actual_name = name or hook_name
+
+    # Convert timeout_seconds to expires_at if provided
+    actual_expires_at = expires_at
+    if timeout_seconds and not expires_at:
+        from datetime import UTC, timedelta
+        actual_expires_at = datetime.now(UTC) + timedelta(seconds=timeout_seconds)
+
     return Event(
         run_id=run_id,
         type=EventType.HOOK_CREATED,
@@ -276,8 +299,8 @@ def create_hook_created_event(
             "hook_id": hook_id,
             "url": url,
             "token": token,
-            "expires_at": expires_at.isoformat() if expires_at else None,
-            "name": name,
+            "expires_at": actual_expires_at.isoformat() if actual_expires_at else None,
+            "name": actual_name,
         },
     )
 

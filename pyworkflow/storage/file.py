@@ -14,8 +14,6 @@ Data is stored in a directory structure:
             {run_id}.jsonl  (append-only)
         steps/
             {step_id}.json
-        hooks/
-            {hook_id}.json
 """
 
 import asyncio
@@ -28,7 +26,7 @@ from filelock import FileLock
 
 from pyworkflow.engine.events import Event, EventType
 from pyworkflow.storage.base import StorageBackend
-from pyworkflow.storage.schemas import Hook, HookStatus, RunStatus, StepExecution, WorkflowRun
+from pyworkflow.storage.schemas import RunStatus, StepExecution, WorkflowRun
 
 
 class FileStorageBackend(StorageBackend):
@@ -49,7 +47,6 @@ class FileStorageBackend(StorageBackend):
         self.runs_dir = self.base_path / "runs"
         self.events_dir = self.base_path / "events"
         self.steps_dir = self.base_path / "steps"
-        self.hooks_dir = self.base_path / "hooks"
         self.locks_dir = self.base_path / ".locks"
 
         # Create directories
@@ -57,7 +54,6 @@ class FileStorageBackend(StorageBackend):
             self.runs_dir,
             self.events_dir,
             self.steps_dir,
-            self.hooks_dir,
             self.locks_dir,
         ]:
             dir_path.mkdir(parents=True, exist_ok=True)
@@ -369,88 +365,3 @@ class FileStorageBackend(StorageBackend):
 
         step_data_list = await asyncio.to_thread(_list)
         return [StepExecution.from_dict(data) for data in step_data_list]
-
-    # Hook Operations
-
-    async def create_hook(self, hook: Hook) -> None:
-        """Create a hook record."""
-        hook_file = self.hooks_dir / f"{hook.hook_id}.json"
-
-        if hook_file.exists():
-            raise ValueError(f"Hook {hook.hook_id} already exists")
-
-        data = hook.to_dict()
-
-        def _write() -> None:
-            hook_file.write_text(json.dumps(data, indent=2))
-
-        await asyncio.to_thread(_write)
-
-    async def get_hook(self, hook_id: str) -> Optional[Hook]:
-        """Retrieve a hook by ID."""
-        hook_file = self.hooks_dir / f"{hook_id}.json"
-
-        if not hook_file.exists():
-            return None
-
-        def _read() -> dict:
-            return json.loads(hook_file.read_text())
-
-        data = await asyncio.to_thread(_read)
-        return Hook.from_dict(data)
-
-    async def get_hook_by_token(self, run_id: str, token: str) -> Optional[Hook]:
-        """Retrieve a hook by run_id and token."""
-
-        def _search() -> Optional[dict]:
-            for hook_file in self.hooks_dir.glob("*.json"):
-                data = json.loads(hook_file.read_text())
-                if data.get("run_id") == run_id and data.get("token") == token:
-                    return data
-            return None
-
-        data = await asyncio.to_thread(_search)
-        return Hook.from_dict(data) if data else None
-
-    async def update_hook_payload(
-        self,
-        hook_id: str,
-        payload: str,
-        status: Optional[str] = None,
-    ) -> None:
-        """Update hook with received payload."""
-        hook_file = self.hooks_dir / f"{hook_id}.json"
-
-        if not hook_file.exists():
-            raise ValueError(f"Hook {hook_id} not found")
-
-        def _update() -> None:
-            data = json.loads(hook_file.read_text())
-            data["payload"] = payload
-            data["received_at"] = datetime.now(UTC).isoformat()
-
-            if status:
-                data["status"] = status
-            else:
-                data["status"] = HookStatus.RECEIVED.value
-
-            hook_file.write_text(json.dumps(data, indent=2))
-
-        await asyncio.to_thread(_update)
-
-    async def list_hooks(self, run_id: str) -> List[Hook]:
-        """List all hooks for a workflow run."""
-
-        def _list() -> List[dict]:
-            hooks = []
-            for hook_file in self.hooks_dir.glob("*.json"):
-                data = json.loads(hook_file.read_text())
-                if data.get("run_id") == run_id:
-                    hooks.append(data)
-
-            # Sort by created_at
-            hooks.sort(key=lambda h: h.get("created_at", ""))
-            return hooks
-
-        hook_data_list = await asyncio.to_thread(_list)
-        return [Hook.from_dict(data) for data in hook_data_list]

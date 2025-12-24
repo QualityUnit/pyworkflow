@@ -1,9 +1,11 @@
 """Storage backend factory utilities."""
 
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
-from pyworkflow import FileStorageBackend, InMemoryStorageBackend, StorageBackend
 from loguru import logger
+
+from pyworkflow import StorageBackend
+from pyworkflow.storage.config import config_to_storage
 
 
 def create_storage(
@@ -36,67 +38,59 @@ def create_storage(
         storage = create_storage(backend_type="file", path="./data")
 
         # From config
-        config = {"storage": {"backend": "file", "path": "./workflow_data"}}
+        config = {"storage": {"type": "file", "base_path": "./workflow_data"}}
         storage = create_storage(config=config)
 
         # Default (file storage)
         storage = create_storage()
     """
-    # Resolve backend type
+    # Resolve backend type with priority: CLI flag > config file > default
     backend = backend_type
 
     if not backend and config:
-        backend = config.get("storage", {}).get("backend")
+        backend = config.get("storage", {}).get("type")
 
     if not backend:
         backend = "file"  # Default
 
     logger.debug(f"Creating storage backend: {backend}")
 
-    # Create backend based on type
-    if backend == "memory":
-        logger.info("Using InMemoryStorageBackend")
-        return InMemoryStorageBackend()
-
-    elif backend == "file":
-        # Resolve storage path
-        storage_path = path
-
-        if not storage_path and config:
-            storage_path = config.get("storage", {}).get("path")
-
-        if not storage_path:
-            storage_path = "./workflow_data"  # Default
-
-        logger.info(f"Using FileStorageBackend with path: {storage_path}")
-        return FileStorageBackend(base_path=storage_path)
-
-    elif backend == "redis":
-        # Redis support (future enhancement)
-        redis_url = config.get("storage", {}).get("redis_url") if config else None
-        if not redis_url:
-            redis_url = "redis://localhost:6379/0"
-
-        logger.warning("Redis backend not yet implemented in CLI")
-        raise ValueError(
-            "Redis backend is not yet supported in the CLI. "
-            "Use 'file' or 'memory' backends."
-        )
-
-    elif backend == "sqlite":
-        # SQLite support (future enhancement)
-        db_path = path or (config.get("storage", {}).get("db_path") if config else None)
-        if not db_path:
-            db_path = "./workflows.db"
-
+    # Check for unsupported backends (CLI-specific validation)
+    if backend == "sqlite":
         logger.warning("SQLite backend not yet implemented in CLI")
         raise ValueError(
             "SQLite backend is not yet supported in the CLI. "
             "Use 'file' or 'memory' backends."
         )
 
+    # Resolve storage path with priority: CLI flag > config file > default
+    storage_path = path
+    if not storage_path and config:
+        storage_path = config.get("storage", {}).get("base_path")
+
+    # Build unified config dict
+    storage_config: Dict[str, Any] = {"type": backend}
+    if storage_path:
+        storage_config["base_path"] = storage_path
+
+    # Extract redis config if present
+    if backend == "redis" and config:
+        storage_section = config.get("storage", {})
+        if "host" in storage_section:
+            storage_config["host"] = storage_section["host"]
+        if "port" in storage_section:
+            storage_config["port"] = storage_section["port"]
+        if "db" in storage_section:
+            storage_config["db"] = storage_section["db"]
+
+    # Use unified config_to_storage
+    storage = config_to_storage(storage_config)
+
+    # Log which backend was created
+    backend_name = storage.__class__.__name__
+    if hasattr(storage, "base_path"):
+        logger.info(f"Using {backend_name} with path: {storage.base_path}")
     else:
-        raise ValueError(
-            f"Unsupported storage backend: {backend}. "
-            f"Supported backends: file, memory"
-        )
+        logger.info(f"Using {backend_name}")
+
+    return storage

@@ -67,7 +67,7 @@ def load_config() -> Dict[str, Any]:
     Examples:
         config = load_config()
         module = config.get("module")
-        storage_backend = config.get("storage", {}).get("backend")
+        storage_type = config.get("storage", {}).get("type")
     """
     config_path = find_config_file()
     if not config_path:
@@ -111,10 +111,10 @@ def get_config_value(
         Configuration value or default
 
     Examples:
-        config = {"storage": {"backend": "file", "path": "./data"}}
+        config = {"storage": {"type": "file", "base_path": "./data"}}
 
         # Get nested value
-        backend = get_config_value(config, "storage", "backend")  # "file"
+        storage_type = get_config_value(config, "storage", "type")  # "file"
 
         # With default
         timeout = get_config_value(config, "timeout", default=30)  # 30

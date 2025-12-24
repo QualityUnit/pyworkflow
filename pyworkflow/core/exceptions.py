@@ -182,6 +182,22 @@ class InvalidTokenError(WorkflowError):
         self.hook_id = hook_id
 
 
+class HookNotFoundError(WorkflowError):
+    """Raised when a hook cannot be found by token."""
+
+    def __init__(self, token: str) -> None:
+        super().__init__(f"Hook not found for token: {token}")
+        self.token = token
+
+
+class HookAlreadyReceivedError(WorkflowError):
+    """Raised when attempting to resume a hook that was already resumed."""
+
+    def __init__(self, hook_id: str) -> None:
+        super().__init__(f"Hook already received: {hook_id}")
+        self.hook_id = hook_id
+
+
 class WorkflowAlreadyRunningError(WorkflowError):
     """Raised when attempting to start a workflow that's already running."""
 

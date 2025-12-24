@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from typing import List, Optional
 
 from pyworkflow.engine.events import Event
-from pyworkflow.storage.schemas import Hook, RunStatus, StepExecution, WorkflowRun
+from pyworkflow.storage.schemas import RunStatus, StepExecution, WorkflowRun
 
 
 class StorageBackend(ABC):
@@ -17,7 +17,7 @@ class StorageBackend(ABC):
     Abstract base class for workflow storage backends.
 
     Storage backends are responsible for:
-    - Persisting workflow runs, steps, hooks
+    - Persisting workflow runs, steps
     - Managing the event log (append-only)
     - Providing query capabilities
 
@@ -228,75 +228,6 @@ class StorageBackend(ABC):
 
         Returns:
             List of StepExecution instances
-        """
-        pass
-
-    # Hook Operations
-
-    @abstractmethod
-    async def create_hook(self, hook: Hook) -> None:
-        """
-        Create a hook/webhook record.
-
-        Args:
-            hook: Hook instance to persist
-        """
-        pass
-
-    @abstractmethod
-    async def get_hook(self, hook_id: str) -> Optional[Hook]:
-        """
-        Retrieve a hook by ID.
-
-        Args:
-            hook_id: Hook identifier
-
-        Returns:
-            Hook if found, None otherwise
-        """
-        pass
-
-    @abstractmethod
-    async def get_hook_by_token(self, run_id: str, token: str) -> Optional[Hook]:
-        """
-        Retrieve a hook by run_id and token (for webhook authentication).
-
-        Args:
-            run_id: Workflow run identifier
-            token: Hook security token
-
-        Returns:
-            Hook if found and token matches, None otherwise
-        """
-        pass
-
-    @abstractmethod
-    async def update_hook_payload(
-        self,
-        hook_id: str,
-        payload: str,
-        status: Optional[str] = None,
-    ) -> None:
-        """
-        Update hook with received payload.
-
-        Args:
-            hook_id: Hook identifier
-            payload: Serialized payload from webhook
-            status: Optional new status
-        """
-        pass
-
-    @abstractmethod
-    async def list_hooks(self, run_id: str) -> List[Hook]:
-        """
-        List all hooks for a workflow run.
-
-        Args:
-            run_id: Workflow run identifier
-
-        Returns:
-            List of Hook instances
         """
         pass
 

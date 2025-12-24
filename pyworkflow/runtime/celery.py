@@ -85,36 +85,19 @@ class CeleryRuntime(Runtime):
         Returns:
             Configuration dict or None
         """
-        if storage is None:
-            return None
+        from pyworkflow.storage.config import storage_to_config
 
-        # Determine storage type and extract configuration
-        storage_class_name = storage.__class__.__name__
+        config = storage_to_config(storage)
 
-        if storage_class_name == "FileStorageBackend":
-            base_path = getattr(storage, "base_path", None)
-            return {
-                "type": "file",
-                "base_path": str(base_path) if base_path else None,
-            }
-        elif storage_class_name == "RedisStorageBackend":
-            return {
-                "type": "redis",
-                "host": getattr(storage, "host", "localhost"),
-                "port": getattr(storage, "port", 6379),
-                "db": getattr(storage, "db", 0),
-            }
-        elif storage_class_name == "InMemoryStorageBackend":
-            # In-memory storage cannot be shared across workers
-            # Fall back to file storage
+        # In-memory storage cannot be shared across Celery workers
+        if config and config.get("type") == "memory":
             logger.warning(
                 "InMemoryStorageBackend cannot be used with Celery runtime. "
                 "Falling back to FileStorageBackend."
             )
             return {"type": "file"}
-        else:
-            # Default to file storage
-            return {"type": "file"}
+
+        return config
 
     async def start_workflow(
         self,

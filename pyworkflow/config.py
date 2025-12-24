@@ -53,19 +53,9 @@ def _create_storage_from_config(storage_config: Dict[str, Any]) -> Optional["Sto
     if not storage_config:
         return None
 
-    backend = storage_config.get("backend", "file")
-    path = storage_config.get("path", "./workflow_data")
+    from pyworkflow.storage.config import config_to_storage
 
-    if backend == "file":
-        from pyworkflow.storage.file import FileStorageBackend
-
-        return FileStorageBackend(base_path=path)
-    elif backend == "memory":
-        from pyworkflow.storage.memory import InMemoryStorageBackend
-
-        return InMemoryStorageBackend()
-
-    return None
+    return config_to_storage(storage_config)
 
 
 @dataclass
@@ -196,3 +186,19 @@ def reset_config() -> None:
     global _config, _config_loaded_from_yaml
     _config = None
     _config_loaded_from_yaml = False
+
+
+def get_storage() -> Optional["StorageBackend"]:
+    """
+    Get the configured storage backend.
+
+    Returns:
+        StorageBackend instance if configured, None otherwise
+
+    Example:
+        >>> import pyworkflow
+        >>> from pyworkflow.storage import InMemoryStorageBackend
+        >>> pyworkflow.configure(storage=InMemoryStorageBackend())
+        >>> storage = pyworkflow.get_storage()
+    """
+    return get_config().storage

@@ -16,7 +16,7 @@ from typing import Dict, List, Optional
 
 from pyworkflow.engine.events import Event
 from pyworkflow.storage.base import StorageBackend
-from pyworkflow.storage.schemas import Hook, HookStatus, RunStatus, StepExecution, WorkflowRun
+from pyworkflow.storage.schemas import RunStatus, StepExecution, WorkflowRun
 
 
 class InMemoryStorageBackend(StorageBackend):
@@ -36,7 +36,6 @@ class InMemoryStorageBackend(StorageBackend):
         self._runs: Dict[str, WorkflowRun] = {}
         self._events: Dict[str, List[Event]] = {}
         self._steps: Dict[str, StepExecution] = {}
-        self._hooks: Dict[str, Hook] = {}
         self._idempotency_index: Dict[str, str] = {}  # key -> run_id
         self._lock = threading.RLock()
         self._event_sequences: Dict[str, int] = {}  # run_id -> next sequence
@@ -216,48 +215,6 @@ class InMemoryStorageBackend(StorageBackend):
         with self._lock:
             return [s for s in self._steps.values() if s.run_id == run_id]
 
-    # Hook Operations
-
-    async def create_hook(self, hook: Hook) -> None:
-        """Create a hook/webhook record."""
-        with self._lock:
-            self._hooks[hook.hook_id] = hook
-
-    async def get_hook(self, hook_id: str) -> Optional[Hook]:
-        """Retrieve a hook by ID."""
-        with self._lock:
-            return self._hooks.get(hook_id)
-
-    async def get_hook_by_token(self, run_id: str, token: str) -> Optional[Hook]:
-        """Retrieve a hook by run_id and token."""
-        with self._lock:
-            for hook in self._hooks.values():
-                if hook.run_id == run_id and hook.token == token:
-                    return hook
-            return None
-
-    async def update_hook_payload(
-        self,
-        hook_id: str,
-        payload: str,
-        status: Optional[str] = None,
-    ) -> None:
-        """Update hook with received payload."""
-        with self._lock:
-            hook = self._hooks.get(hook_id)
-            if hook:
-                hook.payload = payload
-                hook.received_at = datetime.now(UTC)
-                if status:
-                    hook.status = HookStatus(status)
-                else:
-                    hook.status = HookStatus.RECEIVED
-
-    async def list_hooks(self, run_id: str) -> List[Hook]:
-        """List all hooks for a workflow run."""
-        with self._lock:
-            return [h for h in self._hooks.values() if h.run_id == run_id]
-
     # Utility methods
 
     def clear(self) -> None:
@@ -270,7 +227,6 @@ class InMemoryStorageBackend(StorageBackend):
             self._runs.clear()
             self._events.clear()
             self._steps.clear()
-            self._hooks.clear()
             self._idempotency_index.clear()
             self._event_sequences.clear()
 
@@ -286,6 +242,5 @@ class InMemoryStorageBackend(StorageBackend):
                 f"InMemoryStorageBackend("
                 f"runs={len(self._runs)}, "
                 f"events={sum(len(e) for e in self._events.values())}, "
-                f"steps={len(self._steps)}, "
-                f"hooks={len(self._hooks)})"
+                f"steps={len(self._steps)})"
             )

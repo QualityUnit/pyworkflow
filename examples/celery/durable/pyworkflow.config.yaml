@@ -16,8 +16,8 @@ runtime: celery
 
 # Storage backend configuration
 storage:
-  backend: file
-  path: ./workflow_data
+  type: file
+  base_path: ./workflow_data
 
 # Celery broker and result backend
 celery:

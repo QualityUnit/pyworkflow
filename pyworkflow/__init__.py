@@ -32,11 +32,14 @@ Quick Start:
 __version__ = "0.1.0"
 
 # Configuration
-from pyworkflow.config import configure, get_config, reset_config
+from pyworkflow.config import configure, get_config, get_storage, reset_config
 
 # Core decorators and primitives
 from pyworkflow.core.step import step
 from pyworkflow.core.workflow import workflow
+from pyworkflow.primitives.define_hook import TypedHook, define_hook
+from pyworkflow.primitives.hooks import hook
+from pyworkflow.primitives.resume_hook import ResumeResult, resume_hook
 from pyworkflow.primitives.sleep import sleep
 
 # Execution engine
@@ -51,6 +54,10 @@ from pyworkflow.engine.executor import (
 # Exceptions
 from pyworkflow.core.exceptions import (
     FatalError,
+    HookAlreadyReceivedError,
+    HookExpiredError,
+    HookNotFoundError,
+    InvalidTokenError,
     RetryableError,
     SuspensionSignal,
     WorkflowAlreadyRunningError,
@@ -100,12 +107,18 @@ __all__ = [
     # Configuration
     "configure",
     "get_config",
+    "get_storage",
     "reset_config",
     # Core decorators
     "workflow",
     "step",
     # Primitives
     "sleep",
+    "hook",
+    "define_hook",
+    "TypedHook",
+    "resume_hook",
+    "ResumeResult",
     # Execution
     "start",
     "resume",
@@ -118,6 +131,10 @@ __all__ = [
     "SuspensionSignal",
     "WorkflowNotFoundError",
     "WorkflowAlreadyRunningError",
+    "HookNotFoundError",
+    "HookExpiredError",
+    "HookAlreadyReceivedError",
+    "InvalidTokenError",
     "ConfigurationError",
     # Context API
     "WorkflowContext",

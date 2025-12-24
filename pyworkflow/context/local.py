@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from datetime import UTC, datetime
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+import uuid
+from datetime import UTC, datetime, timedelta
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Union
 
 from loguru import logger
 
@@ -555,3 +556,95 @@ class LocalContext(WorkflowContext):
             timeout_seconds=timeout_seconds,
         )
         await self._storage.record_event(event)
+
+    async def hook(
+        self,
+        name: str,
+        timeout: Optional[int] = None,
+        on_created: Optional[Callable[[str], Awaitable[None]]] = None,
+    ) -> Any:
+        """
+        Wait for an external event (webhook, approval, callback).
+
+        In durable mode:
+        - Generates hook_id and composite token (run_id:hook_id)
+        - Checks if already received (replay mode)
+        - Records HOOK_CREATED event (idempotency checked via events)
+        - Calls on_created callback with token (if provided)
+        - Raises SuspensionSignal to pause workflow
+
+        In transient mode:
+        - Raises NotImplementedError (hooks require durability)
+
+        Args:
+            name: Human-readable name for the hook
+            timeout: Optional timeout in seconds
+            on_created: Optional async callback called with token when hook is created
+
+        Returns:
+            Payload from resume_hook()
+
+        Raises:
+            NotImplementedError: If not in durable mode
+        """
+        if not self._durable:
+            raise NotImplementedError(
+                "hook() requires durable mode with storage. "
+                "Initialize LocalContext with durable=True and a storage backend."
+            )
+
+        # Generate deterministic hook_id
+        self._step_counter += 1
+        hook_id = f"hook_{name}_{self._step_counter}"
+
+        # Check if already received (replay mode)
+        if hook_id in self._hook_results:
+            logger.debug(f"[replay] Hook {hook_id} already received")
+            return self._hook_results[hook_id]
+
+        # Generate composite token: run_id:hook_id
+        from pyworkflow.primitives.resume_hook import create_hook_token
+
+        actual_token = create_hook_token(self._run_id, hook_id)
+
+        # Calculate expiration time
+        expires_at = None
+        if timeout:
+            expires_at = datetime.now(UTC) + timedelta(seconds=timeout)
+
+        # Record HOOK_CREATED event (this is the source of truth for hook existence)
+        from pyworkflow.engine.events import create_hook_created_event
+
+        event = create_hook_created_event(
+            run_id=self._run_id,
+            hook_id=hook_id,
+            hook_name=name,
+            token=actual_token,
+            timeout_seconds=timeout,
+            expires_at=expires_at,
+        )
+        await self._storage.record_event(event)
+
+        # Track pending hook locally
+        self._pending_hooks[hook_id] = {
+            "token": actual_token,
+            "name": name,
+            "expires_at": expires_at.isoformat() if expires_at else None,
+        }
+
+        # Call on_created callback if provided (before suspension)
+        if on_created is not None:
+            await on_created(actual_token)
+
+        logger.info(
+            f"Waiting for hook: {name}",
+            run_id=self._run_id,
+            hook_id=hook_id,
+            token=actual_token,
+        )
+
+        raise SuspensionSignal(
+            reason=f"hook:{hook_id}",
+            hook_id=hook_id,
+            token=actual_token,
+        )

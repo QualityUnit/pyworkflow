@@ -42,6 +42,8 @@ from pyworkflow.primitives.hooks import hook
 from pyworkflow.primitives.resume_hook import ResumeResult, resume_hook
 from pyworkflow.primitives.shield import shield
 from pyworkflow.primitives.sleep import sleep
+from pyworkflow.primitives.child_workflow import start_child_workflow
+from pyworkflow.primitives.child_handle import ChildWorkflowHandle
 
 # Execution engine
 from pyworkflow.engine.executor import (
@@ -56,11 +58,14 @@ from pyworkflow.engine.executor import (
 # Exceptions
 from pyworkflow.core.exceptions import (
     CancellationError,
+    ChildWorkflowError,
+    ChildWorkflowFailedError,
     FatalError,
     HookAlreadyReceivedError,
     HookExpiredError,
     HookNotFoundError,
     InvalidTokenError,
+    MaxNestingDepthError,
     RetryableError,
     SuspensionSignal,
     WorkflowAlreadyRunningError,
@@ -123,6 +128,9 @@ __all__ = [
     "resume_hook",
     "ResumeResult",
     "shield",
+    # Child workflows
+    "start_child_workflow",
+    "ChildWorkflowHandle",
     # Execution
     "start",
     "resume",
@@ -142,6 +150,9 @@ __all__ = [
     "HookAlreadyReceivedError",
     "InvalidTokenError",
     "ConfigurationError",
+    "ChildWorkflowError",
+    "ChildWorkflowFailedError",
+    "MaxNestingDepthError",
     # Context API
     "WorkflowContext",
     "LocalContext",

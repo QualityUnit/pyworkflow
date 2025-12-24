@@ -494,3 +494,123 @@ async def cancel_run(
         if ctx.obj["verbose"]:
             raise
         raise click.Abort()
+
+
+@runs.command(name="children")
+@click.argument("run_id")
+@click.option(
+    "--status",
+    type=click.Choice([s.value for s in RunStatus], case_sensitive=False),
+    help="Filter by child run status",
+)
+@click.pass_context
+@async_command
+async def list_children(
+    ctx: click.Context,
+    run_id: str,
+    status: Optional[str],
+) -> None:
+    """
+    List child workflows spawned by a parent workflow.
+
+    Shows all child workflows that were started by the specified parent workflow
+    using start_child_workflow(). Displays run_id, workflow name, status, and
+    timing information for each child.
+
+    Args:
+        RUN_ID: Parent workflow run identifier
+
+    Examples:
+
+        # List all children of a workflow
+        pyworkflow runs children run_abc123def456
+
+        # List only running children
+        pyworkflow runs children run_abc123def456 --status running
+
+        # JSON output
+        pyworkflow --output json runs children run_abc123def456
+    """
+    # Get context data
+    config = ctx.obj["config"]
+    output = ctx.obj["output"]
+    storage_type = ctx.obj["storage_type"]
+    storage_path = ctx.obj["storage_path"]
+
+    # Create storage backend
+    storage = create_storage(storage_type, storage_path, config)
+
+    try:
+        # Check if parent workflow exists
+        parent_run = await storage.get_run(run_id)
+        if not parent_run:
+            print_error(f"Parent workflow run '{run_id}' not found")
+            raise click.Abort()
+
+        # Parse status filter
+        status_filter = RunStatus(status) if status else None
+
+        # Get children
+        children = await storage.get_children(run_id, status=status_filter)
+
+        if not children:
+            print_info(f"No child workflows found for run: {run_id}")
+            return
+
+        # Calculate durations
+        for child in children:
+            if child.started_at and child.completed_at:
+                duration = (child.completed_at - child.started_at).total_seconds()
+                child.duration = f"{duration:.1f}s"
+            elif child.started_at:
+                duration = (datetime.now() - child.started_at.replace(tzinfo=None)).total_seconds()
+                child.duration = f"{duration:.1f}s (ongoing)"
+            else:
+                child.duration = "-"
+
+        # Format output
+        if output == "json":
+            data = [
+                {
+                    "run_id": child.run_id,
+                    "workflow_name": child.workflow_name,
+                    "status": child.status.value,
+                    "nesting_depth": child.nesting_depth,
+                    "created_at": child.created_at.isoformat() if child.created_at else None,
+                    "started_at": child.started_at.isoformat() if child.started_at else None,
+                    "completed_at": child.completed_at.isoformat() if child.completed_at else None,
+                    "duration": child.duration,
+                }
+                for child in children
+            ]
+            format_json(data)
+
+        elif output == "plain":
+            child_ids = [child.run_id for child in children]
+            format_plain(child_ids)
+
+        else:  # table
+            data = [
+                {
+                    "Run ID": child.run_id,
+                    "Workflow": child.workflow_name,
+                    "Status": child.status.value,
+                    "Depth": child.nesting_depth,
+                    "Started": child.started_at.strftime("%Y-%m-%d %H:%M:%S") if child.started_at else "-",
+                    "Duration": child.duration,
+                }
+                for child in children
+            ]
+            format_table(
+                data,
+                ["Run ID", "Workflow", "Status", "Depth", "Started", "Duration"],
+                title=f"Child Workflows of {run_id}",
+            )
+
+    except click.Abort:
+        raise
+    except Exception as e:
+        print_error(f"Failed to list child workflows: {e}")
+        if ctx.obj["verbose"]:
+            raise
+        raise click.Abort()

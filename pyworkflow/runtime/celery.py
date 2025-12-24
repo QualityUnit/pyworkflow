@@ -220,3 +220,56 @@ class CeleryRuntime(Runtime):
             run_id=run_id,
             wake_time=wake_time.isoformat(),
         )
+
+    async def start_child_workflow(
+        self,
+        workflow_func: Callable[..., Any],
+        args: tuple,
+        kwargs: dict,
+        child_run_id: str,
+        workflow_name: str,
+        storage: "StorageBackend",
+        parent_run_id: str,
+        child_id: str,
+        wait_for_completion: bool,
+    ) -> None:
+        """
+        Start a child workflow via Celery (fire-and-forget).
+
+        Dispatches child workflow execution to a Celery worker. The worker
+        will handle parent notification and resumption when the child completes.
+        """
+        from pyworkflow.celery.tasks import start_child_workflow_task
+        from pyworkflow.serialization.encoder import serialize_args, serialize_kwargs
+
+        logger.info(
+            f"Dispatching child workflow to Celery: {workflow_name}",
+            child_run_id=child_run_id,
+            parent_run_id=parent_run_id,
+            child_id=child_id,
+        )
+
+        # Serialize arguments for Celery transport
+        args_json = serialize_args(*args)
+        kwargs_json = serialize_kwargs(**kwargs)
+
+        # Get storage configuration for workers
+        storage_config = self._get_storage_config(storage)
+
+        # Dispatch to Celery worker
+        task_result = start_child_workflow_task.delay(
+            workflow_name=workflow_name,
+            args_json=args_json,
+            kwargs_json=kwargs_json,
+            child_run_id=child_run_id,
+            storage_config=storage_config,
+            parent_run_id=parent_run_id,
+            child_id=child_id,
+            wait_for_completion=wait_for_completion,
+        )
+
+        logger.info(
+            f"Child workflow dispatched to Celery: {workflow_name}",
+            child_run_id=child_run_id,
+            task_id=task_result.id,
+        )

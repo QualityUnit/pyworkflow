@@ -259,3 +259,59 @@ class ContextError(WorkflowError):
     """Raised when workflow context is not available or invalid."""
 
     pass
+
+
+class ChildWorkflowError(WorkflowError):
+    """Base exception for child workflow errors."""
+
+    pass
+
+
+class ChildWorkflowFailedError(ChildWorkflowError):
+    """
+    Raised when a child workflow fails.
+
+    This exception is raised in the parent workflow when a child
+    workflow fails and wait_for_completion=True.
+
+    Attributes:
+        child_run_id: The failed child's run ID
+        child_workflow_name: The failed child's workflow name
+        error: The error message from the child
+        error_type: The exception type that caused the failure
+    """
+
+    def __init__(
+        self,
+        child_run_id: str,
+        child_workflow_name: str,
+        error: str,
+        error_type: str,
+    ) -> None:
+        super().__init__(
+            f"Child workflow '{child_workflow_name}' ({child_run_id}) failed: {error}"
+        )
+        self.child_run_id = child_run_id
+        self.child_workflow_name = child_workflow_name
+        self.error = error
+        self.error_type = error_type
+
+
+class MaxNestingDepthError(ChildWorkflowError):
+    """
+    Raised when maximum child workflow nesting depth is exceeded.
+
+    PyWorkflow limits child workflow nesting to 3 levels to prevent
+    runaway recursion and maintain reasonable execution complexity.
+    """
+
+    MAX_DEPTH = 3
+
+    def __init__(self, current_depth: int) -> None:
+        super().__init__(
+            f"Maximum nesting depth of {self.MAX_DEPTH} exceeded. "
+            f"Current depth: {current_depth}. "
+            f"Consider restructuring your workflow to reduce nesting."
+        )
+        self.current_depth = current_depth
+        self.max_depth = self.MAX_DEPTH

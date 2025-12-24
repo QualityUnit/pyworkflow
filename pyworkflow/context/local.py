@@ -86,6 +86,7 @@ class LocalContext(WorkflowContext):
         self._step_counter = 0
         self._retry_states: Dict[str, Dict[str, Any]] = {}
         self._is_replaying = False
+        self._last_warning_count: int = 0  # Track last event count for warning interval
 
         # Replay state if resuming
         if event_log:
@@ -275,6 +276,58 @@ class LocalContext(WorkflowContext):
         return self._retry_states
 
     # =========================================================================
+    # Event limit validation
+    # =========================================================================
+
+    async def validate_event_limits(self) -> None:
+        """
+        Validate event count against configured soft/hard limits.
+
+        - Soft limit: Log warning, then every N events after
+        - Hard limit: Raise EventLimitExceededError
+
+        Called before recording new events to prevent runaway workflows.
+
+        Raises:
+            EventLimitExceededError: If event count exceeds hard limit
+        """
+        if not self._durable or self._storage is None:
+            return  # Skip validation for transient mode
+
+        from pyworkflow.config import get_config
+        from pyworkflow.core.exceptions import EventLimitExceededError
+
+        config = get_config()
+
+        # Get current event count from storage
+        events = await self._storage.get_events(self._run_id)
+        event_count = len(events)
+
+        # Hard limit check - fail immediately
+        if event_count >= config.event_hard_limit:
+            raise EventLimitExceededError(
+                self._run_id, event_count, config.event_hard_limit
+            )
+
+        # Soft limit check with interval warnings
+        if event_count >= config.event_soft_limit:
+            # Calculate if we should log a warning
+            should_warn = (
+                self._last_warning_count == 0  # First warning
+                or event_count >= self._last_warning_count + config.event_warning_interval
+            )
+
+            if should_warn:
+                logger.warning(
+                    f"Workflow approaching event limit: {event_count}/{config.event_hard_limit}",
+                    run_id=self._run_id,
+                    event_count=event_count,
+                    soft_limit=config.event_soft_limit,
+                    hard_limit=config.event_hard_limit,
+                )
+                self._last_warning_count = event_count
+
+    # =========================================================================
     # Step execution
     # =========================================================================
 
@@ -449,6 +502,9 @@ class LocalContext(WorkflowContext):
             self._completed_sleeps.add(sleep_id)
             return
 
+        # Validate event limits before recording sleep event
+        await self.validate_event_limits()
+
         # Record sleep started and suspend
         await self._record_sleep_start(sleep_id, duration_seconds, resume_at)
 
@@ -615,6 +671,9 @@ class LocalContext(WorkflowContext):
         expires_at = None
         if timeout:
             expires_at = datetime.now(UTC) + timedelta(seconds=timeout)
+
+        # Validate event limits before recording hook event
+        await self.validate_event_limits()
 
         # Record HOOK_CREATED event (this is the source of truth for hook existence)
         from pyworkflow.engine.events import create_hook_created_event

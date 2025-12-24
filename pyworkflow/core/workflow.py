@@ -182,6 +182,9 @@ async def execute_workflow_with_context(
 
         # Record completion event (durable mode only)
         if is_durable:
+            # Validate event limits before recording completion
+            await ctx.validate_event_limits()
+
             completion_event = create_workflow_completed_event(run_id, serialize(result))
             await storage.record_event(completion_event)
 

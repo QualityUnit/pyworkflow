@@ -17,6 +17,7 @@ Usage:
     ... )
 """
 
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
@@ -72,6 +73,9 @@ class PyWorkflowConfig:
         storage: Storage backend instance for durable workflows
         celery_broker: Celery broker URL (for celery runtime)
         aws_region: AWS region (for lambda runtimes)
+        event_soft_limit: Log warning when event count reaches this (default: 10000)
+        event_hard_limit: Fail workflow when event count reaches this (default: 50000)
+        event_warning_interval: Log warning every N events after soft limit (default: 100)
     """
 
     # Defaults (can be overridden per-workflow)
@@ -87,6 +91,12 @@ class PyWorkflowConfig:
     storage: Optional["StorageBackend"] = None
     celery_broker: Optional[str] = None
     aws_region: Optional[str] = None
+
+    # Event limit settings (WARNING: Do not modify unless you understand the implications)
+    # These limits prevent runaway workflows from consuming excessive resources
+    event_soft_limit: int = 10_000  # Log warning at this count
+    event_hard_limit: int = 50_000  # Fail workflow at this count
+    event_warning_interval: int = 100  # Log warning every N events after soft limit
 
 
 def _config_from_yaml() -> PyWorkflowConfig:
@@ -135,6 +145,14 @@ def configure(**kwargs: Any) -> None:
         celery_broker: Celery broker URL
         aws_region: AWS region
 
+    Event Limit Settings (Advanced - modify with caution):
+        event_soft_limit: Log warning when event count reaches this (default: 10000)
+        event_hard_limit: Fail workflow when event count reaches this (default: 50000)
+        event_warning_interval: Log warning every N events after soft limit (default: 100)
+
+    WARNING: Modifying event limits is not recommended. These defaults are carefully
+    chosen to prevent runaway workflows from consuming excessive resources.
+
     Example:
         >>> import pyworkflow
         >>> from pyworkflow.storage import InMemoryStorageBackend
@@ -148,6 +166,17 @@ def configure(**kwargs: Any) -> None:
     global _config
     if _config is None:
         _config = PyWorkflowConfig()
+
+    # Warn if user is modifying event limits
+    event_limit_keys = {"event_soft_limit", "event_hard_limit", "event_warning_interval"}
+    modified_limits = event_limit_keys & set(kwargs.keys())
+    if modified_limits:
+        warnings.warn(
+            f"Modifying event limits ({', '.join(sorted(modified_limits))}) is not recommended. "
+            "These defaults are carefully chosen to prevent runaway workflows.",
+            UserWarning,
+            stacklevel=2,
+        )
 
     for key, value in kwargs.items():
         if hasattr(_config, key):

@@ -104,7 +104,7 @@ class Runtime(ABC):
         This is called by resume_hook() after recording the hook event.
         Each runtime implements this differently:
         - CeleryRuntime: Schedules an async Celery task
-        - LocalRuntime: No-op (workflow resumes on next execution/poll)
+        - LocalRuntime: Calls resume_workflow directly (in-process)
 
         Args:
             run_id: The run_id of the workflow to resume

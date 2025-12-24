@@ -187,29 +187,20 @@ async def resume_hook(
         payload=serialized_payload,
     )
 
-    # Schedule workflow resumption via Celery
+    # Schedule workflow resumption via configured runtime
+    from pyworkflow.config import get_config
+    from pyworkflow.runtime import get_runtime
+
+    config = get_config()
+    runtime = get_runtime(config.default_runtime)
+
     try:
-        from pyworkflow.celery.tasks import resume_workflow_task
-
-        # Get storage config for Celery task
-        from pyworkflow.storage.config import storage_to_config
-
-        storage_config = storage_to_config(storage)
-
-        resume_workflow_task.apply_async(
-            args=[run_id],
-            kwargs={"storage_config": storage_config},
-        )
-
-        logger.info(
-            f"Scheduled workflow resumption: {run_id}",
+        await runtime.schedule_resume(run_id, storage)
+    except Exception as e:
+        logger.warning(
+            f"Failed to schedule workflow resumption: {e}",
             run_id=run_id,
             hook_id=hook_id,
-        )
-    except ImportError:
-        logger.warning(
-            "Celery not available - workflow will resume on next poll",
-            run_id=run_id,
         )
 
     return ResumeResult(

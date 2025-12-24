@@ -8,9 +8,9 @@ The local runtime is ideal for:
 - Simple scripts that don't need distributed execution
 """
 
-import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from loguru import logger
 
@@ -43,9 +43,9 @@ class LocalRuntime(Runtime):
         workflow_name: str,
         storage: Optional["StorageBackend"],
         durable: bool,
-        idempotency_key: Optional[str] = None,
-        max_duration: Optional[str] = None,
-        metadata: Optional[dict] = None,
+        idempotency_key: str | None = None,
+        max_duration: str | None = None,
+        metadata: dict | None = None,
     ) -> str:
         """Start a workflow execution in the current process."""
         from pyworkflow.core.workflow import execute_workflow_with_context
@@ -127,7 +127,7 @@ class LocalRuntime(Runtime):
                 attempt = e.data.get("attempt") if e.data else "?"
                 resume_at = e.data.get("resume_at") if e.data else "unknown"
                 logger.info(
-                    f"Workflow suspended for step retry",
+                    "Workflow suspended for step retry",
                     run_id=run_id,
                     workflow_name=workflow_name,
                     step_id=step_id,

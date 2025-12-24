@@ -30,7 +30,6 @@ Check workflow status:
     pyworkflow runs status <run_id>
 """
 
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -46,7 +45,7 @@ class ApprovalPayload(BaseModel):
     """
     approved: bool
     reviewer: str
-    comments: Optional[str] = None
+    comments: str | None = None
 
 
 # Create typed hook - schema is stored for CLI resume
@@ -122,7 +121,7 @@ async def approval_workflow(order_id: str) -> dict:
     async def on_hook_created(token: str):
         """Called when hook is created - log for CLI use."""
         print(f"[Hook] Typed hook created with token: {token}")
-        print(f"[Hook] Run: pyworkflow hooks resume")
+        print("[Hook] Run: pyworkflow hooks resume")
         print(f"[Hook] Or:  pyworkflow hooks resume {token} --payload '{{\"approved\": true, \"reviewer\": \"admin@example.com\"}}'")
 
     # Wait for typed approval - payload validated against ApprovalPayload

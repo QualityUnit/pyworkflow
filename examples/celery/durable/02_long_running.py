@@ -77,6 +77,7 @@ async def onboarding_workflow(user_id: str) -> dict:
 async def main() -> None:
     """Run the onboarding workflow example."""
     import argparse
+
     import pyworkflow
 
     parser = argparse.ArgumentParser(description="User Onboarding Workflow with Sleeps")
@@ -89,7 +90,7 @@ async def main() -> None:
     run_id = await pyworkflow.start(onboarding_workflow, args.user_id)
     print(f"Workflow started with run_id: {run_id}")
     print(f"\nCheck status: pyworkflow runs status {run_id}")
-    print(f"List suspended: pyworkflow runs list --status suspended")
+    print("List suspended: pyworkflow runs list --status suspended")
 
 
 if __name__ == "__main__":

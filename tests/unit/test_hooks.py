@@ -21,7 +21,6 @@ from pyworkflow import (
     InvalidTokenError,
     MockContext,
     ResumeResult,
-    TypedHook,
     define_hook,
     hook,
     resume_hook,

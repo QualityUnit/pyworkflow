@@ -15,8 +15,8 @@ Supports multiple runtimes:
 
 import functools
 import hashlib
-import uuid
-from typing import Any, Callable, Dict, List, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
 from loguru import logger
 
@@ -28,11 +28,10 @@ from pyworkflow.engine.events import (
     create_step_failed_event,
     create_step_started_event,
 )
-from pyworkflow.serialization.decoder import deserialize
 from pyworkflow.serialization.encoder import serialize, serialize_args, serialize_kwargs
 
 
-def _get_aws_context() -> Optional[Any]:
+def _get_aws_context() -> Any | None:
     """
     Get the current AWS workflow context if running in AWS environment.
 
@@ -48,11 +47,11 @@ def _get_aws_context() -> Optional[Any]:
 
 
 def step(
-    name: Optional[str] = None,
+    name: str | None = None,
     max_retries: int = 3,
-    retry_delay: Union[str, int, List[int]] = "exponential",
-    timeout: Optional[int] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    retry_delay: str | int | list[int] = "exponential",
+    timeout: int | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> Callable:
     """
     Decorator to mark functions as workflow steps.
@@ -387,7 +386,7 @@ async def _execute_with_retries(
     kwargs: dict,
     step_name: str,
     max_retries: int,
-    retry_delay: Union[str, int, List[int]],
+    retry_delay: str | int | list[int],
 ) -> Any:
     """
     Execute a step function with retry logic (for transient mode).
@@ -442,7 +441,7 @@ async def _execute_with_retries(
     raise last_error
 
 
-def _get_retry_delay(retry_delay: Union[str, int, List[int]], attempt: int) -> float:
+def _get_retry_delay(retry_delay: str | int | list[int], attempt: int) -> float:
     """
     Calculate retry delay based on strategy.
 

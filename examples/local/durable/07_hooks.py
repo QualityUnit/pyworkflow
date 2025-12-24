@@ -12,7 +12,6 @@ Run: python examples/local/durable/07_hooks.py 2>/dev/null
 """
 
 import asyncio
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -44,7 +43,7 @@ class ApprovalPayload(BaseModel):
 
     approved: bool
     reviewer: str
-    comments: Optional[str] = None
+    comments: str | None = None
 
 
 # Create typed hook

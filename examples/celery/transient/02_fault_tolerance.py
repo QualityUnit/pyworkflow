@@ -41,6 +41,7 @@ To test fault tolerance:
 """
 
 import asyncio
+
 from pyworkflow import step, workflow
 
 
@@ -56,7 +57,7 @@ async def download_image(image_id: str) -> dict:
 async def resize_image(image: dict) -> dict:
     """Resize image to standard dimensions."""
     print(f"[Step] Resizing image {image['image_id']}...")
-    print(f"       (taking 8 seconds - kill worker now to test!)")
+    print("       (taking 8 seconds - kill worker now to test!)")
     await asyncio.sleep(8)  # Long operation - good time to kill worker
     return {**image, "resized": True, "new_size_mb": 1.2}
 
@@ -65,7 +66,7 @@ async def resize_image(image: dict) -> dict:
 async def apply_filters(image: dict) -> dict:
     """Apply visual filters to image."""
     print(f"[Step] Applying filters to {image['image_id']}...")
-    print(f"       (taking 6 seconds - kill worker now to test!)")
+    print("       (taking 6 seconds - kill worker now to test!)")
     await asyncio.sleep(6)  # Another good time to kill worker
     return {**image, "filtered": True}
 
@@ -104,7 +105,7 @@ async def image_processor(image_id: str) -> dict:
     """
     print(f"\n{'='*60}")
     print(f"Image Processor (NO RECOVERY): {image_id}")
-    print(f"If worker crashes, workflow will FAIL permanently")
+    print("If worker crashes, workflow will FAIL permanently")
     print(f"{'='*60}\n")
 
     image = await download_image(image_id)
@@ -178,7 +179,7 @@ async def batch_processor(batch_id: str) -> dict:
     """
     print(f"\n{'='*60}")
     print(f"Batch Processor (WITH RECOVERY): {batch_id}")
-    print(f"If worker crashes, workflow will RESTART from scratch")
+    print("If worker crashes, workflow will RESTART from scratch")
     print(f"{'='*60}\n")
 
     batch = await fetch_batch_items(batch_id)
@@ -196,6 +197,7 @@ async def batch_processor(batch_id: str) -> dict:
 async def main() -> None:
     """Run the transient fault tolerance examples."""
     import argparse
+
     import pyworkflow
 
     parser = argparse.ArgumentParser(

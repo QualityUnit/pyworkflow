@@ -23,7 +23,6 @@ from pyworkflow import (
 )
 from pyworkflow.storage import FileStorageBackend
 
-
 # Execution counter to track step calls
 execution_count = 0
 
@@ -90,7 +89,7 @@ async def main():
         )
 
         run_1 = await get_workflow_run(run_id_1)
-        print(f"\nFirst call completed:")
+        print("\nFirst call completed:")
         print(f"  Run ID: {run_id_1}")
         print(f"  Status: {run_1.status.value}")
         print(f"  Result: {run_1.result}")
@@ -107,7 +106,7 @@ async def main():
         )
 
         run_2 = await get_workflow_run(run_id_2)
-        print(f"\nSecond call result:")
+        print("\nSecond call result:")
         print(f"  Run ID: {run_id_2}")
         print(f"  Status: {run_2.status.value}")
         print(f"  Result: {run_2.result}")
@@ -135,7 +134,7 @@ async def main():
         )
 
         run_3 = await get_workflow_run(run_id_3)
-        print(f"\nThird call result:")
+        print("\nThird call result:")
         print(f"  Run ID: {run_id_3}")
         print(f"  Status: {run_3.status.value}")
         print(f"  Execution count: {execution_count} (incremented!)")

@@ -3,16 +3,16 @@
 import json
 import sys
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pyworkflow.cli.output.styles import (
-    RESET,
     BOLD,
     DIM,
-    Colors,
-    STATUS_COLORS,
     EVENT_COLORS,
+    RESET,
+    STATUS_COLORS,
     SYMBOLS,
+    Colors,
 )
 
 
@@ -32,7 +32,7 @@ def print_colored(text: str, color: str, bold: bool = False, file: Any = None) -
     print(f"{prefix}{color}{text}{RESET}", file=file)
 
 
-def print_breadcrumb(steps: List[str], current_index: int) -> None:
+def print_breadcrumb(steps: list[str], current_index: int) -> None:
     """
     Print a breadcrumb navigation display.
 
@@ -61,10 +61,10 @@ def print_breadcrumb(steps: List[str], current_index: int) -> None:
 
 
 def print_list(
-    items: List[Dict[str, Any]],
-    title: Optional[str] = None,
+    items: list[dict[str, Any]],
+    title: str | None = None,
     key_field: str = "name",
-    detail_fields: Optional[List[str]] = None,
+    detail_fields: list[str] | None = None,
 ) -> None:
     """
     Print items as a simple indented list.
@@ -103,8 +103,8 @@ def print_list(
 
 
 def format_key_value(
-    data: Dict[str, Any],
-    title: Optional[str] = None,
+    data: dict[str, Any],
+    title: str | None = None,
 ) -> None:
     """
     Print key-value pairs with formatting.
@@ -147,7 +147,7 @@ def format_json(data: Any, indent: int = 2) -> None:
     print(json_str)
 
 
-def format_plain(data: List[str]) -> None:
+def format_plain(data: list[str]) -> None:
     """
     Print data as plain text (one item per line).
 
@@ -232,9 +232,9 @@ def show_cursor() -> None:
 
 # Deprecated aliases for backwards compatibility during transition
 def format_table(
-    data: List[Dict[str, Any]],
-    columns: List[str],
-    title: Optional[str] = None,
+    data: list[dict[str, Any]],
+    columns: list[str],
+    title: str | None = None,
 ) -> None:
     """
     Format data as a simple list (replacing Rich tables).
@@ -271,7 +271,7 @@ def format_table(
 
 def format_panel(
     content: str,
-    title: Optional[str] = None,
+    title: str | None = None,
     border_style: str = "blue",
 ) -> None:
     """
@@ -288,7 +288,7 @@ def format_panel(
     print(content)
 
 
-def format_tree(data: Dict[str, Any], title: str = "Data") -> None:
+def format_tree(data: dict[str, Any], title: str = "Data") -> None:
     """
     Print data as an indented tree structure.
 
@@ -305,14 +305,14 @@ def _print_tree_nodes(data: Any, indent: int = 0) -> None:
     prefix = " " * indent
     if isinstance(data, dict):
         for key, value in data.items():
-            if isinstance(value, (dict, list)):
+            if isinstance(value, dict | list):
                 print(f"{prefix}{Colors.CYAN}{key}{RESET}:")
                 _print_tree_nodes(value, indent + 2)
             else:
                 print(f"{prefix}{Colors.CYAN}{key}:{RESET} {value}")
     elif isinstance(data, list):
         for i, item in enumerate(data):
-            if isinstance(item, (dict, list)):
+            if isinstance(item, dict | list):
                 print(f"{prefix}{DIM}{i}:{RESET}")
                 _print_tree_nodes(item, indent + 2)
             else:

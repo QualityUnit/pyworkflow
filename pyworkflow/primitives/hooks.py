@@ -5,7 +5,8 @@ Allows workflows to suspend and wait for external events such as
 webhooks, manual approvals, or third-party callbacks.
 """
 
-from typing import Any, Awaitable, Callable, Optional, Type, Union
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel
@@ -16,9 +17,9 @@ from pyworkflow.context import get_context, has_context
 async def hook(
     name: str,
     *,
-    timeout: Optional[Union[str, int]] = None,
-    on_created: Optional[Callable[[str], Awaitable[None]]] = None,
-    payload_schema: Optional[Type[BaseModel]] = None,
+    timeout: str | int | None = None,
+    on_created: Callable[[str], Awaitable[None]] | None = None,
+    payload_schema: type[BaseModel] | None = None,
 ) -> Any:
     """
     Wait for an external event (webhook, approval, callback).
@@ -71,7 +72,7 @@ async def hook(
     ctx = get_context()
 
     # Parse timeout to seconds
-    timeout_seconds: Optional[int] = None
+    timeout_seconds: int | None = None
     if timeout is not None:
         if isinstance(timeout, str):
             from pyworkflow.utils.duration import parse_duration

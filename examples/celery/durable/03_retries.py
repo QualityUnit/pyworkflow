@@ -41,14 +41,14 @@ async def flaky_api_call(endpoint: str) -> dict:
     roll = random.random()
 
     if roll < 0.3:
-        print(f"[Step] API temporarily unavailable, will retry...")
+        print("[Step] API temporarily unavailable, will retry...")
         raise RetryableError("API temporarily unavailable", retry_after="5s")
 
     if roll < 0.4:
-        print(f"[Step] API returned invalid response, fatal error...")
+        print("[Step] API returned invalid response, fatal error...")
         raise FatalError("API returned invalid response - cannot retry")
 
-    print(f"[Step] API call successful!")
+    print("[Step] API call successful!")
     return {"endpoint": endpoint, "status": "success", "data": {"value": 42}}
 
 
@@ -79,6 +79,7 @@ async def retry_demo_workflow(endpoint: str) -> dict:
 async def main() -> None:
     """Run the retry demo workflow example."""
     import argparse
+
     import pyworkflow
 
     parser = argparse.ArgumentParser(description="Retry Handling Demo Workflow")

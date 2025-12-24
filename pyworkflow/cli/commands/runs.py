@@ -1,26 +1,24 @@
 """Workflow run management commands."""
 
 import json
-import click
-from typing import Optional
 from datetime import datetime
+
+import click
 
 import pyworkflow
 from pyworkflow import RunStatus
-from pyworkflow.cli.utils.async_helpers import async_command
-from pyworkflow.cli.utils.storage import create_storage
 from pyworkflow.cli.output.formatters import (
-    format_table,
     format_json,
-    format_plain,
     format_key_value,
-    format_status,
-    format_event_type,
-    print_success,
+    format_plain,
+    format_table,
     print_error,
     print_info,
+    print_success,
     print_warning,
 )
+from pyworkflow.cli.utils.async_helpers import async_command
+from pyworkflow.cli.utils.storage import create_storage
 
 
 @click.group(name="runs")
@@ -49,8 +47,8 @@ def runs() -> None:
 @async_command
 async def list_runs(
     ctx: click.Context,
-    workflow: Optional[str],
-    status: Optional[str],
+    workflow: str | None,
+    status: str | None,
     limit: int,
 ) -> None:
     """
@@ -226,7 +224,7 @@ async def run_status(ctx: click.Context, run_id: str) -> None:
                     kwargs = json.loads(run.input_kwargs)
                     if kwargs:
                         data["Input Arguments"] = json.dumps(kwargs, indent=2)
-                except:
+                except Exception:
                     pass
 
             # Add result or error
@@ -234,7 +232,7 @@ async def run_status(ctx: click.Context, run_id: str) -> None:
                 try:
                     result = json.loads(run.result)
                     data["Result"] = json.dumps(result, indent=2) if not isinstance(result, str) else result
-                except:
+                except Exception:
                     data["Result"] = run.result
 
             if run.error:
@@ -265,7 +263,7 @@ async def run_status(ctx: click.Context, run_id: str) -> None:
 async def run_logs(
     ctx: click.Context,
     run_id: str,
-    event_filter: Optional[str],
+    event_filter: str | None,
 ) -> None:
     """
     Show workflow execution event log.
@@ -328,7 +326,7 @@ async def run_logs(
             format_plain(lines)
 
         else:  # table (displays as list with full data)
-            from pyworkflow.cli.output.styles import Colors, RESET, DIM
+            from pyworkflow.cli.output.styles import DIM, RESET, Colors
 
             print(f"\n{Colors.PRIMARY}{Colors.bold(f'Event Log: {run_id}')}{RESET}")
             print(f"{DIM}{'─' * 60}{RESET}")
@@ -403,7 +401,7 @@ async def cancel_run(
     run_id: str,
     wait: bool,
     timeout: int,
-    reason: Optional[str],
+    reason: str | None,
 ) -> None:
     """
     Cancel a running or suspended workflow.
@@ -470,12 +468,12 @@ async def cancel_run(
                 if run and run.status == RunStatus.CANCELLED:
                     print_success(f"Workflow cancelled successfully: {run_id}")
                 else:
-                    print_warning(f"Cancellation requested but workflow may still be running")
+                    print_warning("Cancellation requested but workflow may still be running")
             else:
                 print_success(f"Cancellation requested for workflow: {run_id}")
                 print_info("Use --wait to wait for cancellation to complete")
         else:
-            print_warning(f"Could not cancel workflow (may already be in terminal state)")
+            print_warning("Could not cancel workflow (may already be in terminal state)")
 
         # Output in different formats
         if output == "json":

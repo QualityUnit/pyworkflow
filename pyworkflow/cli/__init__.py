@@ -1,13 +1,14 @@
 """PyWorkflow CLI - Manage and run durable workflows."""
 
-import click
 from typing import Optional
+
+import click
+from loguru import logger
 
 from pyworkflow import __version__
 from pyworkflow.cli.utils.config import load_config
 from pyworkflow.cli.utils.discovery import discover_workflows
 from pyworkflow.cli.utils.storage import create_storage
-from loguru import logger
 
 
 @click.group()
@@ -50,10 +51,10 @@ from loguru import logger
 @click.pass_context
 def main(
     ctx: click.Context,
-    module: Optional[str],
+    module: str | None,
     runtime: str,
-    storage: Optional[str],
-    storage_path: Optional[str],
+    storage: str | None,
+    storage_path: str | None,
     output: str,
     verbose: bool,
 ) -> None:
@@ -108,11 +109,11 @@ def main(
 
 
 # Import and register commands
-from pyworkflow.cli.commands.workflows import workflows
-from pyworkflow.cli.commands.runs import runs
-from pyworkflow.cli.commands.worker import worker
-from pyworkflow.cli.commands.setup import setup
 from pyworkflow.cli.commands.hooks import hooks
+from pyworkflow.cli.commands.runs import runs
+from pyworkflow.cli.commands.setup import setup
+from pyworkflow.cli.commands.worker import worker
+from pyworkflow.cli.commands.workflows import workflows
 
 main.add_command(workflows)
 main.add_command(runs)

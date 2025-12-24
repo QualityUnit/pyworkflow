@@ -6,18 +6,16 @@ Tests use the unified start/resume API with local runtime.
 
 import pytest
 
-from pyworkflow import start, resume, configure, reset_config
+from pyworkflow import configure, reset_config, resume, start
 from pyworkflow.core.exceptions import (
-    SuspensionSignal,
-    WorkflowAlreadyRunningError,
     WorkflowNotFoundError,
 )
+from pyworkflow.core.step import step
+from pyworkflow.core.workflow import workflow
 from pyworkflow.engine.executor import get_workflow_events, get_workflow_run
 from pyworkflow.primitives.sleep import sleep
 from pyworkflow.storage.file import FileStorageBackend
 from pyworkflow.storage.schemas import RunStatus
-from pyworkflow.core.step import step
-from pyworkflow.core.workflow import workflow
 
 
 @pytest.fixture(autouse=True)
@@ -169,7 +167,7 @@ class TestWorkflowResume:
         assert run.status == RunStatus.SUSPENDED
 
         # Resume workflow
-        result = await resume(run_id, storage=storage)
+        await resume(run_id, storage=storage)
 
         # Should complete now
         # Note: This will still suspend because sleep hasn't actually elapsed

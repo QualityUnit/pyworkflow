@@ -6,7 +6,7 @@ PyWorkflow distinguishes between fatal errors (don't retry) and retriable errors
 """
 
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 
 class WorkflowError(Exception):
@@ -70,7 +70,7 @@ class CancellationError(WorkflowError):
     def __init__(
         self,
         message: str = "Workflow was cancelled",
-        reason: Optional[str] = None,
+        reason: str | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
@@ -108,7 +108,7 @@ class RetryableError(WorkflowError):
     def __init__(
         self,
         message: str,
-        retry_after: Optional[Union[str, int, timedelta, datetime]] = None,
+        retry_after: str | int | timedelta | datetime | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(message)
@@ -116,7 +116,7 @@ class RetryableError(WorkflowError):
         self.retry_after = retry_after
         self.metadata = kwargs
 
-    def get_retry_delay_seconds(self) -> Optional[int]:
+    def get_retry_delay_seconds(self) -> int | None:
         """
         Get retry delay in seconds.
 
@@ -267,7 +267,7 @@ class WorkflowAlreadyRunningError(WorkflowError):
 class SerializationError(WorkflowError):
     """Raised when data cannot be serialized or deserialized."""
 
-    def __init__(self, message: str, data_type: Optional[type] = None) -> None:
+    def __init__(self, message: str, data_type: type | None = None) -> None:
         super().__init__(message)
         self.data_type = data_type
 

@@ -24,22 +24,23 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable, Coroutine
 from contextvars import ContextVar, Token
-from typing import Any, Awaitable, Callable, Coroutine, List, Optional, TypeVar, Union
+from typing import Any, TypeVar
 
 from loguru import logger
 
 # Type for step functions
 T = TypeVar("T")
-StepFunction = Callable[..., Union[T, Coroutine[Any, Any, T]]]
+StepFunction = Callable[..., T | Coroutine[Any, Any, T]]
 
 # Global context variable - the implicit context
-_current_context: ContextVar[Optional["WorkflowContext"]] = ContextVar(
+_current_context: ContextVar[WorkflowContext | None] = ContextVar(
     "workflow_context", default=None
 )
 
 
-def get_context() -> "WorkflowContext":
+def get_context() -> WorkflowContext:
     """
     Get the current workflow context (implicit).
 
@@ -78,7 +79,7 @@ def has_context() -> bool:
     return _current_context.get() is not None
 
 
-def set_context(ctx: Optional["WorkflowContext"]) -> Token:
+def set_context(ctx: WorkflowContext | None) -> Token:
     """
     Set the current workflow context.
 
@@ -151,7 +152,7 @@ class WorkflowContext(ABC):
         self,
         func: StepFunction[T],
         *args: Any,
-        name: Optional[str] = None,
+        name: str | None = None,
         **kwargs: Any,
     ) -> T:
         """
@@ -169,7 +170,7 @@ class WorkflowContext(ABC):
         ...
 
     @abstractmethod
-    async def sleep(self, duration: Union[str, int, float]) -> None:
+    async def sleep(self, duration: str | int | float) -> None:
         """
         Pause workflow execution for the specified duration.
 
@@ -184,8 +185,8 @@ class WorkflowContext(ABC):
     async def hook(
         self,
         name: str,
-        timeout: Optional[int] = None,
-        on_created: Optional[Callable[[str], Awaitable[None]]] = None,
+        timeout: int | None = None,
+        on_created: Callable[[str], Awaitable[None]] | None = None,
     ) -> Any:
         """
         Wait for an external event (webhook, approval, callback).
@@ -222,7 +223,7 @@ class WorkflowContext(ABC):
         ...
 
     @abstractmethod
-    def request_cancellation(self, reason: Optional[str] = None) -> None:
+    def request_cancellation(self, reason: str | None = None) -> None:
         """
         Mark this workflow as cancelled.
 
@@ -262,7 +263,7 @@ class WorkflowContext(ABC):
     # Optional methods - can be overridden by subclasses
     # =========================================================================
 
-    async def parallel(self, *tasks: Coroutine[Any, Any, T]) -> List[T]:
+    async def parallel(self, *tasks: Coroutine[Any, Any, T]) -> list[T]:
         """
         Execute multiple tasks in parallel.
 
@@ -280,7 +281,7 @@ class WorkflowContext(ABC):
     async def wait_for_event(
         self,
         event_name: str,
-        timeout: Optional[Union[str, int]] = None,
+        timeout: str | int | None = None,
     ) -> Any:
         """
         Wait for an external event (webhook, approval, callback).
@@ -321,7 +322,7 @@ class WorkflowContext(ABC):
             **kwargs,
         )
 
-    def __enter__(self) -> "WorkflowContext":
+    def __enter__(self) -> WorkflowContext:
         """Context manager entry - set as current context."""
         self._token = set_context(self)
         return self
@@ -330,7 +331,7 @@ class WorkflowContext(ABC):
         """Context manager exit - restore previous context."""
         reset_context(self._token)
 
-    async def __aenter__(self) -> "WorkflowContext":
+    async def __aenter__(self) -> WorkflowContext:
         """Async context manager entry."""
         self._token = set_context(self)
         return self

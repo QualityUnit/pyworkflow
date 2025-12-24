@@ -1,6 +1,6 @@
 """Storage backend factory utilities."""
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from loguru import logger
 
@@ -9,9 +9,9 @@ from pyworkflow.storage.config import config_to_storage
 
 
 def create_storage(
-    backend_type: Optional[str] = None,
-    path: Optional[str] = None,
-    config: Optional[Dict[str, Any]] = None,
+    backend_type: str | None = None,
+    path: str | None = None,
+    config: dict[str, Any] | None = None,
 ) -> StorageBackend:
     """
     Create storage backend from configuration.
@@ -69,7 +69,7 @@ def create_storage(
         storage_path = config.get("storage", {}).get("base_path")
 
     # Build unified config dict
-    storage_config: Dict[str, Any] = {"type": backend}
+    storage_config: dict[str, Any] = {"type": backend}
     if storage_path:
         storage_config["base_path"] = storage_path
 

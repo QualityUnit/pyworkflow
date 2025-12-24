@@ -1,31 +1,31 @@
 """Hook management commands."""
 
 import json
-import click
-from typing import Any, Dict, List, Optional
+from typing import Any
 
+import click
 from InquirerPy import inquirer
 
-from pyworkflow.storage.schemas import HookStatus
-from pyworkflow.cli.utils.async_helpers import async_command
-from pyworkflow.cli.utils.storage import create_storage
 from pyworkflow.cli.output.formatters import (
-    format_table,
     format_json,
-    format_plain,
     format_key_value,
-    print_success,
+    format_plain,
+    format_table,
+    print_breadcrumb,
     print_error,
     print_info,
-    print_breadcrumb,
+    print_success,
 )
 from pyworkflow.cli.output.styles import (
+    DIM,
     PYWORKFLOW_STYLE,
+    RESET,
     SYMBOLS,
     Colors,
-    RESET,
-    DIM,
 )
+from pyworkflow.cli.utils.async_helpers import async_command
+from pyworkflow.cli.utils.storage import create_storage
+from pyworkflow.storage.schemas import HookStatus
 
 
 @click.group(name="hooks")
@@ -34,7 +34,7 @@ def hooks() -> None:
     pass
 
 
-def _build_hook_choices(hooks_list: List[Any]) -> List[Dict[str, str]]:
+def _build_hook_choices(hooks_list: list[Any]) -> list[dict[str, str]]:
     """Build choices list for hook selection."""
     choices = []
     for hook in hooks_list:
@@ -46,7 +46,7 @@ def _build_hook_choices(hooks_list: List[Any]) -> List[Dict[str, str]]:
     return choices
 
 
-async def _select_pending_hook_async(storage: Any) -> Optional[str]:
+async def _select_pending_hook_async(storage: Any) -> str | None:
     """
     Display an interactive menu to select a pending hook.
 
@@ -79,7 +79,7 @@ async def _select_pending_hook_async(storage: Any) -> Optional[str]:
         return None
 
 
-async def _prompt_for_payload_async(hook: Any) -> Dict[str, Any]:
+async def _prompt_for_payload_async(hook: Any) -> dict[str, Any]:
     """
     Interactively prompt for payload fields based on hook's schema.
 
@@ -229,8 +229,8 @@ async def _prompt_for_payload_async(hook: Any) -> Dict[str, Any]:
 @async_command
 async def list_hooks_cmd(
     ctx: click.Context,
-    run_id: Optional[str],
-    status: Optional[str],
+    run_id: str | None,
+    status: str | None,
     limit: int,
 ) -> None:
     """
@@ -530,9 +530,9 @@ async def hooks_by_run_cmd(ctx: click.Context, run_id: str) -> None:
 @async_command
 async def resume_hook_cmd(
     ctx: click.Context,
-    token: Optional[str],
-    payload: Optional[str],
-    payload_file: Optional[str],
+    token: str | None,
+    payload: str | None,
+    payload_file: str | None,
 ) -> None:
     """
     Resume a pending hook with payload.
@@ -584,7 +584,7 @@ async def resume_hook_cmd(
 
         # Step 2: Get payload
         if payload_file:
-            with open(payload_file, "r") as f:
+            with open(payload_file) as f:
                 payload_data = json.load(f)
         elif payload:
             try:

@@ -7,14 +7,13 @@ and events. Integrates with loguru for powerful logging capabilities.
 
 import sys
 from pathlib import Path
-from typing import Optional
 
 from loguru import logger
 
 
 def configure_logging(
     level: str = "INFO",
-    log_file: Optional[str] = None,
+    log_file: str | None = None,
     json_logs: bool = False,
     show_context: bool = True,
 ) -> None:
@@ -153,7 +152,7 @@ def _get_json_format() -> str:
     )
 
 
-def get_logger(name: Optional[str] = None):
+def get_logger(name: str | None = None):
     """
     Get a logger instance.
 

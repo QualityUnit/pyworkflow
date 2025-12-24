@@ -4,7 +4,7 @@ Unit tests for @workflow decorator and workflow execution.
 
 import pytest
 
-from pyworkflow.context import LocalContext, get_context, set_context, has_context
+from pyworkflow.context import LocalContext, get_context, has_context, set_context
 from pyworkflow.core.workflow import execute_workflow_with_context, workflow
 from pyworkflow.storage.file import FileStorageBackend
 

@@ -18,15 +18,15 @@ Usage:
 """
 
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from pyworkflow.storage.base import StorageBackend
 
 
-def _load_yaml_config() -> Dict[str, Any]:
+def _load_yaml_config() -> dict[str, Any]:
     """
     Load configuration from pyworkflow.config.yaml in current directory.
 
@@ -49,7 +49,7 @@ def _load_yaml_config() -> Dict[str, Any]:
         return {}
 
 
-def _create_storage_from_config(storage_config: Dict[str, Any]) -> Optional["StorageBackend"]:
+def _create_storage_from_config(storage_config: dict[str, Any]) -> Optional["StorageBackend"]:
     """Create a storage backend from config dictionary."""
     if not storage_config:
         return None
@@ -84,13 +84,13 @@ class PyWorkflowConfig:
     default_retries: int = 3
 
     # Fault tolerance defaults
-    default_recover_on_worker_loss: Optional[bool] = None  # None = True for durable, False for transient
+    default_recover_on_worker_loss: bool | None = None  # None = True for durable, False for transient
     default_max_recovery_attempts: int = 3
 
     # Infrastructure (app-level only)
     storage: Optional["StorageBackend"] = None
-    celery_broker: Optional[str] = None
-    aws_region: Optional[str] = None
+    celery_broker: str | None = None
+    aws_region: str | None = None
 
     # Event limit settings (WARNING: Do not modify unless you understand the implications)
     # These limits prevent runaway workflows from consuming excessive resources
@@ -126,7 +126,7 @@ def _config_from_yaml() -> PyWorkflowConfig:
 
 
 # Global singleton
-_config: Optional[PyWorkflowConfig] = None
+_config: PyWorkflowConfig | None = None
 _config_loaded_from_yaml: bool = False
 
 
@@ -182,7 +182,7 @@ def configure(**kwargs: Any) -> None:
         if hasattr(_config, key):
             setattr(_config, key, value)
         else:
-            valid_keys = [f for f in PyWorkflowConfig.__dataclass_fields__.keys()]
+            valid_keys = list(PyWorkflowConfig.__dataclass_fields__.keys())
             raise ValueError(
                 f"Unknown config option: {key}. Valid options: {', '.join(valid_keys)}"
             )

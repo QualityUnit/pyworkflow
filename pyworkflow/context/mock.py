@@ -8,7 +8,8 @@ any side effects. Tracks all operations for verification.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, Union
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel
@@ -46,9 +47,9 @@ class MockContext(WorkflowContext):
         run_id: str = "test_run",
         workflow_name: str = "test_workflow",
         skip_sleeps: bool = True,
-        mock_results: Optional[Dict[str, Any]] = None,
-        mock_events: Optional[Dict[str, Any]] = None,
-        mock_hooks: Optional[Dict[str, Any]] = None,
+        mock_results: dict[str, Any] | None = None,
+        mock_events: dict[str, Any] | None = None,
+        mock_hooks: dict[str, Any] | None = None,
     ) -> None:
         """
         Initialize mock context.
@@ -68,23 +69,23 @@ class MockContext(WorkflowContext):
         self._mock_hooks = mock_hooks or {}
 
         # Tracking
-        self._steps: List[Dict[str, Any]] = []
-        self._sleeps: List[Dict[str, Any]] = []
-        self._events: List[Dict[str, Any]] = []
-        self._hooks: List[Dict[str, Any]] = []
-        self._parallel_calls: List[int] = []
+        self._steps: list[dict[str, Any]] = []
+        self._sleeps: list[dict[str, Any]] = []
+        self._events: list[dict[str, Any]] = []
+        self._hooks: list[dict[str, Any]] = []
+        self._parallel_calls: list[int] = []
 
         # Cancellation state
         self._cancellation_requested: bool = False
         self._cancellation_blocked: bool = False
-        self._cancellation_reason: Optional[str] = None
+        self._cancellation_reason: str | None = None
 
     # =========================================================================
     # Tracking properties
     # =========================================================================
 
     @property
-    def steps(self) -> List[Dict[str, Any]]:
+    def steps(self) -> list[dict[str, Any]]:
         """Get all step executions."""
         return self._steps.copy()
 
@@ -94,12 +95,12 @@ class MockContext(WorkflowContext):
         return len(self._steps)
 
     @property
-    def step_names(self) -> List[str]:
+    def step_names(self) -> list[str]:
         """Get names of all executed steps."""
         return [s["name"] for s in self._steps]
 
     @property
-    def sleeps(self) -> List[Dict[str, Any]]:
+    def sleeps(self) -> list[dict[str, Any]]:
         """Get all sleep calls."""
         return self._sleeps.copy()
 
@@ -114,12 +115,12 @@ class MockContext(WorkflowContext):
         return sum(s["seconds"] for s in self._sleeps)
 
     @property
-    def events(self) -> List[Dict[str, Any]]:
+    def events(self) -> list[dict[str, Any]]:
         """Get all event waits."""
         return self._events.copy()
 
     @property
-    def hooks(self) -> List[Dict[str, Any]]:
+    def hooks(self) -> list[dict[str, Any]]:
         """Get all hook waits."""
         return self._hooks.copy()
 
@@ -129,7 +130,7 @@ class MockContext(WorkflowContext):
         return len(self._hooks)
 
     @property
-    def hook_names(self) -> List[str]:
+    def hook_names(self) -> list[str]:
         """Get names of all hooks."""
         return [h["name"] for h in self._hooks]
 
@@ -141,7 +142,7 @@ class MockContext(WorkflowContext):
         self,
         func: StepFunction,
         *args: Any,
-        name: Optional[str] = None,
+        name: str | None = None,
         **kwargs: Any,
     ) -> Any:
         """
@@ -185,7 +186,7 @@ class MockContext(WorkflowContext):
     # Sleep
     # =========================================================================
 
-    async def sleep(self, duration: Union[str, int, float]) -> None:
+    async def sleep(self, duration: str | int | float) -> None:
         """
         Sleep for the specified duration.
 
@@ -196,10 +197,7 @@ class MockContext(WorkflowContext):
         """
         from pyworkflow.utils.duration import parse_duration
 
-        if isinstance(duration, str):
-            duration_seconds = parse_duration(duration)
-        else:
-            duration_seconds = int(duration)
+        duration_seconds = parse_duration(duration) if isinstance(duration, str) else int(duration)
 
         # Track the call
         self._sleeps.append({
@@ -216,7 +214,7 @@ class MockContext(WorkflowContext):
     # Parallel execution
     # =========================================================================
 
-    async def parallel(self, *tasks) -> List[Any]:
+    async def parallel(self, *tasks) -> list[Any]:
         """Execute tasks in parallel (tracking the call)."""
         self._parallel_calls.append(len(tasks))
         return list(await asyncio.gather(*tasks))
@@ -228,7 +226,7 @@ class MockContext(WorkflowContext):
     async def wait_for_event(
         self,
         event_name: str,
-        timeout: Optional[Union[str, int]] = None,
+        timeout: str | int | None = None,
     ) -> Any:
         """
         Wait for an external event.
@@ -260,9 +258,9 @@ class MockContext(WorkflowContext):
     async def hook(
         self,
         name: str,
-        timeout: Optional[int] = None,
-        on_created: Optional[Callable[[str], Awaitable[None]]] = None,
-        payload_schema: Optional[Type[BaseModel]] = None,
+        timeout: int | None = None,
+        on_created: Callable[[str], Awaitable[None]] | None = None,
+        payload_schema: type[BaseModel] | None = None,
     ) -> Any:
         """
         Wait for an external event (hook).
@@ -311,7 +309,7 @@ class MockContext(WorkflowContext):
         """Check if cancellation has been requested."""
         return self._cancellation_requested
 
-    def request_cancellation(self, reason: Optional[str] = None) -> None:
+    def request_cancellation(self, reason: str | None = None) -> None:
         """Request cancellation of the workflow."""
         self._cancellation_requested = True
         self._cancellation_reason = reason
@@ -343,7 +341,7 @@ class MockContext(WorkflowContext):
         self._hooks.clear()
         self._parallel_calls.clear()
 
-    def assert_step_called(self, step_name: str, times: Optional[int] = None) -> None:
+    def assert_step_called(self, step_name: str, times: int | None = None) -> None:
         """
         Assert a step was called.
 
@@ -360,7 +358,7 @@ class MockContext(WorkflowContext):
         else:
             assert call_count > 0, f"Step '{step_name}' was not called"
 
-    def assert_slept(self, total_seconds: Optional[int] = None) -> None:
+    def assert_slept(self, total_seconds: int | None = None) -> None:
         """
         Assert sleep was called.
 

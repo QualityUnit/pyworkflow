@@ -7,12 +7,12 @@ for passing storage configuration to Celery tasks and other cross-process
 communication.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pyworkflow.storage.base import StorageBackend
 
 
-def storage_to_config(storage: Optional[StorageBackend]) -> Optional[Dict[str, Any]]:
+def storage_to_config(storage: StorageBackend | None) -> dict[str, Any] | None:
     """
     Serialize storage backend to configuration dict.
 
@@ -54,7 +54,7 @@ def storage_to_config(storage: Optional[StorageBackend]) -> Optional[Dict[str, A
         return {"type": "unknown"}
 
 
-def config_to_storage(config: Optional[Dict[str, Any]] = None) -> StorageBackend:
+def config_to_storage(config: dict[str, Any] | None = None) -> StorageBackend:
     """
     Create storage backend from configuration dict.
 

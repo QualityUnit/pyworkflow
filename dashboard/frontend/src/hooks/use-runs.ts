@@ -10,28 +10,43 @@ import {
   type ListRunsParams,
 } from '@/api'
 
-export function useRuns(params: ListRunsParams = {}) {
+// Refresh interval in milliseconds
+export const REFRESH_INTERVAL = 30000 // 30 seconds
+
+interface UseRunsOptions {
+  params?: ListRunsParams
+  autoRefresh?: boolean
+}
+
+export function useRuns({ params = {}, autoRefresh = true }: UseRunsOptions = {}) {
   return useQuery({
     queryKey: ['runs', params],
     queryFn: () => listRuns(params),
-    refetchInterval: 5000, // Refresh every 5 seconds
+    refetchInterval: autoRefresh ? REFRESH_INTERVAL : false,
+    refetchOnWindowFocus: false,
   })
 }
 
-export function useRun(runId: string) {
+interface UseRunOptions {
+  autoRefresh?: boolean
+}
+
+export function useRun(runId: string, { autoRefresh = true }: UseRunOptions = {}) {
   return useQuery({
     queryKey: ['run', runId],
     queryFn: () => getRun(runId),
     enabled: !!runId,
-    refetchInterval: 5000,
+    refetchInterval: autoRefresh ? REFRESH_INTERVAL : false,
+    refetchOnWindowFocus: false,
   })
 }
 
-export function useRunEvents(runId: string) {
+export function useRunEvents(runId: string, { autoRefresh = true }: UseRunOptions = {}) {
   return useQuery({
     queryKey: ['run-events', runId],
     queryFn: () => getRunEvents(runId),
     enabled: !!runId,
-    refetchInterval: 5000,
+    refetchInterval: autoRefresh ? REFRESH_INTERVAL : false,
+    refetchOnWindowFocus: false,
   })
 }

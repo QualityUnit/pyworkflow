@@ -17,7 +17,7 @@ import { StatusBadge } from '@/features/runs/components/status-badge'
 import { Play, CheckCircle, XCircle, Clock, Activity } from 'lucide-react'
 
 export function Dashboard() {
-  const { data: runsData } = useRuns({ limit: 10 })
+  const { data: runsData } = useRuns({ params: { limit: 10 } })
   const { data: workflowsData } = useWorkflows()
   const { data: health } = useHealth()
 

@@ -14,7 +14,6 @@ import {
   getFacetedRowModel,
   getFacetedUniqueValues,
   getFilteredRowModel,
-  getPaginationRowModel,
   getSortedRowModel,
   getExpandedRowModel,
   useReactTable,
@@ -33,7 +32,6 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DataTableColumnHeader } from '@/components/data-table/column-header'
 import { DataTableToolbar } from '@/components/data-table/toolbar'
-import { DataTablePagination } from '@/components/data-table/pagination'
 import type { Event } from '@/api/types'
 
 interface EventsTableProps {
@@ -330,17 +328,11 @@ export function EventsTable({
     onExpandedChange: setExpanded,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFacetedRowModel: getFacetedRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
     getExpandedRowModel: getExpandedRowModel(),
     getRowCanExpand: (row) => Object.keys(row.original.data || {}).length > 0,
-    initialState: {
-      pagination: {
-        pageSize: 20,
-      },
-    },
   })
 
   // Build filters array
@@ -493,8 +485,6 @@ export function EventsTable({
           </TableBody>
         </Table>
       </div>
-
-      <DataTablePagination table={table} />
     </div>
   )
 }

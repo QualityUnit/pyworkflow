@@ -28,7 +28,7 @@ interface WorkflowDetailProps {
 
 export function WorkflowDetail({ workflowName }: WorkflowDetailProps) {
   const { data: workflow, isLoading: workflowLoading, error: workflowError } = useWorkflow(workflowName)
-  const { data: runsData, isLoading: runsLoading } = useRuns({ workflow_name: workflowName, limit: 10 })
+  const { data: runsData, isLoading: runsLoading } = useRuns({ params: { workflow_name: workflowName, limit: 10 } })
 
   if (workflowLoading) {
     return (

@@ -2,11 +2,12 @@
  * Runs table component with TanStack React Table.
  */
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
   type ColumnDef,
   type ColumnFiltersState,
+  type PaginationState,
   type RowSelectionState,
   type SortingState,
   type VisibilityState,
@@ -49,6 +50,7 @@ import type { Run } from '@/api/types'
 
 interface RunsTableProps {
   runs: Run[]
+  onPageChange?: (pageIndex: number) => void
 }
 
 function formatDuration(seconds: number | null): string {
@@ -74,7 +76,7 @@ const statusOptions = [
   { label: 'Cancelled', value: 'cancelled' },
 ]
 
-export function RunsTable({ runs }: RunsTableProps) {
+export function RunsTable({ runs, onPageChange }: RunsTableProps) {
   const navigate = useNavigate()
   const [sorting, setSorting] = useState<SortingState>([
     { id: 'started_at', desc: true },
@@ -82,10 +84,19 @@ export function RunsTable({ runs }: RunsTableProps) {
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
+  const [pagination, setPagination] = useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: 20,
+  })
   const [dateRange, setDateRange] = useState<{ from: Date | null; to: Date | null }>({
     from: null,
     to: null,
   })
+
+  // Notify parent of page changes
+  useEffect(() => {
+    onPageChange?.(pagination.pageIndex)
+  }, [pagination.pageIndex, onPageChange])
 
   const handleRowClick = useCallback(
     (runId: string) => {
@@ -167,7 +178,7 @@ export function RunsTable({ runs }: RunsTableProps) {
         const runId = row.getValue('run_id') as string
         return (
           <span className="font-mono text-sm">
-            {runId.slice(0, 16)}...
+            {runId}
           </span>
         )
       },
@@ -301,23 +312,20 @@ export function RunsTable({ runs }: RunsTableProps) {
       columnFilters,
       columnVisibility,
       rowSelection,
+      pagination,
     },
     enableRowSelection: true,
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
+    onPaginationChange: setPagination,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFacetedRowModel: getFacetedRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
-    initialState: {
-      pagination: {
-        pageSize: 20,
-      },
-    },
   })
 
   // Build filters

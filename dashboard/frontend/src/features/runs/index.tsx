@@ -2,15 +2,16 @@
  * Runs list page.
  */
 
+import { useState, useCallback } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { RefreshCw, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { GithubStarButton } from '@/components/github-star-button'
 import { ThemeSwitch } from '@/components/theme-switch'
-import { Button } from '@/components/ui/button'
+import { RefreshButton } from '@/components/refresh-button'
 import { Badge } from '@/components/ui/badge'
-import { useRuns } from '@/hooks/use-runs'
+import { useRuns, REFRESH_INTERVAL } from '@/hooks/use-runs'
 import { RunsTable } from './components/runs-table'
 
 interface RunsListProps {
@@ -19,26 +20,45 @@ interface RunsListProps {
 
 export function RunsList({ workflowName }: RunsListProps) {
   const navigate = useNavigate()
+  const [currentPage, setCurrentPage] = useState(0)
+  const [userAutoRefresh, setUserAutoRefresh] = useState(true)
+
+  // Auto-refresh is enabled only on page 1 and when user hasn't disabled it
+  const autoRefreshEnabled = currentPage === 0 && userAutoRefresh
 
   // Fetch all runs - filtering is done client-side in the table
-  const { data, isLoading, error, refetch } = useRuns({
-    workflow_name: workflowName,
-    limit: 1000,
+  const { data, isLoading, isFetching, error, refetch } = useRuns({
+    params: {
+      workflow_name: workflowName,
+      limit: 1000,
+    },
+    autoRefresh: autoRefreshEnabled,
   })
 
   const clearWorkflowFilter = () => {
     navigate({ to: '/runs', search: {} })
   }
 
+  const handlePageChange = useCallback((pageIndex: number) => {
+    setCurrentPage(pageIndex)
+  }, [])
+
+  const handleAutoRefreshChange = useCallback((enabled: boolean) => {
+    setUserAutoRefresh(enabled)
+  }, [])
+
   return (
     <>
       <Header>
         <h1 className="text-lg font-semibold">Workflow Runs</h1>
         <div className="ms-auto flex items-center space-x-4">
-          <Button variant="ghost" size="icon" onClick={() => refetch()}>
-            <RefreshCw className="h-4 w-4" />
-            <span className="sr-only">Refresh</span>
-          </Button>
+          <RefreshButton
+            onRefresh={() => refetch()}
+            intervalMs={REFRESH_INTERVAL}
+            isFetching={isFetching}
+            autoRefreshEnabled={autoRefreshEnabled}
+            onAutoRefreshChange={handleAutoRefreshChange}
+          />
           <ThemeSwitch />
           <GithubStarButton />
         </div>
@@ -82,7 +102,7 @@ export function RunsList({ workflowName }: RunsListProps) {
         {data && (
           <div className="-mx-4 flex-1 overflow-auto px-4 py-1 lg:flex-row lg:space-x-12 lg:space-y-0">
             <div className="@container/content h-full">
-              <RunsTable runs={data.items} />
+              <RunsTable runs={data.items} onPageChange={handlePageChange} />
             </div>
           </div>
         )}

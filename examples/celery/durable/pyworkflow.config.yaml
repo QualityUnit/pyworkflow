@@ -17,7 +17,7 @@ runtime: celery
 # Storage backend configuration
 storage:
   type: file
-  base_path: ./workflow_data
+  base_path: /home/yasha/Desktop/projects/pyworkflow/examples/celery/durable/workflow_data
 
 # Celery broker and result backend
 celery:

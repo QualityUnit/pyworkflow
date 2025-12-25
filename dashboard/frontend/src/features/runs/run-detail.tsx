@@ -8,13 +8,27 @@ import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { GithubStarButton } from '@/components/github-star-button'
 import { ThemeSwitch } from '@/components/theme-switch'
+import { RefreshButton } from '@/components/refresh-button'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useRun, useRunEvents } from '@/hooks/use-runs'
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
+import { useRun, useRunEvents, REFRESH_INTERVAL } from '@/hooks/use-runs'
 import { StatusBadge } from './components/status-badge'
 import { EventsTable } from './components/events-table'
-import { ArrowLeft, ExternalLink, Copy, Check } from 'lucide-react'
+import { ExternalLink, Copy, Check, ChevronDown, Filter } from 'lucide-react'
 import { useState, useCallback, useMemo } from 'react'
 import { toast } from 'sonner'
 import {
@@ -25,7 +39,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Filter } from 'lucide-react'
 
 interface RunDetailProps {
   runId: string
@@ -49,8 +62,14 @@ interface StepSummary {
 }
 
 export function RunDetail({ runId }: RunDetailProps) {
-  const { data: run, isLoading: runLoading, error: runError } = useRun(runId)
-  const { data: events } = useRunEvents(runId)
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true)
+  const { data: run, isLoading: runLoading, isFetching: runFetching, error: runError, refetch: refetchRun } = useRun(runId, { autoRefresh: autoRefreshEnabled })
+  const { data: events, isFetching: eventsFetching, refetch: refetchEvents } = useRunEvents(runId, { autoRefresh: autoRefreshEnabled })
+  const isFetching = runFetching || eventsFetching
+  const refetch = useCallback(() => {
+    refetchRun()
+    refetchEvents()
+  }, [refetchRun, refetchEvents])
   const [copied, setCopied] = useState(false)
   const [activeTab, setActiveTab] = useState('events')
   const [stepFilter, setStepFilter] = useState<string[]>([])
@@ -101,7 +120,30 @@ export function RunDetail({ runId }: RunDetailProps) {
     return (
       <>
         <Header>
-          <h1 className="text-lg font-semibold">Run Details</h1>
+          <Breadcrumb>
+            <BreadcrumbList className="text-lg">
+              <BreadcrumbItem>
+                <BreadcrumbLink asChild>
+                  <Link to="/runs">Runs</Link>
+                </BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbPage className="font-semibold">Loading...</BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+          <div className="ms-auto flex items-center space-x-4">
+            <RefreshButton
+              onRefresh={refetch}
+              intervalMs={REFRESH_INTERVAL}
+              isFetching={isFetching}
+              autoRefreshEnabled={autoRefreshEnabled}
+              onAutoRefreshChange={setAutoRefreshEnabled}
+            />
+            <ThemeSwitch />
+            <GithubStarButton />
+          </div>
         </Header>
         <Main>
           <div className="text-center py-8 text-muted-foreground">
@@ -116,7 +158,30 @@ export function RunDetail({ runId }: RunDetailProps) {
     return (
       <>
         <Header>
-          <h1 className="text-lg font-semibold">Run Details</h1>
+          <Breadcrumb>
+            <BreadcrumbList className="text-lg">
+              <BreadcrumbItem>
+                <BreadcrumbLink asChild>
+                  <Link to="/runs">Runs</Link>
+                </BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbPage className="font-semibold">Error</BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+          <div className="ms-auto flex items-center space-x-4">
+            <RefreshButton
+              onRefresh={refetch}
+              intervalMs={REFRESH_INTERVAL}
+              isFetching={isFetching}
+              autoRefreshEnabled={autoRefreshEnabled}
+              onAutoRefreshChange={setAutoRefreshEnabled}
+            />
+            <ThemeSwitch />
+            <GithubStarButton />
+          </div>
         </Header>
         <Main>
           <div className="text-center py-8 text-destructive">
@@ -130,97 +195,93 @@ export function RunDetail({ runId }: RunDetailProps) {
   return (
     <>
       <Header>
-        <div className="flex items-center gap-4">
-          <Link to="/runs">
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <h1 className="text-lg font-semibold">Run Details</h1>
-        </div>
+        <Breadcrumb>
+          <BreadcrumbList className="text-lg">
+            <BreadcrumbItem>
+              <BreadcrumbLink asChild>
+                <Link to="/runs">Runs</Link>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage className="font-semibold">{run.run_id}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
         <div className="ms-auto flex items-center space-x-4">
+          <RefreshButton
+            onRefresh={refetch}
+            intervalMs={REFRESH_INTERVAL}
+            isFetching={isFetching}
+            autoRefreshEnabled={autoRefreshEnabled}
+            onAutoRefreshChange={setAutoRefreshEnabled}
+          />
           <ThemeSwitch />
           <GithubStarButton />
         </div>
       </Header>
 
       <Main>
-        {/* Run summary */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 mb-6">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Status</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <StatusBadge status={run.status} />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Workflow</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Link
-                to="/workflows/$name"
-                params={{ name: run.workflow_name }}
-                className="text-primary hover:underline flex items-center gap-1"
-              >
-                {run.workflow_name}
-                <ExternalLink className="h-3 w-3" />
-              </Link>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Run ID</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-xs truncate">{run.run_id}</span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={handleCopyRunId}
-                >
-                  {copied ? (
-                    <Check className="h-3 w-3 text-green-500" />
-                  ) : (
-                    <Copy className="h-3 w-3" />
-                  )}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Started</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-sm" title={formatDate(run.started_at)}>
-                {formatRelativeTime(run.started_at)}
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Completed</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-sm" title={formatDate(run.completed_at)}>
-                {run.completed_at ? formatRelativeTime(run.completed_at) : '-'}
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Events</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-lg font-semibold">{events?.count || 0}</div>
-            </CardContent>
-          </Card>
+        {/* Title row with run_id and status */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-semibold font-mono">{run.run_id}</h2>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={handleCopyRunId}
+            >
+              {copied ? (
+                <Check className="h-3 w-3 text-green-500" />
+              ) : (
+                <Copy className="h-3 w-3" />
+              )}
+            </Button>
+          </div>
+          <StatusBadge status={run.status} />
         </div>
+
+        {/* Run details collapsible */}
+        <Collapsible className="mb-6">
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" className="flex items-center gap-2 p-0 h-auto hover:bg-transparent">
+              <ChevronDown className="h-4 w-4 transition-transform duration-200 [[data-state=closed]_&]:-rotate-90" />
+              <span className="text-sm text-muted-foreground">Run Details</span>
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-muted/30 rounded-lg">
+              <div>
+                <div className="text-sm text-muted-foreground">Workflow</div>
+                <Link
+                  to="/workflows/$name"
+                  params={{ name: run.workflow_name }}
+                  className="text-primary hover:underline flex items-center gap-1"
+                >
+                  {run.workflow_name}
+                  <ExternalLink className="h-3 w-3" />
+                </Link>
+              </div>
+              <div>
+                <div className="text-sm text-muted-foreground">Started</div>
+                <div className="text-sm" title={formatDate(run.started_at)}>
+                  {formatRelativeTime(run.started_at)}
+                </div>
+              </div>
+              <div>
+                <div className="text-sm text-muted-foreground">Completed</div>
+                <div className="text-sm" title={formatDate(run.completed_at)}>
+                  {run.completed_at ? formatRelativeTime(run.completed_at) : '-'}
+                </div>
+              </div>
+              <div>
+                <div className="text-sm text-muted-foreground">Events</div>
+                <div className="text-sm font-semibold">{events?.count || 0}</div>
+              </div>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
 
         {/* Error display */}
         {run.error && (

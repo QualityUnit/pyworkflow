@@ -15,7 +15,15 @@ from datetime import UTC, datetime
 
 from pyworkflow.engine.events import Event
 from pyworkflow.storage.base import StorageBackend
-from pyworkflow.storage.schemas import Hook, HookStatus, RunStatus, StepExecution, WorkflowRun
+from pyworkflow.storage.schemas import (
+    Hook,
+    HookStatus,
+    RunStatus,
+    Schedule,
+    ScheduleStatus,
+    StepExecution,
+    WorkflowRun,
+)
 
 
 class InMemoryStorageBackend(StorageBackend):
@@ -36,6 +44,7 @@ class InMemoryStorageBackend(StorageBackend):
         self._events: dict[str, list[Event]] = {}
         self._steps: dict[str, StepExecution] = {}
         self._hooks: dict[str, Hook] = {}
+        self._schedules: dict[str, Schedule] = {}
         self._idempotency_index: dict[str, str] = {}  # key -> run_id
         self._token_index: dict[str, str] = {}  # token -> hook_id
         self._cancellation_flags: dict[str, bool] = {}  # run_id -> cancelled
@@ -372,6 +381,94 @@ class InMemoryStorageBackend(StorageBackend):
             run = self._runs.get(run_id)
             return run.nesting_depth if run else 0
 
+    # Schedule Operations
+
+    async def create_schedule(self, schedule: Schedule) -> None:
+        """Create a new schedule record."""
+        with self._lock:
+            if schedule.schedule_id in self._schedules:
+                raise ValueError(f"Schedule {schedule.schedule_id} already exists")
+            self._schedules[schedule.schedule_id] = schedule
+
+    async def get_schedule(self, schedule_id: str) -> Schedule | None:
+        """Retrieve a schedule by ID."""
+        with self._lock:
+            return self._schedules.get(schedule_id)
+
+    async def update_schedule(self, schedule: Schedule) -> None:
+        """Update an existing schedule."""
+        with self._lock:
+            if schedule.schedule_id not in self._schedules:
+                raise ValueError(f"Schedule {schedule.schedule_id} does not exist")
+            self._schedules[schedule.schedule_id] = schedule
+
+    async def delete_schedule(self, schedule_id: str) -> None:
+        """Mark a schedule as deleted (soft delete)."""
+        with self._lock:
+            if schedule_id not in self._schedules:
+                raise ValueError(f"Schedule {schedule_id} does not exist")
+            schedule = self._schedules[schedule_id]
+            schedule.status = ScheduleStatus.DELETED
+            schedule.updated_at = datetime.now(UTC)
+
+    async def list_schedules(
+        self,
+        workflow_name: str | None = None,
+        status: ScheduleStatus | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Schedule]:
+        """List schedules with optional filtering."""
+        with self._lock:
+            schedules = list(self._schedules.values())
+
+            # Apply filters
+            if workflow_name:
+                schedules = [s for s in schedules if s.workflow_name == workflow_name]
+            if status:
+                schedules = [s for s in schedules if s.status == status]
+
+            # Sort by created_at descending
+            schedules.sort(key=lambda s: s.created_at, reverse=True)
+
+            # Apply pagination
+            return schedules[offset : offset + limit]
+
+    async def get_due_schedules(self, now: datetime) -> list[Schedule]:
+        """Get all schedules that are due to run."""
+        with self._lock:
+            due_schedules = [
+                s
+                for s in self._schedules.values()
+                if s.status == ScheduleStatus.ACTIVE
+                and s.next_run_time is not None
+                and s.next_run_time <= now
+            ]
+
+            # Sort by next_run_time ascending
+            due_schedules.sort(key=lambda s: s.next_run_time)  # type: ignore
+            return due_schedules
+
+    async def add_running_run(self, schedule_id: str, run_id: str) -> None:
+        """Add a run_id to the schedule's running_run_ids list."""
+        with self._lock:
+            if schedule_id not in self._schedules:
+                raise ValueError(f"Schedule {schedule_id} does not exist")
+            schedule = self._schedules[schedule_id]
+            if run_id not in schedule.running_run_ids:
+                schedule.running_run_ids.append(run_id)
+                schedule.updated_at = datetime.now(UTC)
+
+    async def remove_running_run(self, schedule_id: str, run_id: str) -> None:
+        """Remove a run_id from the schedule's running_run_ids list."""
+        with self._lock:
+            if schedule_id not in self._schedules:
+                raise ValueError(f"Schedule {schedule_id} does not exist")
+            schedule = self._schedules[schedule_id]
+            if run_id in schedule.running_run_ids:
+                schedule.running_run_ids.remove(run_id)
+                schedule.updated_at = datetime.now(UTC)
+
     # Utility methods
 
     def clear(self) -> None:
@@ -385,6 +482,7 @@ class InMemoryStorageBackend(StorageBackend):
             self._events.clear()
             self._steps.clear()
             self._hooks.clear()
+            self._schedules.clear()
             self._idempotency_index.clear()
             self._token_index.clear()
             self._cancellation_flags.clear()
@@ -403,5 +501,6 @@ class InMemoryStorageBackend(StorageBackend):
                 f"runs={len(self._runs)}, "
                 f"events={sum(len(e) for e in self._events.values())}, "
                 f"steps={len(self._steps)}, "
-                f"hooks={len(self._hooks)})"
+                f"hooks={len(self._hooks)}, "
+                f"schedules={len(self._schedules)})"
             )

@@ -6,9 +6,18 @@ across different backends (File, Redis, SQLite, PostgreSQL).
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from pyworkflow.engine.events import Event
-from pyworkflow.storage.schemas import Hook, HookStatus, RunStatus, StepExecution, WorkflowRun
+from pyworkflow.storage.schemas import (
+    Hook,
+    HookStatus,
+    RunStatus,
+    Schedule,
+    ScheduleStatus,
+    StepExecution,
+    WorkflowRun,
+)
 
 
 class StorageBackend(ABC):
@@ -431,6 +440,138 @@ class StorageBackend(ABC):
 
         Returns:
             Nesting depth (0=root, 1=child, 2=grandchild, max 3)
+        """
+        pass
+
+    # Schedule Operations
+
+    @abstractmethod
+    async def create_schedule(self, schedule: Schedule) -> None:
+        """
+        Create a new schedule record.
+
+        Args:
+            schedule: Schedule instance to persist
+
+        Raises:
+            ValueError: If schedule_id already exists
+        """
+        pass
+
+    @abstractmethod
+    async def get_schedule(self, schedule_id: str) -> Schedule | None:
+        """
+        Retrieve a schedule by ID.
+
+        Args:
+            schedule_id: Schedule identifier
+
+        Returns:
+            Schedule if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def update_schedule(self, schedule: Schedule) -> None:
+        """
+        Update an existing schedule.
+
+        Replaces the schedule record with the provided schedule.
+        The schedule_id must match an existing schedule.
+
+        Args:
+            schedule: Schedule with updated values
+
+        Raises:
+            ValueError: If schedule_id does not exist
+        """
+        pass
+
+    @abstractmethod
+    async def delete_schedule(self, schedule_id: str) -> None:
+        """
+        Mark a schedule as deleted (soft delete).
+
+        Sets the schedule status to DELETED. The schedule record
+        is preserved for audit purposes.
+
+        Args:
+            schedule_id: Schedule identifier
+
+        Raises:
+            ValueError: If schedule_id does not exist
+        """
+        pass
+
+    @abstractmethod
+    async def list_schedules(
+        self,
+        workflow_name: str | None = None,
+        status: ScheduleStatus | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Schedule]:
+        """
+        List schedules with optional filtering.
+
+        Args:
+            workflow_name: Filter by workflow name (None = all)
+            status: Filter by status (None = all)
+            limit: Maximum number of results
+            offset: Number of results to skip
+
+        Returns:
+            List of Schedule instances, sorted by created_at descending
+        """
+        pass
+
+    @abstractmethod
+    async def get_due_schedules(self, now: datetime) -> list[Schedule]:
+        """
+        Get all schedules that are due to run.
+
+        Returns schedules where:
+        - status is ACTIVE
+        - next_run_time is not None
+        - next_run_time <= now
+
+        Args:
+            now: Current datetime
+
+        Returns:
+            List of schedules due to run, sorted by next_run_time ascending
+        """
+        pass
+
+    @abstractmethod
+    async def add_running_run(self, schedule_id: str, run_id: str) -> None:
+        """
+        Add a run_id to the schedule's running_run_ids list.
+
+        Called when a scheduled workflow starts execution.
+
+        Args:
+            schedule_id: Schedule identifier
+            run_id: Run ID to add
+
+        Raises:
+            ValueError: If schedule_id does not exist
+        """
+        pass
+
+    @abstractmethod
+    async def remove_running_run(self, schedule_id: str, run_id: str) -> None:
+        """
+        Remove a run_id from the schedule's running_run_ids list.
+
+        Called when a scheduled workflow completes (success or failure).
+
+        Args:
+            schedule_id: Schedule identifier
+            run_id: Run ID to remove
+
+        Raises:
+            ValueError: If schedule_id does not exist
         """
         pass
 

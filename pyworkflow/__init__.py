@@ -72,6 +72,13 @@ from pyworkflow.core.registry import (
 )
 
 # Core decorators and primitives
+from pyworkflow.core.scheduled import (
+    ScheduledWorkflowMetadata,
+    activate_scheduled_workflows,
+    get_scheduled_workflow,
+    list_scheduled_workflows,
+    scheduled_workflow,
+)
 from pyworkflow.core.step import step
 from pyworkflow.core.workflow import workflow
 
@@ -102,16 +109,38 @@ from pyworkflow.primitives.define_hook import TypedHook, define_hook
 from pyworkflow.primitives.hooks import hook
 from pyworkflow.primitives.resume_hook import ResumeResult, resume_hook
 from pyworkflow.primitives.shield import shield
+from pyworkflow.primitives.schedule import (
+    backfill_schedule,
+    create_schedule,
+    delete_schedule,
+    get_schedule,
+    list_schedules,
+    pause_schedule,
+    resume_schedule,
+    trigger_schedule,
+    update_schedule,
+)
 from pyworkflow.primitives.sleep import sleep
 
 # Runtime
 from pyworkflow.runtime import LocalRuntime, Runtime, get_runtime, register_runtime
 
+# Scheduler
+from pyworkflow.scheduler import LocalScheduler
+
 # Storage backends
 from pyworkflow.storage.base import StorageBackend
 from pyworkflow.storage.file import FileStorageBackend
 from pyworkflow.storage.memory import InMemoryStorageBackend
-from pyworkflow.storage.schemas import RunStatus, WorkflowRun
+from pyworkflow.storage.schemas import (
+    CalendarSpec,
+    OverlapPolicy,
+    RunStatus,
+    Schedule,
+    ScheduleSpec,
+    ScheduleStatus,
+    WorkflowRun,
+)
 
 __all__ = [
     # Version
@@ -124,6 +153,21 @@ __all__ = [
     # Core decorators
     "workflow",
     "step",
+    "scheduled_workflow",
+    # Schedule management
+    "create_schedule",
+    "get_schedule",
+    "list_schedules",
+    "update_schedule",
+    "pause_schedule",
+    "resume_schedule",
+    "delete_schedule",
+    "trigger_schedule",
+    "backfill_schedule",
+    "activate_scheduled_workflows",
+    "get_scheduled_workflow",
+    "list_scheduled_workflows",
+    "ScheduledWorkflowMetadata",
     # Primitives
     "sleep",
     "hook",
@@ -178,11 +222,19 @@ __all__ = [
     "InMemoryStorageBackend",
     "WorkflowRun",
     "RunStatus",
+    # Schedule types
+    "Schedule",
+    "ScheduleSpec",
+    "CalendarSpec",
+    "ScheduleStatus",
+    "OverlapPolicy",
     # Runtime
     "Runtime",
     "LocalRuntime",
     "get_runtime",
     "register_runtime",
+    # Scheduler
+    "LocalScheduler",
     # Logging
     "configure_logging",
     "get_logger",

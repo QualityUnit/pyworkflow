@@ -14,11 +14,14 @@ PyWorkflow includes a powerful CLI for managing workflows and monitoring runs di
   <Card title="Run Monitoring" icon="chart-line">
     Check run status, view event logs, and debug executions.
   </Card>
+  <Card title="Schedule Management" icon="calendar">
+    Create, manage, and monitor automated workflow schedules.
+  </Card>
+  <Card title="Scheduler" icon="clock">
+    Run the local scheduler for triggering due schedules.
+  </Card>
   <Card title="Worker Management" icon="server">
     Start and manage Celery workers for distributed execution.
-  </Card>
-  <Card title="Flexible Configuration" icon="gear">
-    Configure via CLI flags, environment variables, or config files.
   </Card>
 </CardGroup>
 
@@ -457,6 +460,223 @@ Show available task queues and their configuration:
 ```bash
 pyworkflow worker queues
 ```
+
+---
+
+### Scheduler Commands
+
+Run the schedule executor for local runtime.
+
+#### `scheduler run`
+
+Start the local scheduler that polls for due schedules:
+
+```bash
+pyworkflow scheduler run
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--poll-interval` | Seconds between storage polls (default: 5.0) |
+| `--duration` | Run for specified seconds then exit (default: run forever) |
+
+<Tabs>
+  <Tab title="Basic Usage">
+    ```bash
+    # Start scheduler with defaults
+    pyworkflow scheduler run
+
+    # With custom poll interval
+    pyworkflow scheduler run --poll-interval 10
+    ```
+  </Tab>
+  <Tab title="With Module">
+    ```bash
+    # Discover workflows from a module
+    pyworkflow --module myapp.workflows scheduler run
+    ```
+  </Tab>
+  <Tab title="Testing">
+    ```bash
+    # Run for 60 seconds (useful for testing)
+    pyworkflow scheduler run --duration 60
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  Use `scheduler run` for local runtime. For Celery runtime, use `worker run --beat`
+  or start Celery Beat separately.
+</Note>
+
+---
+
+### Schedule Commands
+
+Manage workflow schedules for automated execution.
+
+#### `schedules list`
+
+List all schedules with optional filtering:
+
+```bash
+pyworkflow schedules list --workflow my_workflow --status active --limit 10
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--workflow` | Filter by workflow name |
+| `--status` | Filter by status: `active`, `paused`, `deleted` |
+| `--limit` | Maximum schedules to display (default: 20) |
+
+**Output includes:** Schedule ID, Workflow, Status, Schedule description, Next Run time, Success rate
+
+#### `schedules create`
+
+Create a new schedule for a workflow:
+
+```bash
+pyworkflow schedules create my_workflow --cron "0 9 * * *"
+```
+
+**Arguments:**
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `WORKFLOW_NAME` | Yes | Name of the workflow to schedule |
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--cron` | Cron expression (e.g., `"0 9 * * *"` for daily at 9 AM) |
+| `--interval` | Interval duration (e.g., `5m`, `1h`, `30s`) |
+| `--timezone` | Timezone for schedule (default: UTC) |
+| `--overlap` | Overlap policy: `skip`, `buffer_one`, `buffer_all`, `cancel_other`, `allow_all` |
+| `--schedule-id` | Custom schedule ID (optional) |
+
+<Tabs>
+  <Tab title="Cron Schedule">
+    ```bash
+    # Every day at 9 AM
+    pyworkflow schedules create daily_report --cron "0 9 * * *"
+
+    # Every Monday at midnight
+    pyworkflow schedules create weekly_cleanup --cron "0 0 * * 1"
+    ```
+  </Tab>
+  <Tab title="Interval Schedule">
+    ```bash
+    # Every 5 minutes
+    pyworkflow schedules create health_check --interval 5m
+
+    # Every hour
+    pyworkflow schedules create sync_data --interval 1h
+    ```
+  </Tab>
+  <Tab title="With Options">
+    ```bash
+    pyworkflow schedules create my_workflow \
+        --cron "0 9 * * *" \
+        --timezone "America/New_York" \
+        --overlap buffer_one \
+        --schedule-id my_custom_id
+    ```
+  </Tab>
+</Tabs>
+
+#### `schedules show`
+
+Show detailed information about a schedule:
+
+```bash
+pyworkflow schedules show sched_abc123
+```
+
+**Output includes:**
+- Schedule ID, Workflow name, Status
+- Schedule specification (cron/interval)
+- Overlap policy, Timezone
+- Next run time, Last run time
+- Statistics: Total runs, Successful, Failed, Skipped
+
+#### `schedules pause`
+
+Pause a schedule (stops triggering new runs):
+
+```bash
+pyworkflow schedules pause sched_abc123
+```
+
+#### `schedules resume`
+
+Resume a paused schedule:
+
+```bash
+pyworkflow schedules resume sched_abc123
+```
+
+**Output includes:** New next run time after resumption
+
+#### `schedules delete`
+
+Delete a schedule (soft delete):
+
+```bash
+pyworkflow schedules delete sched_abc123
+pyworkflow schedules delete sched_abc123 --force  # Skip confirmation
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--force` | Delete without confirmation prompt |
+
+#### `schedules trigger`
+
+Manually trigger a schedule immediately:
+
+```bash
+pyworkflow schedules trigger sched_abc123
+```
+
+This executes the workflow immediately without affecting the regular schedule timing.
+
+#### `schedules update`
+
+Update an existing schedule:
+
+```bash
+pyworkflow schedules update sched_abc123 --cron "0 10 * * *"
+pyworkflow schedules update sched_abc123 --overlap buffer_one
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--cron` | New cron expression |
+| `--interval` | New interval duration |
+| `--overlap` | New overlap policy |
+
+#### `schedules backfill`
+
+Backfill missed runs for a schedule:
+
+```bash
+pyworkflow schedules backfill sched_abc123 \
+    --start 2024-01-01T00:00:00 \
+    --end 2024-01-31T23:59:59
+```
+
+**Options:**
+| Option | Required | Description |
+|--------|----------|-------------|
+| `--start` | Yes | Start time for backfill (ISO format) |
+| `--end` | Yes | End time for backfill (ISO format) |
+
+<Warning>
+  Backfill creates runs for all scheduled times in the range. For high-frequency schedules, this could create many runs.
+</Warning>
 
 ---
 

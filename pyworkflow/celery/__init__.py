@@ -19,7 +19,9 @@ Usage:
 """
 
 from pyworkflow.celery.app import celery_app, create_celery_app, get_celery_app
+from pyworkflow.celery.scheduler import PyWorkflowScheduler
 from pyworkflow.celery.tasks import (
+    execute_scheduled_workflow_task,
     execute_step_task,
     resume_workflow_task,
     schedule_workflow_resumption,
@@ -34,4 +36,6 @@ __all__ = [
     "start_workflow_task",
     "resume_workflow_task",
     "schedule_workflow_resumption",
+    "execute_scheduled_workflow_task",
+    "PyWorkflowScheduler",
 ]

@@ -40,7 +40,7 @@ async def fetch_batch(offset: int, batch_size: int) -> list:
 
 
 @step()
-async def process_item(item: int) -> dict:
+async def process_batch_item(item: int) -> dict:
     """Process a single item."""
     await asyncio.sleep(0.01)  # Simulate work
     return {"item": item, "processed": True}
@@ -81,7 +81,7 @@ async def batch_processor(offset: int = 0, batch_size: int = 10) -> str:
 
     # Process each item in this batch
     for item in items:
-        await process_item(item)
+        await process_batch_item(item)
 
     print("  [Workflow] Batch complete. Continuing with next batch...")
 

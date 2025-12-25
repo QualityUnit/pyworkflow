@@ -1114,6 +1114,142 @@ def resume_workflow_task(
     return result
 
 
+@celery_app.task(
+    name="pyworkflow.execute_scheduled_workflow",
+    queue="pyworkflow.schedules",
+)
+def execute_scheduled_workflow_task(
+    schedule_id: str,
+    scheduled_time: str,
+    storage_config: dict[str, Any] | None = None,
+) -> str | None:
+    """
+    Execute a workflow from a schedule.
+
+    This task is triggered by the PyWorkflow scheduler when a schedule is due.
+    It starts a new workflow run and tracks it against the schedule.
+
+    Args:
+        schedule_id: Schedule identifier
+        scheduled_time: ISO format scheduled execution time
+        storage_config: Storage backend configuration
+
+    Returns:
+        Workflow run ID if started, None if skipped
+    """
+    logger.info("Executing scheduled workflow", schedule_id=schedule_id)
+
+    storage = _get_storage_backend(storage_config)
+
+    return asyncio.run(
+        _execute_scheduled_workflow(
+            schedule_id=schedule_id,
+            scheduled_time=datetime.fromisoformat(scheduled_time),
+            storage=storage,
+            storage_config=storage_config,
+        )
+    )
+
+
+async def _execute_scheduled_workflow(
+    schedule_id: str,
+    scheduled_time: datetime,
+    storage: StorageBackend,
+    storage_config: dict[str, Any] | None,
+) -> str | None:
+    """
+    Execute a scheduled workflow with tracking.
+
+    Args:
+        schedule_id: Schedule identifier
+        scheduled_time: When the schedule was supposed to trigger
+        storage: Storage backend
+        storage_config: Storage configuration for serialization
+
+    Returns:
+        Workflow run ID if started, None if skipped
+    """
+    from pyworkflow.engine.events import create_schedule_triggered_event
+    from pyworkflow.storage.schemas import ScheduleStatus
+
+    # Get schedule
+    schedule = await storage.get_schedule(schedule_id)
+    if not schedule:
+        logger.error(f"Schedule not found: {schedule_id}")
+        return None
+
+    if schedule.status != ScheduleStatus.ACTIVE:
+        logger.info(f"Schedule not active: {schedule_id}")
+        return None
+
+    # Get workflow
+    workflow_meta = get_workflow(schedule.workflow_name)
+    if not workflow_meta:
+        logger.error(f"Workflow not found: {schedule.workflow_name}")
+        schedule.failed_runs += 1
+        schedule.updated_at = datetime.now(UTC)
+        await storage.update_schedule(schedule)
+        return None
+
+    # Deserialize arguments
+    args = deserialize_args(schedule.args)
+    kwargs = deserialize_kwargs(schedule.kwargs)
+
+    # Generate run_id
+    run_id = f"sched_{schedule_id[:8]}_{uuid.uuid4().hex[:8]}"
+
+    # Add to running runs
+    await storage.add_running_run(schedule_id, run_id)
+
+    # Update schedule stats
+    schedule.total_runs += 1
+    schedule.last_run_at = datetime.now(UTC)
+    schedule.last_run_id = run_id
+    await storage.update_schedule(schedule)
+
+    try:
+        # Serialize args for Celery task
+        args_json = serialize_args(*args)
+        kwargs_json = serialize_kwargs(**kwargs)
+
+        # Start the workflow via Celery
+        # Note: start_workflow_task will create the run record
+        start_workflow_task.delay(
+            workflow_name=schedule.workflow_name,
+            args_json=args_json,
+            kwargs_json=kwargs_json,
+            run_id=run_id,
+            storage_config=storage_config,
+            metadata={"schedule_id": schedule_id, "scheduled_time": scheduled_time.isoformat()},
+        )
+
+        # Record trigger event - use schedule_id as run_id since workflow run may not exist yet
+        trigger_event = create_schedule_triggered_event(
+            run_id=schedule_id,  # Use schedule_id for event association
+            schedule_id=schedule_id,
+            scheduled_time=scheduled_time,
+            actual_time=datetime.now(UTC),
+            workflow_run_id=run_id,
+        )
+        await storage.record_event(trigger_event)
+
+        logger.info(
+            f"Started scheduled workflow: {schedule.workflow_name}",
+            schedule_id=schedule_id,
+            run_id=run_id,
+        )
+
+        return run_id
+
+    except Exception as e:
+        logger.error(f"Failed to start scheduled workflow: {e}")
+        await storage.remove_running_run(schedule_id, run_id)
+        schedule.failed_runs += 1
+        schedule.updated_at = datetime.now(UTC)
+        await storage.update_schedule(schedule)
+        raise
+
+
 async def _complete_pending_sleeps(
     run_id: str,
     events: list[Any],

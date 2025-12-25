@@ -51,6 +51,17 @@ class EventType(Enum):
     CHILD_WORKFLOW_FAILED = "child_workflow.failed"
     CHILD_WORKFLOW_CANCELLED = "child_workflow.cancelled"
 
+    # Schedule events
+    SCHEDULE_CREATED = "schedule.created"
+    SCHEDULE_UPDATED = "schedule.updated"
+    SCHEDULE_PAUSED = "schedule.paused"
+    SCHEDULE_RESUMED = "schedule.resumed"
+    SCHEDULE_DELETED = "schedule.deleted"
+    SCHEDULE_TRIGGERED = "schedule.triggered"
+    SCHEDULE_SKIPPED = "schedule.skipped"
+    SCHEDULE_BACKFILL_STARTED = "schedule.backfill_started"
+    SCHEDULE_BACKFILL_COMPLETED = "schedule.backfill_completed"
+
 
 @dataclass
 class Event:
@@ -612,5 +623,257 @@ def create_child_workflow_cancelled_event(
             "child_run_id": child_run_id,
             "reason": reason,
             "cancelled_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+# Schedule event creation helpers
+
+
+def create_schedule_created_event(
+    run_id: str,
+    schedule_id: str,
+    workflow_name: str,
+    spec: dict[str, Any],
+    overlap_policy: str,
+) -> Event:
+    """
+    Create a schedule created event.
+
+    This event is recorded when a new schedule is created.
+
+    Args:
+        run_id: The run ID (use schedule_id for schedule-level events)
+        schedule_id: The schedule identifier
+        workflow_name: Name of the workflow being scheduled
+        spec: The schedule specification (as dict)
+        overlap_policy: The overlap policy for the schedule
+
+    Returns:
+        Event: The schedule created event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.SCHEDULE_CREATED,
+        data={
+            "schedule_id": schedule_id,
+            "workflow_name": workflow_name,
+            "spec": spec,
+            "overlap_policy": overlap_policy,
+            "created_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_schedule_triggered_event(
+    run_id: str,
+    schedule_id: str,
+    scheduled_time: datetime,
+    actual_time: datetime,
+    workflow_run_id: str,
+) -> Event:
+    """
+    Create a schedule triggered event.
+
+    This event is recorded when a schedule triggers a workflow execution.
+
+    Args:
+        run_id: The workflow run ID being created
+        schedule_id: The schedule identifier
+        scheduled_time: The time the schedule was supposed to trigger
+        actual_time: The actual time the trigger occurred
+        workflow_run_id: The ID of the workflow run being created
+
+    Returns:
+        Event: The schedule triggered event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.SCHEDULE_TRIGGERED,
+        data={
+            "schedule_id": schedule_id,
+            "scheduled_time": scheduled_time.isoformat(),
+            "actual_time": actual_time.isoformat(),
+            "workflow_run_id": workflow_run_id,
+        },
+    )
+
+
+def create_schedule_skipped_event(
+    run_id: str,
+    schedule_id: str,
+    reason: str,
+    scheduled_time: datetime,
+    overlap_policy: str | None = None,
+) -> Event:
+    """
+    Create a schedule skipped event.
+
+    This event is recorded when a scheduled execution is skipped,
+    typically due to overlap policy or schedule being paused.
+
+    Args:
+        run_id: The run ID (use schedule_id for schedule-level events)
+        schedule_id: The schedule identifier
+        reason: The reason for skipping
+        scheduled_time: The time the schedule was supposed to trigger
+        overlap_policy: The overlap policy that caused the skip
+
+    Returns:
+        Event: The schedule skipped event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.SCHEDULE_SKIPPED,
+        data={
+            "schedule_id": schedule_id,
+            "reason": reason,
+            "scheduled_time": scheduled_time.isoformat(),
+            "overlap_policy": overlap_policy,
+            "skipped_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_schedule_paused_event(
+    run_id: str,
+    schedule_id: str,
+    reason: str | None = None,
+) -> Event:
+    """
+    Create a schedule paused event.
+
+    Args:
+        run_id: The run ID (use schedule_id for schedule-level events)
+        schedule_id: The schedule identifier
+        reason: Optional reason for pausing
+
+    Returns:
+        Event: The schedule paused event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.SCHEDULE_PAUSED,
+        data={
+            "schedule_id": schedule_id,
+            "reason": reason,
+            "paused_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_schedule_resumed_event(
+    run_id: str,
+    schedule_id: str,
+    next_run_time: datetime | None = None,
+) -> Event:
+    """
+    Create a schedule resumed event.
+
+    Args:
+        run_id: The run ID (use schedule_id for schedule-level events)
+        schedule_id: The schedule identifier
+        next_run_time: The next scheduled run time after resumption
+
+    Returns:
+        Event: The schedule resumed event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.SCHEDULE_RESUMED,
+        data={
+            "schedule_id": schedule_id,
+            "next_run_time": next_run_time.isoformat() if next_run_time else None,
+            "resumed_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_schedule_deleted_event(
+    run_id: str,
+    schedule_id: str,
+    reason: str | None = None,
+) -> Event:
+    """
+    Create a schedule deleted event.
+
+    Args:
+        run_id: The run ID (use schedule_id for schedule-level events)
+        schedule_id: The schedule identifier
+        reason: Optional reason for deletion
+
+    Returns:
+        Event: The schedule deleted event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.SCHEDULE_DELETED,
+        data={
+            "schedule_id": schedule_id,
+            "reason": reason,
+            "deleted_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_schedule_backfill_started_event(
+    run_id: str,
+    schedule_id: str,
+    start_time: datetime,
+    end_time: datetime,
+    expected_runs: int,
+) -> Event:
+    """
+    Create a schedule backfill started event.
+
+    Args:
+        run_id: The run ID (use schedule_id for schedule-level events)
+        schedule_id: The schedule identifier
+        start_time: Start of the backfill period
+        end_time: End of the backfill period
+        expected_runs: Expected number of runs to create
+
+    Returns:
+        Event: The schedule backfill started event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.SCHEDULE_BACKFILL_STARTED,
+        data={
+            "schedule_id": schedule_id,
+            "start_time": start_time.isoformat(),
+            "end_time": end_time.isoformat(),
+            "expected_runs": expected_runs,
+            "started_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_schedule_backfill_completed_event(
+    run_id: str,
+    schedule_id: str,
+    runs_created: int,
+    run_ids: list[str],
+) -> Event:
+    """
+    Create a schedule backfill completed event.
+
+    Args:
+        run_id: The run ID (use schedule_id for schedule-level events)
+        schedule_id: The schedule identifier
+        runs_created: Number of runs actually created
+        run_ids: List of created run IDs
+
+    Returns:
+        Event: The schedule backfill completed event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.SCHEDULE_BACKFILL_COMPLETED,
+        data={
+            "schedule_id": schedule_id,
+            "runs_created": runs_created,
+            "run_ids": run_ids,
+            "completed_at": datetime.now(UTC).isoformat(),
         },
     )

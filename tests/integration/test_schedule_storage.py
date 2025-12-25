@@ -9,7 +9,6 @@ import pytest
 from pyworkflow.storage.file import FileStorageBackend
 from pyworkflow.storage.memory import InMemoryStorageBackend
 from pyworkflow.storage.schemas import (
-    OverlapPolicy,
     Schedule,
     ScheduleSpec,
     ScheduleStatus,

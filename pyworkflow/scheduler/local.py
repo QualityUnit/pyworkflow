@@ -12,7 +12,7 @@ from loguru import logger
 
 from pyworkflow.primitives.schedule import trigger_schedule
 from pyworkflow.storage.base import StorageBackend
-from pyworkflow.storage.schemas import OverlapPolicy, Schedule, ScheduleStatus
+from pyworkflow.storage.schemas import OverlapPolicy, Schedule
 from pyworkflow.utils.schedule import calculate_next_run_time
 
 
@@ -84,7 +84,7 @@ class LocalScheduler:
         self._start_time = datetime.now(UTC)
 
         logger.info(
-            f"Local scheduler started",
+            "Local scheduler started",
             poll_interval=self.poll_interval,
             duration=duration,
         )
@@ -145,19 +145,19 @@ class LocalScheduler:
         # Trigger the schedule (uses runtime-agnostic start())
         try:
             logger.info(
-                f"Triggering schedule",
+                "Triggering schedule",
                 schedule_id=schedule.schedule_id,
                 workflow_name=schedule.workflow_name,
             )
             run_id = await trigger_schedule(schedule.schedule_id, storage=self.storage)
             logger.info(
-                f"Schedule triggered successfully",
+                "Schedule triggered successfully",
                 schedule_id=schedule.schedule_id,
                 run_id=run_id,
             )
         except Exception as e:
             logger.error(
-                f"Failed to trigger schedule",
+                "Failed to trigger schedule",
                 schedule_id=schedule.schedule_id,
                 error=str(e),
             )
@@ -185,7 +185,7 @@ class LocalScheduler:
         policy = schedule.overlap_policy
 
         if policy == OverlapPolicy.SKIP:
-            return False, f"previous run still active (SKIP policy)"
+            return False, "previous run still active (SKIP policy)"
 
         elif policy == OverlapPolicy.ALLOW_ALL:
             return True, ""
@@ -208,13 +208,13 @@ class LocalScheduler:
                 try:
                     await cancel_workflow(run_id)
                     logger.info(
-                        f"Cancelled previous run",
+                        "Cancelled previous run",
                         schedule_id=schedule.schedule_id,
                         run_id=run_id,
                     )
                 except Exception as e:
                     logger.warning(
-                        f"Failed to cancel previous run",
+                        "Failed to cancel previous run",
                         schedule_id=schedule.schedule_id,
                         run_id=run_id,
                         error=str(e),

@@ -52,7 +52,7 @@ async def collect_metrics() -> dict:
 @step()
 async def store_metrics(metrics: dict) -> dict:
     """Store metrics (simulated)."""
-    print(f"  [Step] Storing metrics...")
+    print("  [Step] Storing metrics...")
     return {**metrics, "stored": True}
 
 
@@ -107,7 +107,7 @@ async def main():
         schedule_id="metrics-every-minute",
     )
 
-    print(f"\nSchedule created:")
+    print("\nSchedule created:")
     print(f"  ID: {schedule.schedule_id}")
     print(f"  Workflow: {schedule.workflow_name}")
     print(f"  Cron: {schedule.spec.cron}")
@@ -153,7 +153,7 @@ async def main():
 
     # Check stats after trigger
     schedule = await get_schedule(schedule.schedule_id)
-    print(f"\nSchedule stats after trigger:")
+    print("\nSchedule stats after trigger:")
     print(f"  Total runs: {schedule.total_runs}")
     print(f"  Successful: {schedule.successful_runs}")
     print(f"  Failed: {schedule.failed_runs}")
@@ -171,7 +171,7 @@ async def main():
         poll_interval=5.0,
     )
 
-    print(f"\nScheduler running for 65 seconds...")
+    print("\nScheduler running for 65 seconds...")
     await local_scheduler.run(duration=65.0)
 
     # Final stats

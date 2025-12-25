@@ -4,8 +4,6 @@ Unit tests for schedule utility functions.
 
 from datetime import UTC, datetime, timedelta
 
-import pytest
-
 from pyworkflow.storage.schemas import CalendarSpec, ScheduleSpec
 from pyworkflow.utils.schedule import (
     calculate_backfill_times,

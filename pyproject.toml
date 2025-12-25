@@ -199,6 +199,7 @@ strict_optional = true
 [[tool.mypy.overrides]]
 module = [
     "celery.*",
+    "croniter.*",
     "redis.*",
     "asyncpg.*",
     "aiosqlite.*",

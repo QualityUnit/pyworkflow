@@ -111,8 +111,8 @@ def main(
 # Import and register commands
 from pyworkflow.cli.commands.hooks import hooks
 from pyworkflow.cli.commands.runs import runs
-from pyworkflow.cli.commands.schedules import schedules
 from pyworkflow.cli.commands.scheduler import scheduler
+from pyworkflow.cli.commands.schedules import schedules
 from pyworkflow.cli.commands.setup import setup
 from pyworkflow.cli.commands.worker import worker
 from pyworkflow.cli.commands.workflows import workflows

@@ -1,6 +1,5 @@
 """CLI commands for running the local scheduler."""
 
-import asyncio
 import signal
 import sys
 
@@ -102,13 +101,13 @@ async def run_scheduler(ctx: click.Context, poll_interval: float, duration: floa
         poll_interval=poll_interval,
     )
 
-    click.echo(f"Starting local scheduler...")
+    click.echo("Starting local scheduler...")
     click.echo(f"  Poll interval: {poll_interval}s")
     click.echo(f"  Runtime: {runtime}")
     if duration:
         click.echo(f"  Duration: {duration}s")
     else:
-        click.echo(f"  Duration: indefinite (Ctrl+C to stop)")
+        click.echo("  Duration: indefinite (Ctrl+C to stop)")
     click.echo()
 
     # Handle graceful shutdown

@@ -108,7 +108,6 @@ from pyworkflow.primitives.continue_as_new import continue_as_new
 from pyworkflow.primitives.define_hook import TypedHook, define_hook
 from pyworkflow.primitives.hooks import hook
 from pyworkflow.primitives.resume_hook import ResumeResult, resume_hook
-from pyworkflow.primitives.shield import shield
 from pyworkflow.primitives.schedule import (
     backfill_schedule,
     create_schedule,
@@ -120,6 +119,7 @@ from pyworkflow.primitives.schedule import (
     trigger_schedule,
     update_schedule,
 )
+from pyworkflow.primitives.shield import shield
 from pyworkflow.primitives.sleep import sleep
 
 # Runtime

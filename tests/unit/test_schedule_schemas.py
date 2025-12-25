@@ -4,8 +4,6 @@ Unit tests for schedule schemas and data models.
 
 from datetime import UTC, datetime
 
-import pytest
-
 from pyworkflow.storage.schemas import (
     CalendarSpec,
     OverlapPolicy,

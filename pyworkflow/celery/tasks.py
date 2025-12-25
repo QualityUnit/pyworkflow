@@ -1145,7 +1145,7 @@ def execute_scheduled_workflow_task(
     Returns:
         Workflow run ID if started, None if skipped
     """
-    logger.info(f"Executing scheduled workflow", schedule_id=schedule_id)
+    logger.info("Executing scheduled workflow", schedule_id=schedule_id)
 
     storage = _get_storage_backend(storage_config)
 

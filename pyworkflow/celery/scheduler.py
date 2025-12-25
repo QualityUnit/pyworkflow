@@ -21,12 +21,12 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
-from celery.beat import Scheduler, ScheduleEntry
+from celery.beat import Scheduler
 from loguru import logger
 
 from pyworkflow.storage.base import StorageBackend
 from pyworkflow.storage.config import config_to_storage
-from pyworkflow.storage.schemas import OverlapPolicy, Schedule, ScheduleStatus
+from pyworkflow.storage.schemas import OverlapPolicy, Schedule
 
 
 class PyWorkflowScheduler(Scheduler):
@@ -238,7 +238,7 @@ class PyWorkflowScheduler(Scheduler):
             return True, None
 
         elif policy == OverlapPolicy.SKIP:
-            return False, f"Previous run still active (SKIP policy)"
+            return False, "Previous run still active (SKIP policy)"
 
         elif policy == OverlapPolicy.BUFFER_ONE:
             if schedule.buffered_count >= 1:

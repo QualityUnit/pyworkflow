@@ -58,10 +58,7 @@ def calculate_next_run_time(
         start_at = spec.start_at
         if start_at.tzinfo is None:
             start_at = start_at.replace(tzinfo=tz)
-        if now < start_at:
-            base_time = start_at
-        else:
-            base_time = now
+        base_time = start_at if now < start_at else now
     else:
         base_time = now
 

@@ -125,13 +125,11 @@ async def main() -> None:
     """
     import argparse
 
-    import pyworkflow
     from pyworkflow import (
         OverlapPolicy,
         ScheduleSpec,
         create_schedule,
         delete_schedule,
-        get_schedule,
         list_schedules,
         pause_schedule,
         resume_schedule,

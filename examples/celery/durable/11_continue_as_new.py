@@ -241,7 +241,9 @@ def main():
 
     print("Configuration complete!")
     print("\nMake sure Celery worker is running:")
-    print("  celery -A pyworkflow.celery.tasks worker -Q pyworkflow.workflows,pyworkflow.steps,pyworkflow.schedules -l info\n")
+    print(
+        "  celery -A pyworkflow.celery.tasks worker -Q pyworkflow.workflows,pyworkflow.steps,pyworkflow.schedules -l info\n"
+    )
 
     # Run examples
     asyncio.run(run_examples())

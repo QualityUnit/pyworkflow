@@ -124,9 +124,7 @@ class TestContinueAsNewExecution:
 
         # Check event was recorded
         events = await storage.get_events("run_1")
-        continuation_events = [
-            e for e in events if e.type == EventType.WORKFLOW_CONTINUED_AS_NEW
-        ]
+        continuation_events = [e for e in events if e.type == EventType.WORKFLOW_CONTINUED_AS_NEW]
         assert len(continuation_events) == 1
 
         event = continuation_events[0]

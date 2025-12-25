@@ -211,8 +211,8 @@ class TestContinuedAsNewEvent:
         event = create_workflow_continued_as_new_event(
             run_id="run_123",
             new_run_id="run_456",
-            args='[]',
-            kwargs='{}',
+            args="[]",
+            kwargs="{}",
         )
 
         assert event.run_id == "run_123"

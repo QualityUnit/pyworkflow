@@ -65,7 +65,10 @@ class TestEventReplayer:
                 attempt=1,
             ),
             create_step_completed_event(
-                run_id="test_run", step_id="step_1", result=serialize("result_1"), step_name="test_step"
+                run_id="test_run",
+                step_id="step_1",
+                result=serialize("result_1"),
+                step_name="test_step",
             ),
         ]
 
@@ -92,13 +95,22 @@ class TestEventReplayer:
 
         events = [
             create_step_completed_event(
-                run_id="test_run", step_id="step_1", result=serialize("result_1"), step_name="test_step"
+                run_id="test_run",
+                step_id="step_1",
+                result=serialize("result_1"),
+                step_name="test_step",
             ),
             create_step_completed_event(
-                run_id="test_run", step_id="step_2", result=serialize("result_2"), step_name="test_step"
+                run_id="test_run",
+                step_id="step_2",
+                result=serialize("result_2"),
+                step_name="test_step",
             ),
             create_step_completed_event(
-                run_id="test_run", step_id="step_3", result=serialize("result_3"), step_name="test_step"
+                run_id="test_run",
+                step_id="step_3",
+                result=serialize("result_3"),
+                step_name="test_step",
             ),
         ]
 
@@ -288,7 +300,10 @@ class TestEventReplayer:
 
         events = [
             create_step_completed_event(
-                run_id="test_run", step_id="step_1", result=serialize("result"), step_name="test_step"
+                run_id="test_run",
+                step_id="step_1",
+                result=serialize("result"),
+                step_name="test_step",
             ),
         ]
         events[0].sequence = 1
@@ -317,7 +332,10 @@ class TestReplayPublicAPI:
 
         events = [
             create_step_completed_event(
-                run_id="test_run", step_id="step_1", result=serialize("test_result"), step_name="test_step"
+                run_id="test_run",
+                step_id="step_1",
+                result=serialize("test_result"),
+                step_name="test_step",
             ),
         ]
         events[0].sequence = 1
@@ -361,7 +379,10 @@ class TestReplayIntegration:
                 attempt=1,
             ),
             create_step_completed_event(
-                run_id="test_run", step_id="step_1", result=serialize("step_1_result"), step_name="first_step"
+                run_id="test_run",
+                step_id="step_1",
+                result=serialize("step_1_result"),
+                step_name="first_step",
             ),
             create_sleep_started_event(
                 run_id="test_run",
@@ -379,7 +400,10 @@ class TestReplayIntegration:
                 attempt=1,
             ),
             create_step_completed_event(
-                run_id="test_run", step_id="step_2", result=serialize("step_2_result"), step_name="second_step"
+                run_id="test_run",
+                step_id="step_2",
+                result=serialize("step_2_result"),
+                step_name="second_step",
             ),
         ]
 

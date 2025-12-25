@@ -422,7 +422,7 @@ class TestContinuedAsNewStatus:
         await storage.create_run(run3)
 
         # Filter by CONTINUED_AS_NEW
-        runs = await storage.list_runs(status=RunStatus.CONTINUED_AS_NEW)
+        runs, _ = await storage.list_runs(status=RunStatus.CONTINUED_AS_NEW)
 
         assert len(runs) == 2
         assert all(r.status == RunStatus.CONTINUED_AS_NEW for r in runs)

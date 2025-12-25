@@ -79,7 +79,9 @@ class TestEventLimitValidation:
 
         # Add events to reach hard limit
         for i in range(5):
-            event = create_step_completed_event(run_id="my_run", step_id=f"step_{i}", result="test", step_name="test_step")
+            event = create_step_completed_event(
+                run_id="my_run", step_id=f"step_{i}", result="test", step_name="test_step"
+            )
             await storage.record_event(event)
 
         with pytest.raises(EventLimitExceededError) as exc_info:
@@ -187,7 +189,9 @@ class TestEventLimitValidation:
             assert "approaching event limit" not in log_text
 
             # Add 1 more (now at 8 events, should warn because 8 >= 5 + 3)
-            event = create_step_completed_event(run_id="test_run", step_id="step_7", result="test", step_name="test_step")
+            event = create_step_completed_event(
+                run_id="test_run", step_id="step_7", result="test", step_name="test_step"
+            )
             await storage.record_event(event)
 
             await ctx.validate_event_limits()

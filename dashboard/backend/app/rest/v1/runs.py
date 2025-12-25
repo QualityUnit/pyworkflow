@@ -12,15 +12,22 @@ from pyworkflow.storage.base import StorageBackend
 
 router = APIRouter()
 
+
 @router.get("", response_model=RunListResponse)
 async def list_runs(
-    query: str | None = Query(None, description="Search in workflow name and input kwargs (case-insensitive)"),
+    query: str | None = Query(
+        None, description="Search in workflow name and input kwargs (case-insensitive)"
+    ),
     status: str | None = Query(
         None,
         description="Filter by status (pending, running, suspended, completed, failed, interrupted, cancelled)",
     ),
-    start_time: datetime | None = Query(None, description="Filter runs started at or after this time (ISO 8601)"),
-    end_time: datetime | None = Query(None, description="Filter runs started before this time (ISO 8601)"),
+    start_time: datetime | None = Query(
+        None, description="Filter runs started at or after this time (ISO 8601)"
+    ),
+    end_time: datetime | None = Query(
+        None, description="Filter runs started before this time (ISO 8601)"
+    ),
     limit: int = Query(100, ge=1, le=1000, description="Maximum results"),
     cursor: str | None = Query(None, description="Run ID to start after (for pagination)"),
     storage: StorageBackend = Depends(get_storage),
@@ -52,8 +59,8 @@ async def list_runs(
 
 @router.post("", response_model=StartRunResponse, status_code=201)
 async def start_run(
-        request: StartRunRequest,
-        storage: StorageBackend = Depends(get_storage),
+    request: StartRunRequest,
+    storage: StorageBackend = Depends(get_storage),
 ) -> StartRunResponse:
     """Start a new workflow run.
 

@@ -243,16 +243,13 @@ def configure_from_yaml(path: str | Path, discover: bool = True) -> None:
     config_path = Path(path)
 
     if not config_path.exists():
-        raise FileNotFoundError(
-            f"PyWorkflow configuration file not found: {config_path}"
-        )
+        raise FileNotFoundError(f"PyWorkflow configuration file not found: {config_path}")
 
     try:
         import yaml
     except ImportError:
         raise ImportError(
-            "PyYAML is required for YAML configuration. "
-            "Install it with: pip install pyyaml"
+            "PyYAML is required for YAML configuration. Install it with: pip install pyyaml"
         )
 
     try:

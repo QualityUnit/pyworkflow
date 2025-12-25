@@ -14,7 +14,12 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from loguru import logger
 
-from pyworkflow.core.exceptions import CancellationError, SuspensionSignal, WorkflowNotFoundError
+from pyworkflow.core.exceptions import (
+    CancellationError,
+    ContinueAsNewSignal,
+    SuspensionSignal,
+    WorkflowNotFoundError,
+)
 from pyworkflow.runtime.base import Runtime
 
 if TYPE_CHECKING:
@@ -144,20 +149,27 @@ class LocalRuntime(Runtime):
         )
 
         if durable and storage is not None:
-            # Create workflow run record
-            workflow_run = WorkflowRun(
-                run_id=run_id,
-                workflow_name=workflow_name,
-                status=RunStatus.RUNNING,
-                created_at=datetime.now(UTC),
-                started_at=datetime.now(UTC),
-                input_args=serialize_args(*args),
-                input_kwargs=serialize_kwargs(**kwargs),
-                idempotency_key=idempotency_key,
-                max_duration=max_duration,
-                metadata=metadata or {},
-            )
-            await storage.create_run(workflow_run)
+            # Check if run already exists (e.g., from continue_as_new)
+            existing_run = await storage.get_run(run_id)
+            if existing_run:
+                # Run was pre-created (e.g., by _handle_continue_as_new)
+                # Just update status to RUNNING
+                await storage.update_run_status(run_id=run_id, status=RunStatus.RUNNING)
+            else:
+                # Create workflow run record
+                workflow_run = WorkflowRun(
+                    run_id=run_id,
+                    workflow_name=workflow_name,
+                    status=RunStatus.RUNNING,
+                    created_at=datetime.now(UTC),
+                    started_at=datetime.now(UTC),
+                    input_args=serialize_args(*args),
+                    input_kwargs=serialize_kwargs(**kwargs),
+                    idempotency_key=idempotency_key,
+                    max_duration=max_duration,
+                    metadata=metadata or {},
+                )
+                await storage.create_run(workflow_run)
 
             # Record start event
             event = create_workflow_started_event(
@@ -249,6 +261,34 @@ class LocalRuntime(Runtime):
                     run_id=run_id,
                     workflow_name=workflow_name,
                     reason=e.reason,
+                )
+
+            return run_id
+
+        except ContinueAsNewSignal as e:
+            # Workflow continuing as new execution
+            if durable and storage is not None:
+                from pyworkflow.engine.executor import _handle_continue_as_new
+                from pyworkflow.storage.schemas import RunStatus as RS
+
+                # Cancel all running children (TERMINATE policy)
+                await _handle_parent_completion_local(run_id, RS.CONTINUED_AS_NEW, storage)
+
+                # Handle the continuation
+                new_run_id = await _handle_continue_as_new(
+                    current_run_id=run_id,
+                    workflow_func=workflow_func,
+                    workflow_name=workflow_name,
+                    storage=storage,
+                    new_args=e.workflow_args,
+                    new_kwargs=e.workflow_kwargs,
+                )
+
+                logger.info(
+                    f"Workflow continued as new: {workflow_name}",
+                    run_id=run_id,
+                    workflow_name=workflow_name,
+                    new_run_id=new_run_id,
                 )
 
             return run_id
@@ -380,12 +420,35 @@ class LocalRuntime(Runtime):
 
             return None
 
+        except ContinueAsNewSignal as e:
+            # Workflow continuing as new execution
+            from pyworkflow.engine.executor import _handle_continue_as_new
+
+            # Cancel all running children (TERMINATE policy)
+            await _handle_parent_completion_local(run_id, RunStatus.CONTINUED_AS_NEW, storage)
+
+            # Handle the continuation
+            new_run_id = await _handle_continue_as_new(
+                current_run_id=run_id,
+                workflow_func=workflow_meta.func,
+                workflow_name=run.workflow_name,
+                storage=storage,
+                new_args=e.workflow_args,
+                new_kwargs=e.workflow_kwargs,
+            )
+
+            logger.info(
+                f"Workflow continued as new on resume: {run.workflow_name}",
+                run_id=run_id,
+                workflow_name=run.workflow_name,
+                new_run_id=new_run_id,
+            )
+
+            return None
+
         except Exception as e:
             # Workflow failed
             await storage.update_run_status(run_id=run_id, status=RunStatus.FAILED, error=str(e))
-
-            # Cancel all running children (TERMINATE policy)
-            await _handle_parent_completion_local(run_id, RunStatus.FAILED, storage)
 
             # Cancel all running children (TERMINATE policy)
             await _handle_parent_completion_local(run_id, RunStatus.FAILED, storage)

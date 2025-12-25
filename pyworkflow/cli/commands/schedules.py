@@ -311,9 +311,7 @@ async def show_schedule_cmd(
                 "next_run_time": schedule.next_run_time.isoformat()
                 if schedule.next_run_time
                 else None,
-                "last_run_at": schedule.last_run_at.isoformat()
-                if schedule.last_run_at
-                else None,
+                "last_run_at": schedule.last_run_at.isoformat() if schedule.last_run_at else None,
                 "total_runs": schedule.total_runs,
                 "successful_runs": schedule.successful_runs,
                 "failed_runs": schedule.failed_runs,

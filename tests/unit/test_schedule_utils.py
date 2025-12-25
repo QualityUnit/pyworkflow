@@ -92,9 +92,7 @@ class TestCalculateNextRunTime:
 
     def test_next_run_time_calendar(self):
         """Test next run time calculation for calendar spec."""
-        spec = ScheduleSpec(
-            calendar=[CalendarSpec(day_of_month=1, hour=0, minute=0)]
-        )
+        spec = ScheduleSpec(calendar=[CalendarSpec(day_of_month=1, hour=0, minute=0)])
         now = datetime(2024, 1, 15, 8, 0, 0, tzinfo=UTC)
 
         next_time = calculate_next_run_time(spec, now=now)
@@ -215,9 +213,7 @@ class TestDescribeSchedule:
 
     def test_describe_calendar(self):
         """Test description for calendar spec."""
-        spec = ScheduleSpec(
-            calendar=[CalendarSpec(day_of_month=1, hour=0, minute=0)]
-        )
+        spec = ScheduleSpec(calendar=[CalendarSpec(day_of_month=1, hour=0, minute=0)])
 
         description = describe_schedule(spec)
 

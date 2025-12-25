@@ -391,12 +391,8 @@ class ScheduleSpec:
             interval=data.get("interval"),
             calendar=calendar,
             timezone=data.get("timezone", "UTC"),
-            start_at=(
-                datetime.fromisoformat(data["start_at"]) if data.get("start_at") else None
-            ),
-            end_at=(
-                datetime.fromisoformat(data["end_at"]) if data.get("end_at") else None
-            ),
+            start_at=(datetime.fromisoformat(data["start_at"]) if data.get("start_at") else None),
+            end_at=(datetime.fromisoformat(data["end_at"]) if data.get("end_at") else None),
             jitter=data.get("jitter"),
         )
 
@@ -478,9 +474,7 @@ class Schedule:
                 datetime.fromisoformat(data["last_run_at"]) if data.get("last_run_at") else None
             ),
             next_run_time=(
-                datetime.fromisoformat(data["next_run_time"])
-                if data.get("next_run_time")
-                else None
+                datetime.fromisoformat(data["next_run_time"]) if data.get("next_run_time") else None
             ),
             last_run_id=data.get("last_run_id"),
             running_run_ids=data.get("running_run_ids", []),

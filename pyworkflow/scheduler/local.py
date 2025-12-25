@@ -69,7 +69,9 @@ class LocalScheduler:
 
             config = get_config()
             if config.storage is None:
-                raise ValueError("Storage backend required. Configure storage or pass to constructor.")
+                raise ValueError(
+                    "Storage backend required. Configure storage or pass to constructor."
+                )
             self._storage = config.storage
         return self._storage
 
@@ -136,9 +138,7 @@ class LocalScheduler:
                 schedule_id=schedule.schedule_id,
             )
             schedule.skipped_runs += 1
-            schedule.next_run_time = calculate_next_run_time(
-                schedule.spec, last_run=now, now=now
-            )
+            schedule.next_run_time = calculate_next_run_time(schedule.spec, last_run=now, now=now)
             await self.storage.update_schedule(schedule)
             return
 
@@ -163,9 +163,7 @@ class LocalScheduler:
             )
             # Update failed runs count
             schedule.failed_runs += 1
-            schedule.next_run_time = calculate_next_run_time(
-                schedule.spec, last_run=now, now=now
-            )
+            schedule.next_run_time = calculate_next_run_time(schedule.spec, last_run=now, now=now)
             await self.storage.update_schedule(schedule)
 
     async def _check_overlap_policy(self, schedule: Schedule) -> tuple[bool, str]:

@@ -131,9 +131,7 @@ def scheduled_workflow(
     """
     # Validate at least one schedule type is provided
     if not cron and not interval and not calendar:
-        raise ValueError(
-            "scheduled_workflow requires at least one of: cron, interval, or calendar"
-        )
+        raise ValueError("scheduled_workflow requires at least one of: cron, interval, or calendar")
 
     def decorator(func: Callable) -> Callable:
         workflow_name = name or func.__name__

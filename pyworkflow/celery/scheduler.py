@@ -119,7 +119,10 @@ class PyWorkflowScheduler(Scheduler):
 
         # Check for due schedules
         now = datetime.now(UTC)
-        if self._last_schedule_check is None or (now - self._last_schedule_check).total_seconds() >= self.sync_interval:
+        if (
+            self._last_schedule_check is None
+            or (now - self._last_schedule_check).total_seconds() >= self.sync_interval
+        ):
             self._sync_schedules()
             self._last_schedule_check = now
 

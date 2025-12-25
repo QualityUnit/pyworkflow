@@ -74,7 +74,7 @@ async def handle_message(message: dict) -> dict:
 
 
 # --- Batch Processing Workflow ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["celery", "durable"])
 async def batch_processor(offset: int = 0, batch_size: int = 10) -> str:
     """
     Process items in batches using continue_as_new.
@@ -105,7 +105,7 @@ async def batch_processor(offset: int = 0, batch_size: int = 10) -> str:
 
 
 # --- Message Consumer Workflow ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["celery", "durable"])
 async def message_consumer(cursor: str | None = None, messages_processed: int = 0) -> str:
     """
     Consume messages from a queue, continuing as new after each batch.
@@ -137,7 +137,7 @@ async def message_consumer(cursor: str | None = None, messages_processed: int = 
 
 
 # --- Recurring Task Workflow ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["celery", "durable"])
 async def recurring_report(iteration: int = 1, max_iterations: int = 3) -> str:
     """
     Generate reports on a schedule, continuing as new for each iteration.

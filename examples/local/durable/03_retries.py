@@ -65,7 +65,7 @@ async def finalize_order(order: dict) -> dict:
 
 
 # --- Workflow ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["local", "durable"])
 async def order_workflow(order_id: str) -> dict:
     """Complete order processing with retry logic."""
     order = await validate_order(order_id)

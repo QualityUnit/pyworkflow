@@ -44,7 +44,7 @@ async def send_confirmation(order: dict) -> dict:
     return {**order, "confirmed": True}
 
 
-@workflow()
+@workflow(tags=["celery", "durable"])
 async def order_workflow(order_id: str, amount: float) -> dict:
     """
     Complete order processing workflow.

@@ -52,7 +52,7 @@ async def aggregate_results(results: list) -> dict:
     }
 
 
-@workflow()
+@workflow(tags=["celery", "durable"])
 async def batch_workflow(batch_id: str, limit: int = 100) -> dict:
     """
     Batch processing workflow.

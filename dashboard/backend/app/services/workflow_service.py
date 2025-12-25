@@ -28,7 +28,7 @@ class WorkflowService:
                 name=name,
                 description=metadata.description,
                 max_duration=metadata.max_duration,
-                metadata=metadata.metadata or {},
+                tags=metadata.tags or [],
             )
             for name, metadata in workflows.items()
         ]
@@ -56,5 +56,5 @@ class WorkflowService:
             name=metadata.name,
             description=metadata.description,
             max_duration=metadata.max_duration,
-            metadata=metadata.metadata or {},
+            tags=metadata.tags or [],
         )

@@ -55,7 +55,7 @@ async def send_receipt(payment: dict) -> dict:
     return {**payment, "receipt_sent": True}
 
 
-@workflow()
+@workflow(tags=["celery", "durable"])
 async def payment_workflow(payment_id: str, amount: float) -> dict:
     """
     Payment processing workflow with idempotency.

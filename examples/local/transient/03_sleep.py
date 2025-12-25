@@ -49,7 +49,7 @@ async def complete_task(task: dict) -> dict:
 
 
 # --- Workflows ---
-@workflow(durable=False)
+@workflow(durable=False, tags=["local", "transient"])
 async def delayed_workflow(task_id: str, delay_seconds: int) -> dict:
     """Workflow with sleep delay."""
     task = await start_task(task_id)
@@ -66,7 +66,7 @@ async def delayed_workflow(task_id: str, delay_seconds: int) -> dict:
     return task
 
 
-@workflow(durable=False)
+@workflow(durable=False, tags=["local", "transient"])
 async def rate_limited_workflow(task_id: str) -> dict:
     """Workflow demonstrating rate limiting pattern."""
     task = await start_task(task_id)

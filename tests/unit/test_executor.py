@@ -272,21 +272,25 @@ class TestWorkflowQueries:
         assert "workflow.completed" in event_types
 
     @pytest.mark.asyncio
-    async def test_workflow_metadata_stored(self, tmp_path):
-        """Test that workflow metadata is stored correctly."""
-        metadata = {"team": "backend", "priority": "high"}
+    async def test_workflow_max_duration_stored(self, tmp_path):
+        """Test that workflow max_duration is stored correctly."""
 
-        @workflow(name="meta_workflow", max_duration="1h", metadata=metadata)
-        async def meta_workflow():
+        @workflow(name="timed_workflow", max_duration="1h", tags=["test", "backend"])
+        async def timed_workflow():
             return "done"
 
         storage = FileStorageBackend(base_path=str(tmp_path))
-        run_id = await start(meta_workflow, durable=True, storage=storage)
+        run_id = await start(timed_workflow, durable=True, storage=storage)
 
-        # Check metadata was stored
+        # Check max_duration was stored on run
         run = await storage.get_run(run_id)
         assert run.max_duration == "1h"
-        assert run.metadata == metadata
+
+        # Check tags were stored on workflow metadata (not run)
+        from pyworkflow.core.registry import get_workflow
+
+        workflow_meta = get_workflow("timed_workflow")
+        assert workflow_meta.tags == ["test", "backend"]
 
 
 class TestWorkflowDefaultStorage:

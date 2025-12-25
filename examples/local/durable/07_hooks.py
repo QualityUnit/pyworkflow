@@ -73,7 +73,7 @@ async def cancel_order(order: dict, reason: str) -> dict:
 
 
 # --- Workflow with simple hook ---
-@workflow(durable=True, name="simple_hook_workflow")
+@workflow(durable=True, name="simple_hook_workflow", tags=["local", "durable"])
 async def simple_hook_workflow(order_id: str) -> dict:
     """
     Workflow using simple hook() with untyped payload.
@@ -103,7 +103,7 @@ async def simple_hook_workflow(order_id: str) -> dict:
 
 
 # --- Workflow with typed hook ---
-@workflow(durable=True, name="typed_hook_workflow")
+@workflow(durable=True, name="typed_hook_workflow", tags=["local", "durable"])
 async def typed_hook_workflow(order_id: str) -> dict:
     """
     Workflow using define_hook() for type-safe payloads.
@@ -131,7 +131,7 @@ async def typed_hook_workflow(order_id: str) -> dict:
 
 
 # --- Workflow with on_created callback ---
-@workflow(durable=True, name="callback_hook_workflow")
+@workflow(durable=True, name="callback_hook_workflow", tags=["local", "durable"])
 async def callback_hook_workflow(order_id: str) -> dict:
     """
     Workflow demonstrating on_created callback.

@@ -67,7 +67,7 @@ async def validate_input(value: int) -> int:
 
 
 # --- Workflows ---
-@workflow(durable=False)
+@workflow(durable=False, tags=["local", "transient"])
 async def api_workflow(request_id: str) -> dict:
     """Workflow with automatic retry logic."""
     request = await validate_request(request_id)
@@ -76,7 +76,7 @@ async def api_workflow(request_id: str) -> dict:
     return request
 
 
-@workflow(durable=False)
+@workflow(durable=False, tags=["local", "transient"])
 async def validation_workflow(value: int) -> int:
     """Workflow with fatal error (no retry)."""
     return await validate_input(value)

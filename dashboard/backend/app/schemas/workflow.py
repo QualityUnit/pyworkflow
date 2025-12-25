@@ -1,7 +1,5 @@
 """Workflow-related response schemas."""
 
-from typing import Any
-
 from pydantic import BaseModel
 
 
@@ -11,7 +9,7 @@ class WorkflowResponse(BaseModel):
     name: str
     description: str | None = None
     max_duration: str | None = None
-    metadata: dict[str, Any] = {}
+    tags: list[str] = []
 
 
 class WorkflowListResponse(BaseModel):

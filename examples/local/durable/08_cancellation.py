@@ -66,7 +66,7 @@ async def refund_payment(order_id: str) -> None:
 
 
 # --- Workflow with Cancellation Handling ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["local", "durable"])
 async def order_workflow(order_id: str) -> dict:
     """
     Order processing workflow with cancellation handling.

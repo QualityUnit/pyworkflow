@@ -1763,6 +1763,19 @@ files = [
 ]
 
 [[package]]
+name = "types-pyyaml"
+version = "6.0.12.20250915"
+description = "Typing stubs for PyYAML"
+optional = true
+python-versions = ">=3.9"
+groups = ["main"]
+markers = "extra == \"dev\""
+files = [
+    {file = "types_pyyaml-6.0.12.20250915-py3-none-any.whl", hash = "sha256:e7d4d9e064e89a3b3cae120b4990cd370874d2bf12fa5f46c97018dd5d3c9ab6"},
+    {file = "types_pyyaml-6.0.12.20250915.tar.gz", hash = "sha256:0f8b54a528c303f0e6f7165687dd33fafa81c807fcac23f632b63aa624ced1d3"},
+]
+
+[[package]]
 name = "types-redis"
 version = "4.6.0.20241004"
 description = "Typing stubs for redis"
@@ -1914,9 +1927,9 @@ dev = ["black (>=19.3b0) ; python_version >= \"3.6\"", "pytest (>=4.6.2)"]
 
 [extras]
 aws = ["aws-durable-execution-sdk-python"]
-dev = ["black", "flower", "mypy", "pre-commit", "pytest", "pytest-asyncio", "pytest-celery", "pytest-cov", "pytest-mock", "ruff", "types-python-dateutil", "types-redis"]
+dev = ["black", "flower", "mypy", "pre-commit", "pytest", "pytest-asyncio", "pytest-celery", "pytest-cov", "pytest-mock", "ruff", "types-PyYAML", "types-python-dateutil", "types-redis"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11"
-content-hash = "71486217b9d3d1ac670698a9c289bfe5426f09eaf08c290538ce7f8c52e532e7"
+content-hash = "ab26a58492856cf3598486af263b0b156dff950cfbe5e38fb2a1b9c4e68db946"

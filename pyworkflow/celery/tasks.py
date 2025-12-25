@@ -942,7 +942,7 @@ async def _start_workflow_on_worker(
         input_kwargs=serialize_kwargs(**kwargs),
         idempotency_key=idempotency_key,
         max_duration=workflow_meta.max_duration,
-        metadata=workflow_meta.metadata or {},
+        metadata={},  # Run-level metadata (not from decorator)
         recovery_attempts=0,
         max_recovery_attempts=max_recovery_attempts,
         recover_on_worker_loss=recover_on_worker_loss,
@@ -956,7 +956,7 @@ async def _start_workflow_on_worker(
         workflow_name=workflow_name,
         args=serialize_args(*args),
         kwargs=serialize_kwargs(**kwargs),
-        metadata=workflow_meta.metadata,
+        metadata={},  # Run-level metadata
     )
 
     await storage.record_event(start_event)

@@ -30,7 +30,7 @@ class TestWorkflowRegistry:
             func=my_workflow,
             original_func=my_workflow,
             max_duration="1h",
-            metadata={"key": "value"},
+            tags=["backend", "critical"],
         )
 
         # Retrieve workflow
@@ -40,7 +40,7 @@ class TestWorkflowRegistry:
         assert workflow_meta.name == "test_workflow"
         assert workflow_meta.func == my_workflow
         assert workflow_meta.max_duration == "1h"
-        assert workflow_meta.metadata == {"key": "value"}
+        assert workflow_meta.tags == ["backend", "critical"]
 
     def test_get_workflow_by_func(self):
         """Test retrieving a workflow by its function reference."""

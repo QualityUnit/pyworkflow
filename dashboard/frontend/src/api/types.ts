@@ -17,7 +17,7 @@ export interface Workflow {
   name: string
   description: string | null
   max_duration: string | null
-  metadata: Record<string, unknown>
+  tags: string[]
 }
 
 export interface WorkflowListResponse {

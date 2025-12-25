@@ -75,7 +75,7 @@ async def cancel_order(order: dict, reason: str) -> dict:
 
 
 # --- Workflow with simple hook ---
-@workflow(name="simple_approval_workflow")
+@workflow(name="simple_approval_workflow", tags=["celery", "durable"])
 async def simple_approval_workflow(order_id: str) -> dict:
     """
     Workflow using simple hook() with untyped payload.
@@ -107,7 +107,7 @@ async def simple_approval_workflow(order_id: str) -> dict:
 
 
 # --- Workflow with typed hook ---
-@workflow(name="approval_workflow")
+@workflow(name="approval_workflow", tags=["celery", "durable"])
 async def approval_workflow(order_id: str) -> dict:
     """
     Workflow using define_hook() for type-safe payloads.
@@ -146,7 +146,7 @@ async def approval_workflow(order_id: str) -> dict:
 
 
 # --- Workflow with multiple hooks ---
-@workflow(name="multi_approval_workflow")
+@workflow(name="multi_approval_workflow", tags=["celery", "durable"])
 async def multi_approval_workflow(order_id: str) -> dict:
     """
     Workflow demonstrating sequential hooks for multi-level approval.

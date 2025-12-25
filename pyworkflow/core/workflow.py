@@ -30,7 +30,7 @@ def workflow(
     name: str | None = None,
     durable: bool | None = None,
     max_duration: str | None = None,
-    metadata: dict[str, Any] | None = None,
+    tags: list[str] | None = None,
     recover_on_worker_loss: bool | None = None,
     max_recovery_attempts: int | None = None,
 ) -> Callable:
@@ -45,7 +45,7 @@ def workflow(
         name: Optional workflow name (defaults to function name)
         durable: Whether workflow is durable (None = use configured default)
         max_duration: Optional max duration (e.g., "1h", "30m")
-        metadata: Optional metadata dictionary
+        tags: Optional list of tags for categorization (max 3 tags)
         recover_on_worker_loss: Whether to auto-recover on worker failure
             (None = True for durable, False for transient)
         max_recovery_attempts: Max recovery attempts on worker failure (default: 3)
@@ -79,7 +79,20 @@ def workflow(
             # Will auto-recover if worker crashes
             result = await important_step()
             return result
+
+    Example (with tags):
+        @workflow(tags=["backend", "critical"])
+        async def tagged_workflow():
+            result = await my_step()
+            return result
     """
+
+    # Validate tags
+    validated_tags = tags or []
+    if len(validated_tags) > 3:
+        raise ValueError(
+            f"Workflows can have at most 3 tags, got {len(validated_tags)}: {validated_tags}"
+        )
 
     def decorator(func: Callable) -> Callable:
         workflow_name = name or func.__name__
@@ -96,7 +109,7 @@ def workflow(
             func=wrapper,
             original_func=func,
             max_duration=max_duration,
-            metadata=metadata,
+            tags=validated_tags,
         )
 
         # Store metadata on wrapper
@@ -104,7 +117,7 @@ def workflow(
         wrapper.__workflow_name__ = workflow_name  # type: ignore[attr-defined]
         wrapper.__workflow_durable__ = durable  # type: ignore[attr-defined]  # None = use config default
         wrapper.__workflow_max_duration__ = max_duration  # type: ignore[attr-defined]
-        wrapper.__workflow_metadata__ = metadata or {}  # type: ignore[attr-defined]
+        wrapper.__workflow_tags__ = validated_tags  # type: ignore[attr-defined]
         wrapper.__workflow_recover_on_worker_loss__ = (  # type: ignore[attr-defined]
             recover_on_worker_loss  # None = use config default
         )

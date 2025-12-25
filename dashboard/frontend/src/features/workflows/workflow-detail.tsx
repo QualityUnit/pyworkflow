@@ -124,16 +124,20 @@ export function WorkflowDetail({ workflowName }: WorkflowDetailProps) {
           </Card>
         </div>
 
-        {/* Metadata */}
-        {Object.keys(workflow.metadata).length > 0 && (
+        {/* Tags */}
+        {workflow.tags.length > 0 && (
           <Card className="mb-6">
             <CardHeader>
-              <CardTitle>Metadata</CardTitle>
+              <CardTitle>Tags</CardTitle>
             </CardHeader>
             <CardContent>
-              <pre className="text-sm bg-muted p-4 rounded overflow-x-auto">
-                {JSON.stringify(workflow.metadata, null, 2)}
-              </pre>
+              <div className="flex gap-2">
+                {workflow.tags.map((tag) => (
+                  <Badge key={tag} variant="outline">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
             </CardContent>
           </Card>
         )}

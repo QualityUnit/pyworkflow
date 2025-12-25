@@ -2,15 +2,18 @@
  * Workflows table component with TanStack React Table.
  */
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
   type ColumnDef,
   type ColumnFiltersState,
+  type FilterFn,
   type SortingState,
   type VisibilityState,
   flexRender,
   getCoreRowModel,
+  getFacetedRowModel,
+  getFacetedUniqueValues,
   getFilteredRowModel,
   getPaginationRowModel,
   getSortedRowModel,
@@ -47,6 +50,13 @@ interface WorkflowsTableProps {
 function truncateText(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text
   return text.slice(0, maxLength).trim() + '...'
+}
+
+// Custom filter function for tags array
+const tagsFilterFn: FilterFn<Workflow> = (row, columnId, filterValue) => {
+  const tags = row.getValue(columnId) as string[]
+  if (!filterValue || filterValue.length === 0) return true
+  return filterValue.some((v: string) => tags.includes(v))
 }
 
 export function WorkflowsTable({ workflows }: WorkflowsTableProps) {
@@ -89,16 +99,32 @@ export function WorkflowsTable({ workflows }: WorkflowsTableProps) {
       ),
       cell: ({ row }) => {
         const description = row.getValue('description') as string | null
-        if (!description) {
-          return <span className="text-muted-foreground italic">No description</span>
-        }
+        const tags = row.original.tags || []
         return (
-          <span className="text-muted-foreground">
-            {truncateText(description, 60)}
-          </span>
+          <div className="flex items-center gap-2 min-w-[350px]">
+            {tags.map((tag) => (
+              <Badge key={tag} variant="outline" className="shrink-0">
+                {tag}
+              </Badge>
+            ))}
+            {description ? (
+              <span className="text-muted-foreground truncate">
+                {truncateText(description, 60)}
+              </span>
+            ) : (
+              <span className="text-muted-foreground italic">No description</span>
+            )}
+          </div>
         )
       },
       enableSorting: false,
+    },
+    {
+      accessorKey: 'tags',
+      header: () => null,
+      cell: () => null,
+      filterFn: tagsFilterFn,
+      enableHiding: true,
     },
     {
       accessorKey: 'max_duration',
@@ -167,6 +193,15 @@ export function WorkflowsTable({ workflows }: WorkflowsTableProps) {
     },
   ]
 
+  // Extract unique tags for filtering
+  const uniqueTags = useMemo(() => {
+    const tagSet = new Set<string>()
+    workflows.forEach((w) => w.tags?.forEach((t) => tagSet.add(t)))
+    return Array.from(tagSet)
+      .sort()
+      .map((tag) => ({ label: tag, value: tag }))
+  }, [workflows])
+
   const table = useReactTable({
     data: workflows,
     columns,
@@ -182,9 +217,14 @@ export function WorkflowsTable({ workflows }: WorkflowsTableProps) {
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    getFacetedRowModel: getFacetedRowModel(),
+    getFacetedUniqueValues: getFacetedUniqueValues(),
     initialState: {
       pagination: {
         pageSize: 10,
+      },
+      columnVisibility: {
+        tags: false, // Hide tags column (only used for filtering)
       },
     },
   })
@@ -195,6 +235,11 @@ export function WorkflowsTable({ workflows }: WorkflowsTableProps) {
         table={table}
         searchKey="name"
         searchPlaceholder="Search workflows..."
+        filters={
+          uniqueTags.length > 0
+            ? [{ columnId: 'tags', title: 'Tags', options: uniqueTags }]
+            : []
+        }
       />
 
       <div className="flex-1 flex flex-col min-h-0">

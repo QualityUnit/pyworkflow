@@ -49,7 +49,7 @@ async def store_result(item: dict) -> dict:
     return {**item, "stored": True}
 
 
-@workflow(durable=False)  # Transient workflow - no event recording
+@workflow(durable=False, tags=["celery", "transient"])  # Transient workflow - no event recording
 async def quick_task(item_id: str) -> dict:
     """
     Quick processing task (transient).

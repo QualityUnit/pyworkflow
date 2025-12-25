@@ -15,6 +15,7 @@ export type RunStatus =
 // Workflow types
 export interface Workflow {
   name: string
+  description: string | null
   max_duration: string | null
   metadata: Record<string, unknown>
 }

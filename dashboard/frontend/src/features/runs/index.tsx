@@ -3,11 +3,13 @@
  */
 
 import { useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { GithubStarButton } from '@/components/github-star-button'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import {
   Select,
   SelectContent,
@@ -17,6 +19,7 @@ import {
 } from '@/components/ui/select'
 import { useRuns } from '@/hooks/use-runs'
 import { RunsTable } from './components/runs-table'
+import { X } from 'lucide-react'
 
 const statusOptions = [
   { value: 'all', label: 'All Statuses' },
@@ -29,19 +32,31 @@ const statusOptions = [
   { value: 'cancelled', label: 'Cancelled' },
 ]
 
-export function RunsList() {
+interface RunsListProps {
+  workflowName?: string
+}
+
+export function RunsList({ workflowName }: RunsListProps) {
+  const navigate = useNavigate()
   const [status, setStatus] = useState<string>('all')
   const [limit] = useState(50)
 
   const { data, isLoading, error, refetch } = useRuns({
+    workflow_name: workflowName,
     status: status === 'all' ? undefined : status,
     limit,
   })
 
+  const clearWorkflowFilter = () => {
+    navigate({ to: '/runs', search: {} })
+  }
+
   return (
     <>
       <Header>
-        <h1 className="text-lg font-semibold">Workflow Runs</h1>
+        <h1 className="text-lg font-semibold">
+          {workflowName ? `Runs: ${workflowName}` : 'Workflow Runs'}
+        </h1>
         <div className="ms-auto flex items-center space-x-4">
           <ThemeSwitch />
           <GithubStarButton />
@@ -51,6 +66,17 @@ export function RunsList() {
       <Main>
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
+            {workflowName && (
+              <Badge variant="secondary" className="flex items-center gap-1">
+                Workflow: {workflowName}
+                <button
+                  onClick={clearWorkflowFilter}
+                  className="ml-1 hover:bg-muted rounded-full p-0.5"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            )}
             <Select value={status} onValueChange={setStatus}>
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Filter by status" />

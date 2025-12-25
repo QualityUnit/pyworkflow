@@ -21,10 +21,14 @@ class WorkflowMetadata:
     original_func: Callable[..., Any]  # Unwrapped function
     max_duration: str | None = None
     metadata: dict[str, Any] | None = None
+    description: str | None = None  # Docstring from the workflow function
 
     def __post_init__(self) -> None:
         if self.metadata is None:
             self.metadata = {}
+        # Auto-extract description from docstring if not provided
+        if self.description is None and self.original_func.__doc__:
+            self.description = self.original_func.__doc__.strip()
 
 
 @dataclass

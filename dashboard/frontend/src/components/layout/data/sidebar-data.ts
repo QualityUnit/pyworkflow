@@ -23,7 +23,7 @@ export const sidebarData: SidebarData = {
           icon: Play,
         },
         {
-          title: 'Workflows',
+          title: 'My Workflows',
           url: '/workflows',
           icon: Workflow,
         },

@@ -31,7 +31,7 @@ export function Dashboard() {
   return (
     <>
       <Header>
-        <h1 className="text-lg font-semibold">PyWorkflow Dashboard</h1>
+        <h1 className="text-lg font-semibold">Dashboard</h1>
         <div className="ms-auto flex items-center space-x-4">
           <ThemeSwitch />
           <GithubStarButton />

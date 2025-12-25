@@ -26,6 +26,7 @@ class WorkflowService:
         items = [
             WorkflowResponse(
                 name=name,
+                description=metadata.description,
                 max_duration=metadata.max_duration,
                 metadata=metadata.metadata or {},
             )
@@ -53,6 +54,7 @@ class WorkflowService:
 
         return WorkflowResponse(
             name=metadata.name,
+            description=metadata.description,
             max_duration=metadata.max_duration,
             metadata=metadata.metadata or {},
         )

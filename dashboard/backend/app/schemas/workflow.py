@@ -9,6 +9,7 @@ class WorkflowResponse(BaseModel):
     """Response model for a registered workflow."""
 
     name: str
+    description: str | None = None
     max_duration: str | None = None
     metadata: dict[str, Any] = {}
 

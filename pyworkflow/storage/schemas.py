@@ -43,6 +43,24 @@ class HookStatus(Enum):
     DISPOSED = "disposed"
 
 
+class OverlapPolicy(Enum):
+    """How to handle overlapping schedule executions."""
+
+    SKIP = "skip"  # Skip if previous run still active
+    BUFFER_ONE = "buffer_one"  # Buffer at most one pending execution
+    BUFFER_ALL = "buffer_all"  # Buffer all pending executions
+    CANCEL_OTHER = "cancel_other"  # Cancel previous run and start new
+    ALLOW_ALL = "allow_all"  # Allow concurrent executions
+
+
+class ScheduleStatus(Enum):
+    """Schedule lifecycle status."""
+
+    ACTIVE = "active"
+    PAUSED = "paused"
+    DELETED = "deleted"
+
+
 @dataclass
 class WorkflowRun:
     """
@@ -286,4 +304,183 @@ class Hook:
             name=data.get("name"),
             payload_schema=data.get("payload_schema"),
             metadata=data.get("metadata", {}),
+        )
+
+
+@dataclass
+class CalendarSpec:
+    """
+    Specification for calendar-based scheduling.
+
+    Defines specific times when a schedule should trigger based on
+    calendar components (hour, minute, day of week, etc.).
+    """
+
+    second: int = 0
+    minute: int = 0
+    hour: int = 0
+    day_of_month: int | None = None  # 1-31
+    month: int | None = None  # 1-12
+    day_of_week: int | None = None  # 0=Monday, 6=Sunday (ISO weekday)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "second": self.second,
+            "minute": self.minute,
+            "hour": self.hour,
+            "day_of_month": self.day_of_month,
+            "month": self.month,
+            "day_of_week": self.day_of_week,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CalendarSpec":
+        """Create from dictionary."""
+        return cls(
+            second=data.get("second", 0),
+            minute=data.get("minute", 0),
+            hour=data.get("hour", 0),
+            day_of_month=data.get("day_of_month"),
+            month=data.get("month"),
+            day_of_week=data.get("day_of_week"),
+        )
+
+
+@dataclass
+class ScheduleSpec:
+    """
+    Specification for when a schedule should trigger.
+
+    Supports three types of scheduling:
+    - cron: Standard cron expression (e.g., "0 9 * * *" for 9 AM daily)
+    - interval: Simple interval (e.g., "5m", "1h", "24h")
+    - calendar: List of specific calendar times
+
+    Only one of cron, interval, or calendar should be specified.
+    """
+
+    cron: str | None = None  # Cron expression
+    interval: str | None = None  # Interval string (e.g., "5m", "1h")
+    calendar: list[CalendarSpec] | None = None  # Calendar-based specs
+    timezone: str = "UTC"  # Timezone for schedule
+    start_at: datetime | None = None  # When to start scheduling
+    end_at: datetime | None = None  # When to stop scheduling
+    jitter: str | None = None  # Random delay to add (e.g., "30s")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "cron": self.cron,
+            "interval": self.interval,
+            "calendar": [c.to_dict() for c in self.calendar] if self.calendar else None,
+            "timezone": self.timezone,
+            "start_at": self.start_at.isoformat() if self.start_at else None,
+            "end_at": self.end_at.isoformat() if self.end_at else None,
+            "jitter": self.jitter,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ScheduleSpec":
+        """Create from dictionary."""
+        calendar = None
+        if data.get("calendar"):
+            calendar = [CalendarSpec.from_dict(c) for c in data["calendar"]]
+        return cls(
+            cron=data.get("cron"),
+            interval=data.get("interval"),
+            calendar=calendar,
+            timezone=data.get("timezone", "UTC"),
+            start_at=(datetime.fromisoformat(data["start_at"]) if data.get("start_at") else None),
+            end_at=(datetime.fromisoformat(data["end_at"]) if data.get("end_at") else None),
+            jitter=data.get("jitter"),
+        )
+
+
+@dataclass
+class Schedule:
+    """
+    Represents a workflow schedule.
+
+    Schedules define when and how often a workflow should be automatically
+    triggered. They support cron expressions, intervals, and calendar-based
+    scheduling with configurable overlap policies.
+    """
+
+    schedule_id: str
+    workflow_name: str
+    spec: ScheduleSpec
+    status: ScheduleStatus = ScheduleStatus.ACTIVE
+    args: str = "[]"  # JSON serialized list
+    kwargs: str = "{}"  # JSON serialized dict
+    overlap_policy: OverlapPolicy = OverlapPolicy.SKIP
+
+    # Timestamps
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime | None = None
+    last_run_at: datetime | None = None
+    next_run_time: datetime | None = None
+
+    # Execution tracking
+    last_run_id: str | None = None
+    running_run_ids: list[str] = field(default_factory=list)
+    buffered_count: int = 0
+
+    # Statistics
+    total_runs: int = 0
+    successful_runs: int = 0
+    failed_runs: int = 0
+    skipped_runs: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "schedule_id": self.schedule_id,
+            "workflow_name": self.workflow_name,
+            "spec": self.spec.to_dict(),
+            "status": self.status.value,
+            "args": self.args,
+            "kwargs": self.kwargs,
+            "overlap_policy": self.overlap_policy.value,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "last_run_at": self.last_run_at.isoformat() if self.last_run_at else None,
+            "next_run_time": self.next_run_time.isoformat() if self.next_run_time else None,
+            "last_run_id": self.last_run_id,
+            "running_run_ids": self.running_run_ids,
+            "buffered_count": self.buffered_count,
+            "total_runs": self.total_runs,
+            "successful_runs": self.successful_runs,
+            "failed_runs": self.failed_runs,
+            "skipped_runs": self.skipped_runs,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Schedule":
+        """Create from dictionary."""
+        return cls(
+            schedule_id=data["schedule_id"],
+            workflow_name=data["workflow_name"],
+            spec=ScheduleSpec.from_dict(data["spec"]),
+            status=ScheduleStatus(data.get("status", "active")),
+            args=data.get("args", "[]"),
+            kwargs=data.get("kwargs", "{}"),
+            overlap_policy=OverlapPolicy(data.get("overlap_policy", "skip")),
+            created_at=datetime.fromisoformat(data["created_at"]),
+            updated_at=(
+                datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
+            ),
+            last_run_at=(
+                datetime.fromisoformat(data["last_run_at"]) if data.get("last_run_at") else None
+            ),
+            next_run_time=(
+                datetime.fromisoformat(data["next_run_time"]) if data.get("next_run_time") else None
+            ),
+            last_run_id=data.get("last_run_id"),
+            running_run_ids=data.get("running_run_ids", []),
+            buffered_count=data.get("buffered_count", 0),
+            total_runs=data.get("total_runs", 0),
+            successful_runs=data.get("successful_runs", 0),
+            failed_runs=data.get("failed_runs", 0),
+            skipped_runs=data.get("skipped_runs", 0),
         )

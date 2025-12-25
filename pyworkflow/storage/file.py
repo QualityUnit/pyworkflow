@@ -16,6 +16,8 @@ Data is stored in a directory structure:
             {step_id}.json
         hooks/
             {hook_id}.json
+        schedules/
+            {schedule_id}.json
         _token_index.json  (token -> hook_id mapping)
 """
 
@@ -28,7 +30,15 @@ from filelock import FileLock
 
 from pyworkflow.engine.events import Event, EventType
 from pyworkflow.storage.base import StorageBackend
-from pyworkflow.storage.schemas import Hook, HookStatus, RunStatus, StepExecution, WorkflowRun
+from pyworkflow.storage.schemas import (
+    Hook,
+    HookStatus,
+    RunStatus,
+    Schedule,
+    ScheduleStatus,
+    StepExecution,
+    WorkflowRun,
+)
 
 
 class FileStorageBackend(StorageBackend):
@@ -50,6 +60,7 @@ class FileStorageBackend(StorageBackend):
         self.events_dir = self.base_path / "events"
         self.steps_dir = self.base_path / "steps"
         self.hooks_dir = self.base_path / "hooks"
+        self.schedules_dir = self.base_path / "schedules"
         self.locks_dir = self.base_path / ".locks"
         self._token_index_file = self.base_path / "_token_index.json"
 
@@ -59,6 +70,7 @@ class FileStorageBackend(StorageBackend):
             self.events_dir,
             self.steps_dir,
             self.hooks_dir,
+            self.schedules_dir,
             self.locks_dir,
         ]:
             dir_path.mkdir(parents=True, exist_ok=True)
@@ -616,3 +628,159 @@ class FileStorageBackend(StorageBackend):
         """Get the nesting depth for a workflow."""
         run = await self.get_run(run_id)
         return run.nesting_depth if run else 0
+
+    # Schedule Operations
+
+    async def create_schedule(self, schedule: Schedule) -> None:
+        """Create a new schedule record."""
+        schedule_file = self.schedules_dir / f"{schedule.schedule_id}.json"
+
+        if schedule_file.exists():
+            raise ValueError(f"Schedule {schedule.schedule_id} already exists")
+
+        data = schedule.to_dict()
+
+        lock_file = self.locks_dir / f"schedule_{schedule.schedule_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _write() -> None:
+            with lock:
+                schedule_file.write_text(json.dumps(data, indent=2))
+
+        await asyncio.to_thread(_write)
+
+    async def get_schedule(self, schedule_id: str) -> Schedule | None:
+        """Retrieve a schedule by ID."""
+        schedule_file = self.schedules_dir / f"{schedule_id}.json"
+
+        if not schedule_file.exists():
+            return None
+
+        lock_file = self.locks_dir / f"schedule_{schedule_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _read() -> dict | None:
+            with lock:
+                if not schedule_file.exists():
+                    return None
+                return json.loads(schedule_file.read_text())
+
+        data = await asyncio.to_thread(_read)
+        return Schedule.from_dict(data) if data else None
+
+    async def update_schedule(self, schedule: Schedule) -> None:
+        """Update an existing schedule."""
+        schedule_file = self.schedules_dir / f"{schedule.schedule_id}.json"
+
+        if not schedule_file.exists():
+            raise ValueError(f"Schedule {schedule.schedule_id} does not exist")
+
+        data = schedule.to_dict()
+
+        lock_file = self.locks_dir / f"schedule_{schedule.schedule_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _write() -> None:
+            with lock:
+                schedule_file.write_text(json.dumps(data, indent=2))
+
+        await asyncio.to_thread(_write)
+
+    async def delete_schedule(self, schedule_id: str) -> None:
+        """Mark a schedule as deleted (soft delete)."""
+        schedule = await self.get_schedule(schedule_id)
+
+        if not schedule:
+            raise ValueError(f"Schedule {schedule_id} does not exist")
+
+        schedule.status = ScheduleStatus.DELETED
+        schedule.updated_at = datetime.now(UTC)
+        await self.update_schedule(schedule)
+
+    async def list_schedules(
+        self,
+        workflow_name: str | None = None,
+        status: ScheduleStatus | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Schedule]:
+        """List schedules with optional filtering."""
+
+        def _list() -> list[dict]:
+            schedules = []
+            for schedule_file in self.schedules_dir.glob("*.json"):
+                try:
+                    data = json.loads(schedule_file.read_text())
+
+                    # Apply filters
+                    if workflow_name and data.get("workflow_name") != workflow_name:
+                        continue
+                    if status and data.get("status") != status.value:
+                        continue
+
+                    schedules.append(data)
+                except (json.JSONDecodeError, KeyError):
+                    continue
+
+            # Sort by created_at descending
+            schedules.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+
+            # Apply pagination
+            return schedules[offset : offset + limit]
+
+        schedule_data_list = await asyncio.to_thread(_list)
+        return [Schedule.from_dict(data) for data in schedule_data_list]
+
+    async def get_due_schedules(self, now: datetime) -> list[Schedule]:
+        """Get all schedules that are due to run."""
+        now_iso = now.isoformat()
+
+        def _list_due() -> list[dict]:
+            due_schedules = []
+            for schedule_file in self.schedules_dir.glob("*.json"):
+                try:
+                    data = json.loads(schedule_file.read_text())
+
+                    # Check criteria
+                    if data.get("status") != ScheduleStatus.ACTIVE.value:
+                        continue
+                    next_run = data.get("next_run_time")
+                    if not next_run:
+                        continue
+                    if next_run > now_iso:
+                        continue
+
+                    due_schedules.append(data)
+                except (json.JSONDecodeError, KeyError):
+                    continue
+
+            # Sort by next_run_time ascending
+            due_schedules.sort(key=lambda x: x.get("next_run_time", ""))
+            return due_schedules
+
+        schedule_data_list = await asyncio.to_thread(_list_due)
+        return [Schedule.from_dict(data) for data in schedule_data_list]
+
+    async def add_running_run(self, schedule_id: str, run_id: str) -> None:
+        """Add a run_id to the schedule's running_run_ids list."""
+        schedule = await self.get_schedule(schedule_id)
+
+        if not schedule:
+            raise ValueError(f"Schedule {schedule_id} does not exist")
+
+        if run_id not in schedule.running_run_ids:
+            schedule.running_run_ids.append(run_id)
+            schedule.updated_at = datetime.now(UTC)
+            await self.update_schedule(schedule)
+
+    async def remove_running_run(self, schedule_id: str, run_id: str) -> None:
+        """Remove a run_id from the schedule's running_run_ids list."""
+        schedule = await self.get_schedule(schedule_id)
+
+        if not schedule:
+            raise ValueError(f"Schedule {schedule_id} does not exist")
+
+        if run_id in schedule.running_run_ids:
+            schedule.running_run_ids.remove(run_id)
+            schedule.updated_at = datetime.now(UTC)
+            await self.update_schedule(schedule)

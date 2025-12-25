@@ -222,6 +222,7 @@ def run_worker(
 
         if beat:
             worker_args.append("--beat")
+            worker_args.append("--scheduler=pyworkflow.celery.scheduler:PyWorkflowScheduler")
 
         if pool:
             worker_args.append(f"--pool={pool}")

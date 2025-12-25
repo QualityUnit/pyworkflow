@@ -1,10 +1,50 @@
 """FastAPI application factory."""
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.rest import router as api_router
+
+
+def _initialize_pyworkflow() -> None:
+    """Initialize pyworkflow configuration.
+
+    Priority:
+    1. If pyworkflow_config_path is set, load from that path
+    2. Otherwise, let pyworkflow auto-discover (pyworkflow.config.yaml in cwd)
+    """
+    import pyworkflow
+
+    if settings.pyworkflow_config_path:
+        pyworkflow.configure_from_yaml(settings.pyworkflow_config_path)
+    else:
+        # Trigger auto-discovery by calling get_config()
+        # This loads from pyworkflow.config.yaml in cwd if present
+        pyworkflow.get_config()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Application lifespan handler.
+
+    Startup: Initialize pyworkflow configuration
+    Shutdown: (cleanup if needed in future)
+    """
+    # Startup
+    _initialize_pyworkflow()
+
+    # Reset cached storage instance to ensure fresh initialization
+    from app.dependencies.storage import reset_storage_cache
+
+    reset_storage_cache()
+
+    yield
+
+    # Shutdown (nothing to do currently)
 
 
 def create_app() -> FastAPI:
@@ -15,6 +55,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         docs_url="/docs",
         redoc_url="/redoc",
+        lifespan=lifespan,
     )
 
     # Configure CORS

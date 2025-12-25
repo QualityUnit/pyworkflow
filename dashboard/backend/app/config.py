@@ -6,7 +6,10 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Dashboard settings loaded from environment variables."""
 
-    # Storage configuration
+    # PyWorkflow configuration
+    pyworkflow_config_path: str | None = None  # Path to pyworkflow.config.yaml
+
+    # Storage configuration (fallback if pyworkflow config not set)
     storage_type: str = "file"
     storage_path: str = "./pyworkflow_data"
 

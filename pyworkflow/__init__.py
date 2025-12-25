@@ -32,7 +32,13 @@ Quick Start:
 __version__ = "0.1.0"
 
 # Configuration
-from pyworkflow.config import configure, get_config, get_storage, reset_config
+from pyworkflow.config import (
+    configure,
+    configure_from_yaml,
+    get_config,
+    get_storage,
+    reset_config,
+)
 
 # Context API (new unified context via contextvars)
 from pyworkflow.context import (
@@ -118,6 +124,7 @@ __all__ = [
     "__version__",
     # Configuration
     "configure",
+    "configure_from_yaml",
     "get_config",
     "get_storage",
     "reset_config",

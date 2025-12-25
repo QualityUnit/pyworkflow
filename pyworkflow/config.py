@@ -190,6 +190,70 @@ def configure(**kwargs: Any) -> None:
             )
 
 
+def configure_from_yaml(path: str | Path) -> None:
+    """
+    Configure PyWorkflow from a specific YAML file.
+
+    Unlike the automatic YAML loading in get_config(), this function:
+    - Requires an explicit path
+    - Raises FileNotFoundError if the file doesn't exist
+    - Raises ValueError if YAML parsing fails
+
+    Args:
+        path: Path to the YAML configuration file
+
+    Raises:
+        FileNotFoundError: If the specified file doesn't exist
+        ValueError: If the YAML file is invalid or cannot be parsed
+        ImportError: If PyYAML is not installed
+
+    Example:
+        >>> import pyworkflow
+        >>> pyworkflow.configure_from_yaml("/etc/pyworkflow/config.yaml")
+    """
+    global _config, _config_loaded_from_yaml
+
+    config_path = Path(path)
+
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"PyWorkflow configuration file not found: {config_path}"
+        )
+
+    try:
+        import yaml
+    except ImportError:
+        raise ImportError(
+            "PyYAML is required for YAML configuration. "
+            "Install it with: pip install pyyaml"
+        )
+
+    try:
+        with open(config_path) as f:
+            yaml_config = yaml.safe_load(f) or {}
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML in {config_path}: {e}")
+
+    # Map YAML keys to config attributes (same logic as _config_from_yaml)
+    runtime = yaml_config.get("runtime", "local")
+    durable = runtime == "celery"  # Celery runtime defaults to durable
+
+    # Create storage from config
+    storage = _create_storage_from_config(yaml_config.get("storage", {}))
+
+    # Get celery broker
+    celery_config = yaml_config.get("celery", {})
+    celery_broker = celery_config.get("broker")
+
+    _config = PyWorkflowConfig(
+        default_runtime=runtime,
+        default_durable=durable,
+        storage=storage,
+        celery_broker=celery_broker,
+    )
+    _config_loaded_from_yaml = True
+
+
 def get_config() -> PyWorkflowConfig:
     """
     Get the current configuration.

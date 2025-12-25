@@ -37,7 +37,7 @@ class RunListResponse(BaseModel):
     items: list[RunResponse]
     count: int
     limit: int = 100
-    offset: int = 0
+    next_cursor: str | None = None
 
 
 class StartRunRequest(BaseModel):

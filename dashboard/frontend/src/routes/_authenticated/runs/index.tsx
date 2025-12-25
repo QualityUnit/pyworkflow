@@ -2,17 +2,17 @@ import { createFileRoute } from '@tanstack/react-router'
 import { RunsList } from '@/features/runs'
 
 interface RunsSearchParams {
-  workflow_name?: string
+  query?: string
 }
 
 export const Route = createFileRoute('/_authenticated/runs/')({
   validateSearch: (search: Record<string, unknown>): RunsSearchParams => {
     return {
-      workflow_name: typeof search.workflow_name === 'string' ? search.workflow_name : undefined,
+      query: typeof search.query === 'string' ? search.query : undefined,
     }
   },
   component: () => {
-    const { workflow_name } = Route.useSearch()
-    return <RunsList workflowName={workflow_name} />
+    const { query } = Route.useSearch()
+    return <RunsList query={query} />
   },
 })

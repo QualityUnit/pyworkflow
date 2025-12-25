@@ -1,5 +1,7 @@
 """Controller for workflow run endpoints."""
 
+from datetime import datetime
+
 from app.repositories.run_repository import RunRepository
 from app.schemas.event import EventListResponse
 from app.schemas.hook import HookListResponse
@@ -23,27 +25,33 @@ class RunController:
 
     async def list_runs(
         self,
-        workflow_name: str | None = None,
+        query: str | None = None,
         status: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
         limit: int = 100,
-        offset: int = 0,
+        cursor: str | None = None,
     ) -> RunListResponse:
-        """List workflow runs with optional filtering.
+        """List workflow runs with optional filtering and cursor-based pagination.
 
         Args:
-            workflow_name: Filter by workflow name.
+            query: Case-insensitive search in workflow name and input kwargs.
             status: Filter by status.
+            start_time: Filter runs started at or after this time.
+            end_time: Filter runs started before this time.
             limit: Maximum results.
-            offset: Skip count.
+            cursor: Run ID to start after (for pagination).
 
         Returns:
-            RunListResponse with matching runs.
+            RunListResponse with matching runs and next_cursor.
         """
         return await self.service.list_runs(
-            workflow_name=workflow_name,
+            query=query,
             status=status,
+            start_time=start_time,
+            end_time=end_time,
             limit=limit,
-            offset=offset,
+            cursor=cursor,
         )
 
     async def get_run(self, run_id: str) -> RunDetailResponse | None:

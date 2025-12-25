@@ -1,5 +1,7 @@
 """Workflow run endpoints."""
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.controllers.run_controller import RunController
@@ -14,33 +16,39 @@ router = APIRouter()
 
 @router.get("", response_model=RunListResponse)
 async def list_runs(
-    workflow_name: str | None = Query(None, description="Filter by workflow name"),
+    query: str | None = Query(None, description="Search in workflow name and input kwargs (case-insensitive)"),
     status: str | None = Query(
         None,
         description="Filter by status (pending, running, suspended, completed, failed, interrupted, cancelled)",
     ),
+    start_time: datetime | None = Query(None, description="Filter runs started at or after this time (ISO 8601)"),
+    end_time: datetime | None = Query(None, description="Filter runs started before this time (ISO 8601)"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum results"),
-    offset: int = Query(0, ge=0, description="Number of results to skip"),
+    cursor: str | None = Query(None, description="Run ID to start after (for pagination)"),
     storage: StorageBackend = Depends(get_storage),
 ) -> RunListResponse:
-    """List workflow runs with optional filtering.
+    """List workflow runs with optional filtering and cursor-based pagination.
 
     Args:
-        workflow_name: Filter by workflow name.
+        query: Case-insensitive search in workflow name and input kwargs.
         status: Filter by run status.
+        start_time: Filter runs started at or after this time.
+        end_time: Filter runs started before this time.
         limit: Maximum number of results (1-1000).
-        offset: Number of results to skip.
+        cursor: Run ID to start after (for pagination).
         storage: Storage backend (injected).
 
     Returns:
-        RunListResponse with matching runs.
+        RunListResponse with matching runs and next_cursor.
     """
     controller = RunController(storage)
     return await controller.list_runs(
-        workflow_name=workflow_name,
+        query=query,
         status=status,
+        start_time=start_time,
+        end_time=end_time,
         limit=limit,
-        offset=offset,
+        cursor=cursor,
     )
 
 

@@ -59,7 +59,7 @@ export interface RunListResponse {
   items: Run[]
   count: number
   limit: number
-  offset: number
+  next_cursor: string | null
 }
 
 // Event types

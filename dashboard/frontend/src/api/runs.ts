@@ -12,30 +12,38 @@ import type {
 } from './types'
 
 export interface ListRunsParams {
-  workflow_name?: string
+  query?: string
   status?: string
+  start_time?: string  // ISO 8601 datetime
+  end_time?: string    // ISO 8601 datetime
   limit?: number
-  offset?: number
+  cursor?: string
 }
 
 export async function listRuns(params: ListRunsParams = {}): Promise<RunListResponse> {
   const searchParams = new URLSearchParams()
 
-  if (params.workflow_name) {
-    searchParams.set('workflow_name', params.workflow_name)
+  if (params.query) {
+    searchParams.set('query', params.query)
   }
   if (params.status) {
     searchParams.set('status', params.status)
   }
+  if (params.start_time) {
+    searchParams.set('start_time', params.start_time)
+  }
+  if (params.end_time) {
+    searchParams.set('end_time', params.end_time)
+  }
   if (params.limit !== undefined) {
     searchParams.set('limit', params.limit.toString())
   }
-  if (params.offset !== undefined) {
-    searchParams.set('offset', params.offset.toString())
+  if (params.cursor) {
+    searchParams.set('cursor', params.cursor)
   }
 
-  const query = searchParams.toString()
-  const path = query ? `/api/v1/runs?${query}` : '/api/v1/runs'
+  const queryString = searchParams.toString()
+  const path = queryString ? `/api/v1/runs?${queryString}` : '/api/v1/runs'
 
   return api.get<RunListResponse>(path)
 }

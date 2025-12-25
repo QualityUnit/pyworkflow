@@ -72,7 +72,7 @@ export function WorkflowsTable({ workflows }: WorkflowsTableProps) {
 
   const handleViewRuns = useCallback(
     (workflowName: string) => {
-      navigate({ to: '/runs', search: { workflow_name: workflowName } })
+      navigate({ to: '/runs', search: { query: workflowName } })
     },
     [navigate]
   )

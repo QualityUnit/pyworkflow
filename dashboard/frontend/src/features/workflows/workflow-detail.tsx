@@ -28,7 +28,7 @@ interface WorkflowDetailProps {
 
 export function WorkflowDetail({ workflowName }: WorkflowDetailProps) {
   const { data: workflow, isLoading: workflowLoading, error: workflowError } = useWorkflow(workflowName)
-  const { data: runsData, isLoading: runsLoading } = useRuns({ params: { workflow_name: workflowName, limit: 10 } })
+  const { data: runsData, isLoading: runsLoading } = useRuns({ params: { query: workflowName, limit: 10 } })
 
   if (workflowLoading) {
     return (
@@ -133,7 +133,7 @@ export function WorkflowDetail({ workflowName }: WorkflowDetailProps) {
             <CardTitle>Recent Runs</CardTitle>
             <Link
               to="/runs"
-              search={{ workflow_name: workflowName }}
+              search={{ query: workflowName }}
               className="text-sm text-primary hover:underline flex items-center gap-1"
             >
               View all runs

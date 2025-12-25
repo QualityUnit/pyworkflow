@@ -32,29 +32,35 @@ class RunService:
 
     async def list_runs(
         self,
-        workflow_name: str | None = None,
+        query: str | None = None,
         status: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
         limit: int = 100,
-        offset: int = 0,
+        cursor: str | None = None,
     ) -> RunListResponse:
-        """List workflow runs with optional filtering.
+        """List workflow runs with optional filtering and cursor-based pagination.
 
         Args:
-            workflow_name: Filter by workflow name.
+            query: Case-insensitive search in workflow name and input kwargs.
             status: Filter by status string.
+            start_time: Filter runs started at or after this time.
+            end_time: Filter runs started before this time.
             limit: Maximum number of results.
-            offset: Number of results to skip.
+            cursor: Run ID to start after (for pagination).
 
         Returns:
-            RunListResponse with list of runs.
+            RunListResponse with list of runs and next_cursor.
         """
         status_enum = RunStatus(status) if status else None
 
-        runs = await self.repository.list_runs(
-            workflow_name=workflow_name,
+        runs, next_cursor = await self.repository.list_runs(
+            query=query,
             status=status_enum,
+            start_time=start_time,
+            end_time=end_time,
             limit=limit,
-            offset=offset,
+            cursor=cursor,
         )
 
         items = [self._run_to_response(run) for run in runs]
@@ -63,7 +69,7 @@ class RunService:
             items=items,
             count=len(items),
             limit=limit,
-            offset=offset,
+            next_cursor=next_cursor,
         )
 
     async def get_run(self, run_id: str) -> RunDetailResponse | None:

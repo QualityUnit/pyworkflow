@@ -2,26 +2,22 @@
  * Runs table component with TanStack React Table.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
   type ColumnDef,
-  type ColumnFiltersState,
   type PaginationState,
   type RowSelectionState,
   type SortingState,
   type VisibilityState,
   flexRender,
   getCoreRowModel,
-  getFacetedRowModel,
-  getFacetedUniqueValues,
-  getFilteredRowModel,
   getPaginationRowModel,
   getSortedRowModel,
   useReactTable,
 } from '@tanstack/react-table'
 import { formatDistanceToNow } from 'date-fns'
-import { MoreHorizontal, XCircle, ExternalLink } from 'lucide-react'
+import { MoreHorizontal, XCircle, ExternalLink, X, ChevronDown } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   Table,
@@ -33,6 +29,8 @@ import {
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,17 +38,25 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
 } from '@/components/ui/dropdown-menu'
 import { DataTableColumnHeader } from '@/components/data-table/column-header'
-import { DataTableToolbar } from '@/components/data-table/toolbar'
+import { DataTableViewOptions } from '@/components/data-table/view-options'
 import { DataTablePagination } from '@/components/data-table/pagination'
 import { StatusBadge } from './status-badge'
 import { DateRangeFilter } from './date-range-filter'
+import { useWorkflows } from '@/hooks/use-workflows'
 import type { Run } from '@/api/types'
+import type { DateRange, RunsFilters } from '@/features/runs'
 
 interface RunsTableProps {
   runs: Run[]
   onPageChange?: (pageIndex: number) => void
+  dateRange?: DateRange
+  onDateRangeChange?: (range: DateRange) => void
+  filters?: RunsFilters
+  onFiltersChange?: (filters: RunsFilters) => void
 }
 
 function formatDuration(seconds: number | null): string {
@@ -76,22 +82,57 @@ const statusOptions = [
   { label: 'Cancelled', value: 'cancelled' },
 ]
 
-export function RunsTable({ runs, onPageChange }: RunsTableProps) {
+export function RunsTable({
+  runs,
+  onPageChange,
+  dateRange,
+  onDateRangeChange,
+  filters,
+  onFiltersChange,
+}: RunsTableProps) {
   const navigate = useNavigate()
   const [sorting, setSorting] = useState<SortingState>([
     { id: 'started_at', desc: true },
   ])
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
     pageSize: 20,
   })
-  const [dateRange, setDateRange] = useState<{ from: Date | null; to: Date | null }>({
+
+  // Local state for search input (to prevent re-renders while typing)
+  const [localSearchQuery, setLocalSearchQuery] = useState('')
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Fetch workflows for the filter dropdown
+  const { data: workflowsData } = useWorkflows()
+  const workflowOptions = workflowsData?.items.map(w => ({
+    label: w.name,
+    value: w.name,
+  })) ?? []
+
+  // Local state for when no external state is provided
+  const [localDateRange, setLocalDateRange] = useState<DateRange>({
     from: null,
     to: null,
   })
+  const [localFilters, setLocalFilters] = useState<RunsFilters>({
+    searchQuery: '',
+    statusFilter: null,
+    workflowFilter: null,
+  })
+
+  // Use external state if provided, otherwise use local state
+  const effectiveDateRange = dateRange ?? localDateRange
+  const handleDateRangeChange = onDateRangeChange ?? setLocalDateRange
+  const effectiveFilters = filters ?? localFilters
+  const handleFiltersChange = onFiltersChange ?? setLocalFilters
+
+  // Sync local search with external filter when it changes externally
+  useEffect(() => {
+    setLocalSearchQuery(effectiveFilters.searchQuery)
+  }, [effectiveFilters.searchQuery])
 
   // Notify parent of page changes
   useEffect(() => {
@@ -106,39 +147,62 @@ export function RunsTable({ runs, onPageChange }: RunsTableProps) {
   )
 
   const handleCancelRun = useCallback((runId: string) => {
-    // TODO: Implement cancel run API
     toast.info('Cancel run feature coming soon', {
       description: `Run ${runId.slice(0, 16)}... will be cancelled when this feature is implemented.`,
     })
   }, [])
 
-  // Filter runs by date range
-  const filteredRuns = useMemo(() => {
-    if (!dateRange.from && !dateRange.to) return runs
+  // Debounced search - update parent filter after user stops typing
+  const handleSearchInputChange = useCallback((value: string) => {
+    setLocalSearchQuery(value)
 
-    return runs.filter((run) => {
-      if (!run.started_at) return false
-      const startedAt = new Date(run.started_at)
+    // Clear existing timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current)
+    }
 
-      if (dateRange.from && startedAt < dateRange.from) return false
-      if (dateRange.to) {
-        const endOfDay = new Date(dateRange.to)
-        endOfDay.setHours(23, 59, 59, 999)
-        if (startedAt > endOfDay) return false
+    // Set new timeout to update filter after 500ms of no typing
+    searchTimeoutRef.current = setTimeout(() => {
+      handleFiltersChange({
+        ...effectiveFilters,
+        searchQuery: value,
+      })
+    }, 500)
+  }, [effectiveFilters, handleFiltersChange])
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current)
       }
+    }
+  }, [])
 
-      return true
+  const handleStatusFilterChange = useCallback((value: string) => {
+    handleFiltersChange({
+      ...effectiveFilters,
+      statusFilter: value === 'all' ? null : value,
     })
-  }, [runs, dateRange])
+  }, [effectiveFilters, handleFiltersChange])
 
-  // Extract unique workflows for filtering
-  const uniqueWorkflows = useMemo(() => {
-    const workflowSet = new Set<string>()
-    runs.forEach((r) => workflowSet.add(r.workflow_name))
-    return Array.from(workflowSet)
-      .sort()
-      .map((name) => ({ label: name, value: name }))
-  }, [runs])
+  const handleWorkflowFilterChange = useCallback((value: string) => {
+    handleFiltersChange({
+      ...effectiveFilters,
+      workflowFilter: value === 'all' ? null : value,
+    })
+  }, [effectiveFilters, handleFiltersChange])
+
+  const handleClearFilters = useCallback(() => {
+    setLocalSearchQuery('')
+    handleFiltersChange({
+      searchQuery: '',
+      statusFilter: null,
+      workflowFilter: null,
+    })
+  }, [handleFiltersChange])
+
+  const hasActiveFilters = effectiveFilters.searchQuery || effectiveFilters.statusFilter || effectiveFilters.workflowFilter
 
   const columns: ColumnDef<Run>[] = [
     {
@@ -204,9 +268,6 @@ export function RunsTable({ runs, onPageChange }: RunsTableProps) {
           </button>
         )
       },
-      filterFn: (row, id, value) => {
-        return value.includes(row.getValue(id))
-      },
     },
     {
       accessorKey: 'status',
@@ -214,9 +275,6 @@ export function RunsTable({ runs, onPageChange }: RunsTableProps) {
         <DataTableColumnHeader column={column} title="Status" />
       ),
       cell: ({ row }) => <StatusBadge status={row.getValue('status')} />,
-      filterFn: (row, id, value) => {
-        return value.includes(row.getValue(id))
-      },
     },
     {
       accessorKey: 'started_at',
@@ -305,62 +363,116 @@ export function RunsTable({ runs, onPageChange }: RunsTableProps) {
   ]
 
   const table = useReactTable({
-    data: filteredRuns,
+    data: runs,
     columns,
     state: {
       sorting,
-      columnFilters,
       columnVisibility,
       rowSelection,
       pagination,
     },
     enableRowSelection: true,
     onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
     onPaginationChange: setPagination,
     getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getFacetedRowModel: getFacetedRowModel(),
-    getFacetedUniqueValues: getFacetedUniqueValues(),
   })
-
-  // Build filters
-  const filters = useMemo(() => {
-    const result = []
-    if (uniqueWorkflows.length > 0) {
-      result.push({
-        columnId: 'workflow_name',
-        title: 'Workflow',
-        options: uniqueWorkflows,
-      })
-    }
-    result.push({
-      columnId: 'status',
-      title: 'Status',
-      options: statusOptions,
-    })
-    return result
-  }, [uniqueWorkflows])
 
   // Count selected rows
   const selectedCount = Object.keys(rowSelection).length
 
   return (
     <div className="flex flex-1 flex-col gap-4 h-full">
+      {/* Custom toolbar with server-side filtering */}
       <div className="flex items-center gap-4">
-        <div className="flex-1">
-          <DataTableToolbar
-            table={table}
-            searchKey="run_id"
-            searchPlaceholder="Search by run ID..."
-            filters={filters}
+        <div className="flex flex-1 flex-col-reverse items-start gap-y-2 sm:flex-row sm:items-center sm:space-x-2">
+          <Input
+            placeholder="Search runs..."
+            value={localSearchQuery}
+            onChange={(e) => handleSearchInputChange(e.target.value)}
+            className="h-8 w-[150px] lg:w-[250px]"
           />
+          <div className="flex gap-x-2">
+            {/* Status filter dropdown - single select */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8">
+                  Status
+                  {effectiveFilters.statusFilter && (
+                    <Badge variant="secondary" className="ml-2 rounded-sm px-1 font-normal">
+                      1
+                    </Badge>
+                  )}
+                  <ChevronDown className="ml-2 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-[180px]">
+                <DropdownMenuRadioGroup
+                  value={effectiveFilters.statusFilter ?? 'all'}
+                  onValueChange={handleStatusFilterChange}
+                >
+                  <DropdownMenuRadioItem value="all">
+                    All statuses
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuSeparator />
+                  {statusOptions.map((option) => (
+                    <DropdownMenuRadioItem key={option.value} value={option.value}>
+                      {option.label}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Workflow filter dropdown - single select */}
+            {workflowOptions.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8">
+                    Workflow
+                    {effectiveFilters.workflowFilter && (
+                      <Badge variant="secondary" className="ml-2 rounded-sm px-1 font-normal">
+                        1
+                      </Badge>
+                    )}
+                    <ChevronDown className="ml-2 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-[200px] max-h-[300px] overflow-y-auto">
+                  <DropdownMenuRadioGroup
+                    value={effectiveFilters.workflowFilter ?? 'all'}
+                    onValueChange={handleWorkflowFilterChange}
+                  >
+                    <DropdownMenuRadioItem value="all">
+                      All workflows
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuSeparator />
+                    {workflowOptions.map((option) => (
+                      <DropdownMenuRadioItem key={option.value} value={option.value}>
+                        {option.label}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+          {hasActiveFilters && (
+            <Button
+              variant="ghost"
+              onClick={handleClearFilters}
+              className="h-8 px-2 lg:px-3"
+            >
+              Reset
+              <X className="ml-2 h-4 w-4" />
+            </Button>
+          )}
         </div>
-        <DateRangeFilter value={dateRange} onChange={setDateRange} />
+        <DataTableViewOptions table={table} />
+        <DateRangeFilter value={effectiveDateRange} onChange={handleDateRangeChange} />
       </div>
 
       {selectedCount > 0 && (

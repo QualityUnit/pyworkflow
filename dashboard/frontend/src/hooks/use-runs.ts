@@ -2,7 +2,7 @@
  * React Query hooks for workflow runs.
  */
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import {
   listRuns,
   getRun,
@@ -24,6 +24,7 @@ export function useRuns({ params = {}, autoRefresh = true }: UseRunsOptions = {}
     queryFn: () => listRuns(params),
     refetchInterval: autoRefresh ? REFRESH_INTERVAL : false,
     refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
   })
 }
 

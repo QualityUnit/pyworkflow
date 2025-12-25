@@ -102,28 +102,71 @@ class InMemoryStorageBackend(StorageBackend):
 
     async def list_runs(
         self,
-        workflow_name: str | None = None,
+        query: str | None = None,
         status: RunStatus | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
         limit: int = 100,
-        offset: int = 0,
-    ) -> list[WorkflowRun]:
-        """List workflow runs with optional filtering."""
+        cursor: str | None = None,
+    ) -> tuple[list[WorkflowRun], str | None]:
+        """List workflow runs with optional filtering and cursor-based pagination."""
+        import json
+
         with self._lock:
             runs = list(self._runs.values())
 
-            # Filter by workflow_name
-            if workflow_name:
-                runs = [r for r in runs if r.workflow_name == workflow_name]
+            # Filter by query (case-insensitive substring in workflow_name or input_kwargs)
+            if query:
+                query_lower = query.lower()
+                filtered_runs = []
+                for r in runs:
+                    workflow_name_match = query_lower in r.workflow_name.lower()
+                    input_kwargs_str = json.dumps(r.input_kwargs or {}).lower()
+                    input_kwargs_match = query_lower in input_kwargs_str
+                    if workflow_name_match or input_kwargs_match:
+                        filtered_runs.append(r)
+                runs = filtered_runs
 
             # Filter by status
             if status:
                 runs = [r for r in runs if r.status == status]
 
-            # Sort by created_at descending
-            runs.sort(key=lambda r: r.created_at, reverse=True)
+            # Filter by time range (based on started_at)
+            if start_time or end_time:
+                filtered_runs = []
+                for r in runs:
+                    if r.started_at is None:
+                        continue  # Skip runs that haven't started
+                    if start_time and r.started_at < start_time:
+                        continue
+                    if end_time and r.started_at >= end_time:
+                        continue
+                    filtered_runs.append(r)
+                runs = filtered_runs
 
-            # Apply pagination
-            return runs[offset : offset + limit]
+            # Sort by (created_at DESC, run_id DESC) for deterministic ordering
+            runs.sort(key=lambda r: (r.created_at, r.run_id), reverse=True)
+
+            # Apply cursor-based pagination
+            if cursor:
+                cursor_found = False
+                filtered_runs = []
+                for run in runs:
+                    if cursor_found:
+                        filtered_runs.append(run)
+                    elif run.run_id == cursor:
+                        cursor_found = True
+                runs = filtered_runs
+
+            # Apply limit and determine next_cursor
+            if len(runs) > limit:
+                result_runs = runs[:limit]
+                next_cursor = result_runs[-1].run_id if result_runs else None
+            else:
+                result_runs = runs[:limit]
+                next_cursor = None
+
+            return result_runs, next_cursor
 
     # Event Log Operations
 

@@ -2,7 +2,7 @@
  * Date range filter component with presets and custom date picker.
  */
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { format, subHours, subDays, startOfDay, endOfDay } from 'date-fns'
 import { CalendarIcon, X } from 'lucide-react'
 import type { DateRange } from 'react-day-picker'
@@ -13,13 +13,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 
 interface DateRangeFilterProps {
@@ -27,15 +20,14 @@ interface DateRangeFilterProps {
   onChange: (value: { from: Date | null; to: Date | null }) => void
 }
 
-type PresetValue = 'all' | '1h' | '24h' | '7d' | '30d' | 'custom'
+type PresetValue = 'all' | '1h' | '24h' | '7d' | '30d'
 
-const presets = [
-  { label: 'All time', value: 'all' as const },
-  { label: 'Last hour', value: '1h' as const },
-  { label: 'Last 24 hours', value: '24h' as const },
-  { label: 'Last 7 days', value: '7d' as const },
-  { label: 'Last 30 days', value: '30d' as const },
-  { label: 'Custom range', value: 'custom' as const },
+const presets: { label: string; value: PresetValue }[] = [
+  { label: 'All time', value: 'all' },
+  { label: 'Last hour', value: '1h' },
+  { label: 'Last 24 hours', value: '24h' },
+  { label: 'Last 7 days', value: '7d' },
+  { label: 'Last 30 days', value: '30d' },
 ]
 
 function getPresetDates(preset: PresetValue): { from: Date | null; to: Date | null } {
@@ -52,117 +44,169 @@ function getPresetDates(preset: PresetValue): { from: Date | null; to: Date | nu
       return { from: startOfDay(subDays(now, 7)), to: endOfDay(now) }
     case '30d':
       return { from: startOfDay(subDays(now, 30)), to: endOfDay(now) }
-    case 'custom':
-      return { from: null, to: null }
     default:
       return { from: null, to: null }
   }
 }
 
 export function DateRangeFilter({ value, onChange }: DateRangeFilterProps) {
-  const [selectedPreset, setSelectedPreset] = useState<PresetValue>('all')
-  const [isCalendarOpen, setIsCalendarOpen] = useState(false)
-
-  // Convert value to DateRange for calendar
-  const dateRange: DateRange | undefined = useMemo(() => {
-    if (!value.from && !value.to) return undefined
-    return {
-      from: value.from ?? undefined,
-      to: value.to ?? undefined,
-    }
-  }, [value])
-
-  const handlePresetChange = (preset: PresetValue) => {
-    setSelectedPreset(preset)
-    if (preset === 'custom') {
-      setIsCalendarOpen(true)
-    } else {
-      onChange(getPresetDates(preset))
-    }
-  }
-
-  const handleCalendarSelect = (range: DateRange | undefined) => {
-    if (range) {
-      onChange({
-        from: range.from ?? null,
-        to: range.to ?? null,
-      })
-    } else {
-      onChange({ from: null, to: null })
-    }
-  }
-
-  const handleClear = () => {
-    setSelectedPreset('all')
-    onChange({ from: null, to: null })
-  }
+  const [isOpen, setIsOpen] = useState(false)
+  const [showCalendar, setShowCalendar] = useState(false)
+  // Local state for custom range selection (to avoid closing popover on first click)
+  const [pendingRange, setPendingRange] = useState<DateRange | undefined>(undefined)
+  // Track if we're waiting for the second date selection
+  const [waitingForSecondDate, setWaitingForSecondDate] = useState(false)
 
   const hasFilter = value.from !== null || value.to !== null
 
-  // Format the display text
+  // Format display text for the button
   const displayText = useMemo(() => {
-    if (!hasFilter) return null
-    if (selectedPreset !== 'custom') {
-      const preset = presets.find((p) => p.value === selectedPreset)
-      return preset?.label ?? 'All time'
+    if (!hasFilter) {
+      return 'All time'
     }
     if (value.from && value.to) {
-      return `${format(value.from, 'MMM d')} - ${format(value.to, 'MMM d')}`
+      return `${format(value.from, 'MMM d, yyyy')} - ${format(value.to, 'MMM d, yyyy')}`
     }
     if (value.from) {
-      return `From ${format(value.from, 'MMM d')}`
+      return `From ${format(value.from, 'MMM d, yyyy')}`
     }
     if (value.to) {
-      return `Until ${format(value.to, 'MMM d')}`
+      return `Until ${format(value.to, 'MMM d, yyyy')}`
     }
-    return null
-  }, [hasFilter, selectedPreset, value])
+    return 'All time'
+  }, [hasFilter, value.from, value.to])
+
+  const handlePresetClick = useCallback((preset: PresetValue) => {
+    const dates = getPresetDates(preset)
+    onChange(dates)
+    setShowCalendar(false)
+    setIsOpen(false)
+  }, [onChange])
+
+  const handleCustomClick = useCallback(() => {
+    setShowCalendar(true)
+    setWaitingForSecondDate(false)
+    // Initialize pending range with current value
+    setPendingRange(value.from || value.to ? {
+      from: value.from ?? undefined,
+      to: value.to ?? undefined,
+    } : undefined)
+  }, [value.from, value.to])
+
+  const handleCalendarSelect = useCallback((range: DateRange | undefined) => {
+    setPendingRange(range)
+
+    if (!range?.from) {
+      setWaitingForSecondDate(false)
+      return
+    }
+
+    // First click - wait for second date
+    if (!waitingForSecondDate) {
+      setWaitingForSecondDate(true)
+      return
+    }
+
+    // Second click - apply the range and close
+    if (range.from && range.to) {
+      onChange({
+        from: range.from,
+        to: range.to,
+      })
+      setShowCalendar(false)
+      setIsOpen(false)
+      setWaitingForSecondDate(false)
+    }
+  }, [onChange, waitingForSecondDate])
+
+  const handleClear = useCallback(() => {
+    setPendingRange(undefined)
+    setShowCalendar(false)
+    setIsOpen(false)
+    setWaitingForSecondDate(false)
+    onChange({ from: null, to: null })
+  }, [onChange])
+
+  const handleOpenChange = useCallback((open: boolean) => {
+    // Don't close if we're in the middle of selecting a custom date range
+    if (!open && showCalendar && waitingForSecondDate) {
+      return
+    }
+    setIsOpen(open)
+    if (!open) {
+      // Reset calendar view when closing
+      setShowCalendar(false)
+      setPendingRange(undefined)
+      setWaitingForSecondDate(false)
+    }
+  }, [showCalendar, waitingForSecondDate])
 
   return (
     <div className="flex items-center gap-2">
-      <Select value={selectedPreset} onValueChange={handlePresetChange}>
-        <SelectTrigger className="w-[160px]">
-          <CalendarIcon className="mr-2 h-4 w-4" />
-          <SelectValue placeholder="Filter by date" />
-        </SelectTrigger>
-        <SelectContent>
-          {presets.map((preset) => (
-            <SelectItem key={preset.value} value={preset.value}>
-              {preset.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <Popover open={isOpen} onOpenChange={handleOpenChange}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            className={cn(
+              'w-[280px] justify-start text-left font-normal',
+              !hasFilter && 'text-muted-foreground'
+            )}
+          >
+            <CalendarIcon className="mr-2 h-4 w-4" />
+            {displayText}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          className="w-auto p-0"
+          align="start"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+          onFocusOutside={(e) => e.preventDefault()}
+        >
+          <div className="flex">
+            {/* Presets sidebar */}
+            <div className="border-r p-2 space-y-1">
+              {presets.map((preset) => (
+                <Button
+                  key={preset.value}
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-start"
+                  onClick={() => handlePresetClick(preset.value)}
+                >
+                  {preset.label}
+                </Button>
+              ))}
+              <Button
+                variant={showCalendar ? 'secondary' : 'ghost'}
+                size="sm"
+                className="w-full justify-start"
+                onClick={handleCustomClick}
+              >
+                Custom range
+              </Button>
+            </div>
 
-      {selectedPreset === 'custom' && (
-        <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              className={cn(
-                'justify-start text-left font-normal',
-                !dateRange && 'text-muted-foreground'
-              )}
-            >
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {displayText ?? 'Pick date range'}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="start">
-            <Calendar
-              mode="range"
-              defaultMonth={value.from ?? new Date()}
-              selected={dateRange}
-              onSelect={handleCalendarSelect}
-              numberOfMonths={2}
-            />
-          </PopoverContent>
-        </Popover>
-      )}
-
-      {hasFilter && selectedPreset !== 'custom' && (
-        <span className="text-sm text-muted-foreground">{displayText}</span>
-      )}
+            {/* Calendar for custom range */}
+            {showCalendar && (
+              <div className="p-2">
+                <Calendar
+                  mode="range"
+                  defaultMonth={pendingRange?.from ?? value.from ?? new Date()}
+                  selected={pendingRange}
+                  onSelect={handleCalendarSelect}
+                  numberOfMonths={2}
+                />
+                <div className="flex justify-end gap-2 p-2 border-t">
+                  <Button variant="ghost" size="sm" onClick={handleClear}>
+                    Clear
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
 
       {hasFilter && (
         <Button

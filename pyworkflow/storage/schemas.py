@@ -20,6 +20,7 @@ class RunStatus(Enum):
     FAILED = "failed"
     INTERRUPTED = "interrupted"  # Recoverable infrastructure failure (worker loss)
     CANCELLED = "cancelled"
+    CONTINUED_AS_NEW = "continued_as_new"  # Workflow continued with fresh history
 
 
 class StepStatus(Enum):
@@ -78,6 +79,10 @@ class WorkflowRun:
     parent_run_id: str | None = None  # Link to parent workflow (None if root)
     nesting_depth: int = 0  # 0=root, 1=child, 2=grandchild (max 3)
 
+    # Continue-as-new chain tracking
+    continued_from_run_id: str | None = None  # Previous run in chain
+    continued_to_run_id: str | None = None  # Next run in chain
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
@@ -100,6 +105,8 @@ class WorkflowRun:
             "recover_on_worker_loss": self.recover_on_worker_loss,
             "parent_run_id": self.parent_run_id,
             "nesting_depth": self.nesting_depth,
+            "continued_from_run_id": self.continued_from_run_id,
+            "continued_to_run_id": self.continued_to_run_id,
         }
 
     @classmethod
@@ -129,6 +136,8 @@ class WorkflowRun:
             recover_on_worker_loss=data.get("recover_on_worker_loss", True),
             parent_run_id=data.get("parent_run_id"),
             nesting_depth=data.get("nesting_depth", 0),
+            continued_from_run_id=data.get("continued_from_run_id"),
+            continued_to_run_id=data.get("continued_to_run_id"),
         )
 
 

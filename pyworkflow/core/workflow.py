@@ -16,7 +16,7 @@ from typing import Any
 from loguru import logger
 
 from pyworkflow.context import LocalContext, reset_context, set_context
-from pyworkflow.core.exceptions import CancellationError, SuspensionSignal
+from pyworkflow.core.exceptions import CancellationError, ContinueAsNewSignal, SuspensionSignal
 from pyworkflow.core.registry import register_workflow
 from pyworkflow.engine.events import (
     create_workflow_cancelled_event,
@@ -216,6 +216,18 @@ async def execute_workflow_with_context(
             workflow_name=workflow_name,
             reason=e.reason,
         )
+        raise
+
+    except ContinueAsNewSignal as e:
+        # Workflow continuing as new execution
+        logger.info(
+            f"Workflow continuing as new: {workflow_name}",
+            run_id=run_id,
+            workflow_name=workflow_name,
+            new_args=e.workflow_args,
+            new_kwargs=e.workflow_kwargs,
+        )
+        # Re-raise for caller (executor) to handle continuation
         raise
 
     except CancellationError as e:

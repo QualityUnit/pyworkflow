@@ -17,6 +17,7 @@ from typing import Any
 from loguru import logger
 
 from pyworkflow.core.exceptions import (
+    ContinueAsNewSignal,
     SuspensionSignal,
     WorkflowAlreadyRunningError,
     WorkflowNotFoundError,
@@ -26,8 +27,9 @@ from pyworkflow.core.workflow import execute_workflow_with_context
 from pyworkflow.engine.events import (
     create_cancellation_requested_event,
     create_workflow_cancelled_event,
+    create_workflow_continued_as_new_event,
 )
-from pyworkflow.serialization.encoder import serialize_args
+from pyworkflow.serialization.encoder import serialize_args, serialize_kwargs
 from pyworkflow.storage.base import StorageBackend
 from pyworkflow.storage.schemas import RunStatus, WorkflowRun
 
@@ -293,6 +295,25 @@ async def _execute_workflow_local(
 
         return None
 
+    except ContinueAsNewSignal as e:
+        # Workflow continuing as new execution
+        new_run_id = await _handle_continue_as_new(
+            current_run_id=run_id,
+            workflow_func=workflow_func,
+            workflow_name=workflow_name,
+            storage=storage,
+            new_args=e.workflow_args,
+            new_kwargs=e.workflow_kwargs,
+        )
+
+        logger.info(
+            f"Workflow continued as new: {workflow_name}",
+            old_run_id=run_id,
+            new_run_id=new_run_id,
+        )
+
+        return None
+
     except Exception as e:
         # Workflow failed
         await storage.update_run_status(run_id=run_id, status=RunStatus.FAILED, error=str(e))
@@ -306,6 +327,104 @@ async def _execute_workflow_local(
         )
 
         raise
+
+
+async def _handle_continue_as_new(
+    current_run_id: str,
+    workflow_func: Callable,
+    workflow_name: str,
+    storage: StorageBackend,
+    new_args: tuple,
+    new_kwargs: dict,
+) -> str:
+    """
+    Handle continue-as-new by creating new run and linking it to current.
+
+    This is an internal function that:
+    1. Generates new run_id
+    2. Records WORKFLOW_CONTINUED_AS_NEW event in current run
+    3. Updates current run status to CONTINUED_AS_NEW
+    4. Updates current run's continued_to_run_id
+    5. Creates new WorkflowRun with continued_from_run_id
+    6. Starts new workflow execution via runtime
+
+    Args:
+        current_run_id: The run ID of the current workflow
+        workflow_func: Workflow function
+        workflow_name: Workflow name
+        storage: Storage backend
+        new_args: Arguments for the new workflow
+        new_kwargs: Keyword arguments for the new workflow
+
+    Returns:
+        New run ID
+    """
+    from datetime import UTC, datetime
+
+    from pyworkflow.config import get_config
+    from pyworkflow.runtime import get_runtime
+
+    # Generate new run_id
+    new_run_id = f"run_{uuid.uuid4().hex[:16]}"
+
+    # Serialize arguments
+    args_json = serialize_args(*new_args)
+    kwargs_json = serialize_kwargs(**new_kwargs)
+
+    # Record continuation event in current run's log
+    continuation_event = create_workflow_continued_as_new_event(
+        run_id=current_run_id,
+        new_run_id=new_run_id,
+        args=args_json,
+        kwargs=kwargs_json,
+    )
+    await storage.record_event(continuation_event)
+
+    # Update current run status and link to new run
+    await storage.update_run_status(
+        run_id=current_run_id,
+        status=RunStatus.CONTINUED_AS_NEW,
+    )
+    await storage.update_run_continuation(
+        run_id=current_run_id,
+        continued_to_run_id=new_run_id,
+    )
+
+    # Get current run to copy metadata
+    current_run = await storage.get_run(current_run_id)
+    nesting_depth = current_run.nesting_depth if current_run else 0
+    parent_run_id = current_run.parent_run_id if current_run else None
+
+    # Create new workflow run linked to current
+    new_run = WorkflowRun(
+        run_id=new_run_id,
+        workflow_name=workflow_name,
+        status=RunStatus.PENDING,
+        created_at=datetime.now(UTC),
+        input_args=args_json,
+        input_kwargs=kwargs_json,
+        continued_from_run_id=current_run_id,
+        nesting_depth=nesting_depth,
+        parent_run_id=parent_run_id,
+    )
+    await storage.create_run(new_run)
+
+    # Start new workflow via runtime
+    config = get_config()
+    runtime = get_runtime(config.default_runtime)
+
+    # Trigger execution of the new run
+    await runtime.start_workflow(
+        workflow_func=workflow_func,
+        args=new_args,
+        kwargs=new_kwargs,
+        run_id=new_run_id,
+        workflow_name=workflow_name,
+        storage=storage,
+        durable=True,
+    )
+
+    return new_run_id
 
 
 async def get_workflow_run(
@@ -362,6 +481,44 @@ async def get_workflow_events(
         storage = FileStorageBackend()
 
     return await storage.get_events(run_id)
+
+
+async def get_workflow_chain(
+    run_id: str,
+    storage: StorageBackend | None = None,
+) -> list[WorkflowRun]:
+    """
+    Get all workflow runs in a continue-as-new chain.
+
+    Given any run_id in a chain, returns all runs from the original
+    execution to the most recent continuation, ordered from oldest to newest.
+
+    Args:
+        run_id: Any run ID in the chain
+        storage: Storage backend (defaults to configured storage or FileStorageBackend)
+
+    Returns:
+        List of WorkflowRun ordered from oldest to newest in the chain
+
+    Examples:
+        # Get full history of a long-running polling workflow
+        chain = await get_workflow_chain("run_abc123")
+        print(f"Workflow has continued {len(chain) - 1} times")
+        for run in chain:
+            print(f"  {run.run_id}: {run.status.value}")
+    """
+    if storage is None:
+        from pyworkflow.config import get_config
+
+        config = get_config()
+        storage = config.storage
+
+    if storage is None:
+        from pyworkflow.storage.file import FileStorageBackend
+
+        storage = FileStorageBackend()
+
+    return await storage.get_workflow_chain(run_id)
 
 
 async def cancel_workflow(
@@ -447,6 +604,7 @@ async def cancel_workflow(
         RunStatus.COMPLETED,
         RunStatus.FAILED,
         RunStatus.CANCELLED,
+        RunStatus.CONTINUED_AS_NEW,
     }
     if run.status in terminal_statuses:
         logger.info(

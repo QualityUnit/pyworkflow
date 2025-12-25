@@ -79,6 +79,7 @@ from pyworkflow.core.workflow import workflow
 from pyworkflow.engine.executor import (
     ConfigurationError,
     cancel_workflow,
+    get_workflow_chain,
     get_workflow_events,
     get_workflow_run,
     resume,
@@ -96,6 +97,7 @@ from pyworkflow.observability.logging import (
 )
 from pyworkflow.primitives.child_handle import ChildWorkflowHandle
 from pyworkflow.primitives.child_workflow import start_child_workflow
+from pyworkflow.primitives.continue_as_new import continue_as_new
 from pyworkflow.primitives.define_hook import TypedHook, define_hook
 from pyworkflow.primitives.hooks import hook
 from pyworkflow.primitives.resume_hook import ResumeResult, resume_hook
@@ -130,6 +132,7 @@ __all__ = [
     "resume_hook",
     "ResumeResult",
     "shield",
+    "continue_as_new",
     # Child workflows
     "start_child_workflow",
     "ChildWorkflowHandle",
@@ -139,6 +142,7 @@ __all__ = [
     "cancel_workflow",
     "get_workflow_run",
     "get_workflow_events",
+    "get_workflow_chain",
     # Exceptions
     "WorkflowError",
     "FatalError",

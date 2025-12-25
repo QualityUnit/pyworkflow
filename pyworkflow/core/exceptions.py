@@ -182,6 +182,27 @@ class SuspensionSignal(Exception):
         self.data = data
 
 
+class ContinueAsNewSignal(Exception):
+    """
+    Internal signal to continue workflow as a new run.
+
+    Raised when workflow calls continue_as_new() to terminate
+    current execution and start fresh with new event history.
+
+    This is an internal implementation detail and should not be caught or
+    raised by user code.
+    """
+
+    def __init__(
+        self,
+        workflow_args: tuple = (),
+        workflow_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__("Workflow continuing as new execution")
+        self.workflow_args = workflow_args
+        self.workflow_kwargs = workflow_kwargs or {}
+
+
 class WorkflowNotFoundError(WorkflowError):
     """Raised when a workflow run cannot be found."""
 

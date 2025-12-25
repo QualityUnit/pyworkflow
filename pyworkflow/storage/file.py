@@ -521,6 +521,59 @@ class FileStorageBackend(StorageBackend):
 
         await asyncio.to_thread(_clear)
 
+    # Continue-As-New Chain Operations
+
+    async def update_run_continuation(
+        self,
+        run_id: str,
+        continued_to_run_id: str,
+    ) -> None:
+        """Update the continuation link for a workflow run."""
+        run_file = self.runs_dir / f"{run_id}.json"
+
+        if not run_file.exists():
+            raise ValueError(f"Workflow run {run_id} not found")
+
+        lock_file = self.locks_dir / f"{run_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _update() -> None:
+            with lock:
+                data = json.loads(run_file.read_text())
+                data["continued_to_run_id"] = continued_to_run_id
+                data["updated_at"] = datetime.now(UTC).isoformat()
+                run_file.write_text(json.dumps(data, indent=2))
+
+        await asyncio.to_thread(_update)
+
+    async def get_workflow_chain(
+        self,
+        run_id: str,
+    ) -> list[WorkflowRun]:
+        """Get all runs in a continue-as-new chain."""
+        run = await self.get_run(run_id)
+        if not run:
+            return []
+
+        # Walk backwards to find the start of the chain
+        current = run
+        while current.continued_from_run_id:
+            prev = await self.get_run(current.continued_from_run_id)
+            if not prev:
+                break
+            current = prev
+
+        # Build chain from start to end
+        chain = [current]
+        while current.continued_to_run_id:
+            next_run = await self.get_run(current.continued_to_run_id)
+            if not next_run:
+                break
+            chain.append(next_run)
+            current = next_run
+
+        return chain
+
     # Child Workflow Operations
 
     async def get_children(

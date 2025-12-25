@@ -22,6 +22,7 @@ from loguru import logger
 from pyworkflow.celery.app import celery_app
 from pyworkflow.core.exceptions import (
     CancellationError,
+    ContinueAsNewSignal,
     FatalError,
     RetryableError,
     SuspensionSignal,
@@ -32,6 +33,7 @@ from pyworkflow.engine.events import (
     EventType,
     create_child_workflow_cancelled_event,
     create_workflow_cancelled_event,
+    create_workflow_continued_as_new_event,
     create_workflow_interrupted_event,
     create_workflow_started_event,
 )
@@ -400,6 +402,31 @@ async def _execute_child_workflow_on_worker(
         if resume_at:
             schedule_workflow_resumption(child_run_id, resume_at, storage_config)
 
+    except ContinueAsNewSignal as e:
+        # Child workflow continuing as new execution
+        from pyworkflow.core.registry import get_workflow
+
+        child_workflow_meta = get_workflow(workflow_name)
+        if not child_workflow_meta:
+            raise ValueError(f"Workflow '{workflow_name}' not found in registry")
+
+        new_run_id = await _handle_continue_as_new_celery(
+            current_run_id=child_run_id,
+            workflow_meta=child_workflow_meta,
+            storage=storage,
+            storage_config=storage_config,
+            new_args=e.workflow_args,
+            new_kwargs=e.workflow_kwargs,
+            parent_run_id=parent_run_id,
+        )
+
+        logger.info(
+            f"Child workflow continued as new: {workflow_name}",
+            old_run_id=child_run_id,
+            new_run_id=new_run_id,
+            parent_run_id=parent_run_id,
+        )
+
     except Exception as e:
         # Child workflow failed
         error_msg = str(e)
@@ -726,6 +753,28 @@ async def _recover_workflow_on_worker(
 
         return run_id
 
+    except ContinueAsNewSignal as e:
+        # Workflow continuing as new execution
+        new_run_id = await _handle_continue_as_new_celery(
+            current_run_id=run_id,
+            workflow_meta=workflow_meta,
+            storage=storage,
+            storage_config=storage_config,
+            new_args=e.workflow_args,
+            new_kwargs=e.workflow_kwargs,
+        )
+
+        # Cancel all running children (TERMINATE policy)
+        await _handle_parent_completion(run_id, RunStatus.CONTINUED_AS_NEW, storage)
+
+        logger.info(
+            f"Recovered workflow continued as new: {workflow_name}",
+            old_run_id=run_id,
+            new_run_id=new_run_id,
+        )
+
+        return run_id
+
     except Exception as e:
         # Workflow failed during recovery
         await storage.update_run_status(run_id=run_id, status=RunStatus.FAILED, error=str(e))
@@ -982,6 +1031,28 @@ async def _start_workflow_on_worker(
                 run_id=run_id,
                 resume_at=resume_at.isoformat(),
             )
+
+        return run_id
+
+    except ContinueAsNewSignal as e:
+        # Workflow continuing as new execution
+        new_run_id = await _handle_continue_as_new_celery(
+            current_run_id=run_id,
+            workflow_meta=workflow_meta,
+            storage=storage,
+            storage_config=storage_config,
+            new_args=e.workflow_args,
+            new_kwargs=e.workflow_kwargs,
+        )
+
+        # Cancel all running children (TERMINATE policy)
+        await _handle_parent_completion(run_id, RunStatus.CONTINUED_AS_NEW, storage)
+
+        logger.info(
+            f"Workflow continued as new on worker: {workflow_name}",
+            old_run_id=run_id,
+            new_run_id=new_run_id,
+        )
 
         return run_id
 
@@ -1244,6 +1315,33 @@ async def _resume_workflow_on_worker(
 
         return None
 
+    except ContinueAsNewSignal as e:
+        # Workflow continuing as new execution
+        workflow_meta = get_workflow(run.workflow_name)
+        if not workflow_meta:
+            raise ValueError(f"Workflow {run.workflow_name} not registered")
+
+        new_run_id = await _handle_continue_as_new_celery(
+            current_run_id=run_id,
+            workflow_meta=workflow_meta,
+            storage=storage,
+            storage_config=storage_config,
+            new_args=e.workflow_args,
+            new_kwargs=e.workflow_kwargs,
+            parent_run_id=run.parent_run_id,
+        )
+
+        # Cancel all running children (TERMINATE policy)
+        await _handle_parent_completion(run_id, RunStatus.CONTINUED_AS_NEW, storage)
+
+        logger.info(
+            f"Workflow continued as new on resume: {run.workflow_name}",
+            old_run_id=run_id,
+            new_run_id=new_run_id,
+        )
+
+        return None
+
     except Exception as e:
         # Workflow failed
         error_msg = str(e)
@@ -1407,3 +1505,91 @@ async def _handle_parent_completion(
                 child_run_id=child.run_id,
                 error=str(e),
             )
+
+
+async def _handle_continue_as_new_celery(
+    current_run_id: str,
+    workflow_meta: WorkflowMetadata,
+    storage: StorageBackend,
+    storage_config: dict[str, Any] | None,
+    new_args: tuple,
+    new_kwargs: dict,
+    parent_run_id: str | None = None,
+) -> str:
+    """
+    Handle continue-as-new in Celery context.
+
+    This function:
+    1. Generates new run_id
+    2. Records WORKFLOW_CONTINUED_AS_NEW event in current run
+    3. Updates current run status to CONTINUED_AS_NEW
+    4. Updates current run's continued_to_run_id
+    5. Creates new WorkflowRun with continued_from_run_id
+    6. Schedules new workflow execution via Celery
+
+    Args:
+        current_run_id: The run ID of the current workflow
+        workflow_meta: Workflow metadata
+        storage: Storage backend
+        storage_config: Storage configuration for serialization
+        new_args: Arguments for the new workflow
+        new_kwargs: Keyword arguments for the new workflow
+        parent_run_id: Parent run ID if this is a child workflow
+
+    Returns:
+        New run ID
+    """
+    # Generate new run_id
+    new_run_id = f"run_{uuid.uuid4().hex[:16]}"
+
+    # Serialize arguments
+    args_json = serialize_args(*new_args)
+    kwargs_json = serialize_kwargs(**new_kwargs)
+
+    # Record continuation event in current run's log
+    continuation_event = create_workflow_continued_as_new_event(
+        run_id=current_run_id,
+        new_run_id=new_run_id,
+        args=args_json,
+        kwargs=kwargs_json,
+    )
+    await storage.record_event(continuation_event)
+
+    # Update current run status and link to new run
+    await storage.update_run_status(
+        run_id=current_run_id,
+        status=RunStatus.CONTINUED_AS_NEW,
+    )
+    await storage.update_run_continuation(
+        run_id=current_run_id,
+        continued_to_run_id=new_run_id,
+    )
+
+    # Get current run to copy metadata
+    current_run = await storage.get_run(current_run_id)
+    nesting_depth = current_run.nesting_depth if current_run else 0
+
+    # Create new workflow run linked to current
+    new_run = WorkflowRun(
+        run_id=new_run_id,
+        workflow_name=workflow_meta.name,
+        status=RunStatus.PENDING,
+        created_at=datetime.now(UTC),
+        input_args=args_json,
+        input_kwargs=kwargs_json,
+        continued_from_run_id=current_run_id,
+        nesting_depth=nesting_depth,
+        parent_run_id=parent_run_id,
+    )
+    await storage.create_run(new_run)
+
+    # Schedule new workflow execution via Celery
+    start_workflow_task.delay(
+        workflow_name=workflow_meta.name,
+        args_json=args_json,
+        kwargs_json=kwargs_json,
+        run_id=new_run_id,
+        storage_config=storage_config,
+    )
+
+    return new_run_id

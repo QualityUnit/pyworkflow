@@ -23,6 +23,7 @@ class EventType(Enum):
     WORKFLOW_CANCELLED = "workflow.cancelled"
     WORKFLOW_PAUSED = "workflow.paused"
     WORKFLOW_RESUMED = "workflow.resumed"
+    WORKFLOW_CONTINUED_AS_NEW = "workflow.continued_as_new"  # Workflow continued with fresh history
 
     # Step lifecycle events
     STEP_STARTED = "step.started"
@@ -118,6 +119,43 @@ def create_workflow_failed_event(
             "error": error,
             "error_type": error_type,
             "traceback": traceback,
+        },
+    )
+
+
+def create_workflow_continued_as_new_event(
+    run_id: str,
+    new_run_id: str,
+    args: str,
+    kwargs: str,
+    reason: str | None = None,
+) -> Event:
+    """
+    Create a workflow continued as new event.
+
+    This event is recorded when a workflow completes by calling
+    continue_as_new(), indicating this run is complete and a new
+    run has been started with fresh event history.
+
+    Args:
+        run_id: The current workflow run ID
+        new_run_id: The new workflow run ID
+        args: Serialized positional arguments for new workflow
+        kwargs: Serialized keyword arguments for new workflow
+        reason: Optional reason for continuation
+
+    Returns:
+        Event: The workflow continued as new event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.WORKFLOW_CONTINUED_AS_NEW,
+        data={
+            "new_run_id": new_run_id,
+            "args": args,
+            "kwargs": kwargs,
+            "reason": reason,
+            "continued_at": datetime.now(UTC).isoformat(),
         },
     )
 

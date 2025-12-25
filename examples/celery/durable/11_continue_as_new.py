@@ -25,8 +25,6 @@ from pyworkflow import (
     step,
     workflow,
 )
-from pyworkflow.runtime import register_runtime
-from pyworkflow.runtime.celery import CeleryRuntime
 from pyworkflow.storage import FileStorageBackend
 
 

@@ -404,9 +404,15 @@ async def _execute_child_workflow_on_worker(
 
     except ContinueAsNewSignal as e:
         # Child workflow continuing as new execution
+        from pyworkflow.core.registry import get_workflow
+
+        child_workflow_meta = get_workflow(workflow_name)
+        if not child_workflow_meta:
+            raise ValueError(f"Workflow '{workflow_name}' not found in registry")
+
         new_run_id = await _handle_continue_as_new_celery(
             current_run_id=child_run_id,
-            workflow_meta=workflow_meta,
+            workflow_meta=child_workflow_meta,
             storage=storage,
             storage_config=storage_config,
             new_args=e.workflow_args,

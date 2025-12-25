@@ -43,7 +43,7 @@ async def fetch_batch(offset: int, batch_size: int) -> list:
     return items
 
 
-@step()
+@step(name="continue_process_item")
 async def process_item(item: int) -> dict:
     """Process a single item."""
     await asyncio.sleep(0.05)  # Simulate work

@@ -11,20 +11,22 @@ from app.rest import router as api_router
 
 
 def _initialize_pyworkflow() -> None:
-    """Initialize pyworkflow configuration.
+    """Initialize pyworkflow configuration and discover workflows.
 
     Priority:
-    1. If pyworkflow_config_path is set, load from that path
-    2. Otherwise, let pyworkflow auto-discover (pyworkflow.config.yaml in cwd)
+    1. If pyworkflow_config_path is set, load from that path (includes discovery)
+    2. Otherwise, load from pyworkflow.config.yaml in cwd and discover workflows
     """
     import pyworkflow
 
     if settings.pyworkflow_config_path:
+        # configure_from_yaml automatically discovers workflows
         pyworkflow.configure_from_yaml(settings.pyworkflow_config_path)
     else:
-        # Trigger auto-discovery by calling get_config()
-        # This loads from pyworkflow.config.yaml in cwd if present
+        # Load config without discovery, then discover from cwd config
         pyworkflow.get_config()
+        # Discover workflows from pyworkflow.config.yaml in cwd
+        pyworkflow.discover_workflows()
 
 
 @asynccontextmanager

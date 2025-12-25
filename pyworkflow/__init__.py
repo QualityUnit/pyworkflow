@@ -81,6 +81,9 @@ from pyworkflow.core.registry import (
 from pyworkflow.core.step import step
 from pyworkflow.core.workflow import workflow
 
+# Discovery
+from pyworkflow.discovery import DiscoveryError, discover_workflows
+
 # Execution engine
 from pyworkflow.engine.executor import (
     ConfigurationError,
@@ -128,6 +131,9 @@ __all__ = [
     "get_config",
     "get_storage",
     "reset_config",
+    # Discovery
+    "discover_workflows",
+    "DiscoveryError",
     # Core decorators
     "workflow",
     "step",

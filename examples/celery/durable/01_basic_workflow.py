@@ -23,14 +23,14 @@ Check status:
 from pyworkflow import step, workflow
 
 
-@step()
+@step(name="basic_validate_order")
 async def validate_order(order_id: str) -> dict:
     """Validate the order exists and is processable."""
     print(f"[Step] Validating order {order_id}...")
     return {"order_id": order_id, "valid": True}
 
 
-@step()
+@step(name="basic_process_payment")
 async def process_payment(order: dict, amount: float) -> dict:
     """Process payment for the order."""
     print(f"[Step] Processing payment ${amount:.2f} for {order['order_id']}...")

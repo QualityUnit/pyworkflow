@@ -32,7 +32,7 @@ async def fetch_batch_items(batch_id: str, limit: int = 100) -> list:
     return items
 
 
-@step()
+@step(name="batch_process_item")
 async def process_item(item: dict) -> dict:
     """Process a single item."""
     print(f"[Step] Processing item {item['id']}...")

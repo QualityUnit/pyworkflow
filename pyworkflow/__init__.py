@@ -32,7 +32,13 @@ Quick Start:
 __version__ = "0.1.0"
 
 # Configuration
-from pyworkflow.config import configure, get_config, get_storage, reset_config
+from pyworkflow.config import (
+    configure,
+    configure_from_yaml,
+    get_config,
+    get_storage,
+    reset_config,
+)
 
 # Context API (new unified context via contextvars)
 from pyworkflow.context import (
@@ -81,6 +87,9 @@ from pyworkflow.core.scheduled import (
 )
 from pyworkflow.core.step import step
 from pyworkflow.core.workflow import workflow
+
+# Discovery
+from pyworkflow.discovery import DiscoveryError, discover_workflows
 
 # Execution engine
 from pyworkflow.engine.executor import (
@@ -147,9 +156,13 @@ __all__ = [
     "__version__",
     # Configuration
     "configure",
+    "configure_from_yaml",
     "get_config",
     "get_storage",
     "reset_config",
+    # Discovery
+    "discover_workflows",
+    "DiscoveryError",
     # Core decorators
     "workflow",
     "step",

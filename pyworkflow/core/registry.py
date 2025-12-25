@@ -20,11 +20,15 @@ class WorkflowMetadata:
     func: Callable[..., Any]
     original_func: Callable[..., Any]  # Unwrapped function
     max_duration: str | None = None
-    metadata: dict[str, Any] | None = None
+    tags: list[str] | None = None
+    description: str | None = None  # Docstring from the workflow function
 
     def __post_init__(self) -> None:
-        if self.metadata is None:
-            self.metadata = {}
+        if self.tags is None:
+            self.tags = []
+        # Auto-extract description from docstring if not provided
+        if self.description is None and self.original_func.__doc__:
+            self.description = self.original_func.__doc__.strip()
 
 
 @dataclass
@@ -65,7 +69,7 @@ class WorkflowRegistry:
         func: Callable[..., Any],
         original_func: Callable[..., Any],
         max_duration: str | None = None,
-        metadata: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
     ) -> None:
         """
         Register a workflow.
@@ -75,7 +79,7 @@ class WorkflowRegistry:
             func: Wrapped workflow function
             original_func: Original unwrapped function
             max_duration: Optional maximum duration
-            metadata: Optional metadata dict
+            tags: Optional list of tags (max 3)
         """
         if name in self._workflows:
             existing = self._workflows[name]
@@ -91,7 +95,7 @@ class WorkflowRegistry:
             func=func,
             original_func=original_func,
             max_duration=max_duration,
-            metadata=metadata or {},
+            tags=tags or [],
         )
 
         self._workflows[name] = workflow_meta
@@ -245,10 +249,10 @@ def register_workflow(
     func: Callable[..., Any],
     original_func: Callable[..., Any],
     max_duration: str | None = None,
-    metadata: dict[str, Any] | None = None,
+    tags: list[str] | None = None,
 ) -> None:
     """Register a workflow in the global registry."""
-    _registry.register_workflow(name, func, original_func, max_duration, metadata)
+    _registry.register_workflow(name, func, original_func, max_duration, tags)
 
 
 def get_workflow(name: str) -> WorkflowMetadata | None:

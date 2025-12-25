@@ -43,7 +43,7 @@ async def failing_step() -> dict:
 
 
 # --- Workflows for Nesting Demo ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["local", "durable"])
 async def level_3_workflow(task_id: str) -> dict:
     """Grandchild workflow (nesting depth 3)."""
     print(f"    [Level3] Starting task {task_id}")
@@ -52,7 +52,7 @@ async def level_3_workflow(task_id: str) -> dict:
     return result
 
 
-@workflow(durable=True)
+@workflow(durable=True, tags=["local", "durable"])
 async def level_2_workflow(task_id: str) -> dict:
     """Child workflow that spawns a grandchild."""
     print(f"  [Level2] Starting task {task_id}")
@@ -67,7 +67,7 @@ async def level_2_workflow(task_id: str) -> dict:
     return {"level2": task_id, "grandchild": grandchild_result}
 
 
-@workflow(durable=True)
+@workflow(durable=True, tags=["local", "durable"])
 async def level_1_workflow() -> dict:
     """Parent workflow demonstrating max nesting depth."""
     print("[Level1] Starting nested workflow demo")
@@ -80,14 +80,14 @@ async def level_1_workflow() -> dict:
 
 
 # --- Workflows for Parallel Demo ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["local", "durable"])
 async def parallel_task_workflow(task_id: str, duration: float) -> dict:
     """A simple workflow for parallel execution."""
     result = await do_work(f"parallel-{task_id}", duration)
     return {"task_id": task_id, **result}
 
 
-@workflow(durable=True)
+@workflow(durable=True, tags=["local", "durable"])
 async def parallel_parent_workflow() -> dict:
     """Parent workflow that runs multiple children in parallel."""
     print("[ParallelParent] Starting parallel children demo")
@@ -117,14 +117,14 @@ async def parallel_parent_workflow() -> dict:
 
 
 # --- Workflows for Error Handling Demo ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["local", "durable"])
 async def failing_child_workflow() -> dict:
     """A child workflow that fails."""
     await failing_step()
     return {"should": "never reach here"}
 
 
-@workflow(durable=True)
+@workflow(durable=True, tags=["local", "durable"])
 async def error_handling_parent_workflow() -> dict:
     """Parent workflow demonstrating error handling."""
     print("[ErrorParent] Starting error handling demo")

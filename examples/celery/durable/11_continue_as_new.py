@@ -43,9 +43,9 @@ async def fetch_batch(offset: int, batch_size: int) -> list:
     return items
 
 
-@step()
-async def process_batch_item(item: int) -> dict:
-    """Process a single item in a batch."""
+@step(name="continue_process_item")
+async def process_item(item: int) -> dict:
+    """Process a single item."""
     await asyncio.sleep(0.05)  # Simulate work
     return {"item": item, "processed": True}
 
@@ -74,7 +74,7 @@ async def handle_message(message: dict) -> dict:
 
 
 # --- Batch Processing Workflow ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["celery", "durable"])
 async def batch_processor(offset: int = 0, batch_size: int = 10) -> str:
     """
     Process items in batches using continue_as_new.
@@ -96,7 +96,7 @@ async def batch_processor(offset: int = 0, batch_size: int = 10) -> str:
 
     # Process items
     for item in items:
-        await process_batch_item(item)
+        await process_item(item)
 
     print(f"  [Batch] Processed {len(items)} items")
 
@@ -105,7 +105,7 @@ async def batch_processor(offset: int = 0, batch_size: int = 10) -> str:
 
 
 # --- Message Consumer Workflow ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["celery", "durable"])
 async def message_consumer(cursor: str | None = None, messages_processed: int = 0) -> str:
     """
     Consume messages from a queue, continuing as new after each batch.
@@ -137,7 +137,7 @@ async def message_consumer(cursor: str | None = None, messages_processed: int = 
 
 
 # --- Recurring Task Workflow ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["celery", "durable"])
 async def recurring_report(iteration: int = 1, max_iterations: int = 3) -> str:
     """
     Generate reports on a schedule, continuing as new for each iteration.

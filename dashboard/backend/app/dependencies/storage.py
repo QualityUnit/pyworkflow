@@ -8,6 +8,16 @@ from pyworkflow.storage.file import FileStorageBackend
 _storage_instance: StorageBackend | None = None
 
 
+def reset_storage_cache() -> None:
+    """Reset the cached storage instance.
+
+    Called during application startup to ensure fresh initialization
+    after pyworkflow configuration is loaded.
+    """
+    global _storage_instance
+    _storage_instance = None
+
+
 async def get_storage() -> StorageBackend:
     """Get or create the storage backend instance.
 

@@ -192,34 +192,75 @@ class FileStorageBackend(StorageBackend):
 
     async def list_runs(
         self,
-        workflow_name: str | None = None,
+        query: str | None = None,
         status: RunStatus | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
         limit: int = 100,
-        offset: int = 0,
-    ) -> list[WorkflowRun]:
-        """List workflow runs with optional filtering."""
+        cursor: str | None = None,
+    ) -> tuple[list[WorkflowRun], str | None]:
+        """List workflow runs with optional filtering and cursor-based pagination."""
 
-        def _list() -> list[dict]:
+        def _list() -> tuple[list[dict], str | None]:
             runs = []
+            query_lower = query.lower() if query else None
+
             for run_file in self.runs_dir.glob("*.json"):
                 data = json.loads(run_file.read_text())
 
-                # Apply filters
-                if workflow_name and data.get("workflow_name") != workflow_name:
-                    continue
+                # Apply query filter (case-insensitive substring in workflow_name or input_kwargs)
+                if query_lower:
+                    workflow_name = data.get("workflow_name", "").lower()
+                    input_kwargs = json.dumps(data.get("input_kwargs", {})).lower()
+                    if query_lower not in workflow_name and query_lower not in input_kwargs:
+                        continue
+
+                # Apply status filter
                 if status and data.get("status") != status.value:
+                    continue
+
+                # Apply time filters (based on started_at)
+                started_at_str = data.get("started_at")
+                if started_at_str:
+                    started_at = datetime.fromisoformat(started_at_str)
+                    # Make timezone-aware comparison if needed
+                    if start_time and started_at < start_time:
+                        continue
+                    if end_time and started_at >= end_time:
+                        continue
+                elif start_time or end_time:
+                    # If run hasn't started yet and we have time filters, skip it
                     continue
 
                 runs.append(data)
 
-            # Sort by created_at descending
-            runs.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+            # Sort by (created_at DESC, run_id DESC) for deterministic ordering
+            runs.sort(key=lambda r: (r.get("created_at", ""), r.get("run_id", "")), reverse=True)
 
-            # Apply pagination
-            return runs[offset : offset + limit]
+            # Apply cursor-based pagination
+            if cursor:
+                # Find the cursor position and start after it
+                cursor_found = False
+                filtered_runs = []
+                for run in runs:
+                    if cursor_found:
+                        filtered_runs.append(run)
+                    elif run.get("run_id") == cursor:
+                        cursor_found = True
+                runs = filtered_runs
 
-        run_data_list = await asyncio.to_thread(_list)
-        return [WorkflowRun.from_dict(data) for data in run_data_list]
+            # Apply limit and determine next_cursor
+            if len(runs) > limit:
+                result_runs = runs[:limit]
+                next_cursor = result_runs[-1].get("run_id") if result_runs else None
+            else:
+                result_runs = runs[:limit]
+                next_cursor = None
+
+            return result_runs, next_cursor
+
+        run_data_list, next_cursor = await asyncio.to_thread(_list)
+        return [WorkflowRun.from_dict(data) for data in run_data_list], next_cursor
 
     # Event Log Operations
 

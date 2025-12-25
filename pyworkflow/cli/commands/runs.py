@@ -29,13 +29,24 @@ def runs() -> None:
 
 @runs.command(name="list")
 @click.option(
-    "--workflow",
-    help="Filter by workflow name",
+    "-q",
+    "--query",
+    help="Search in workflow name and input kwargs (case-insensitive)",
 )
 @click.option(
     "--status",
     type=click.Choice([s.value for s in RunStatus], case_sensitive=False),
     help="Filter by run status",
+)
+@click.option(
+    "--start-time",
+    type=click.DateTime(),
+    help="Filter runs started at or after this time (ISO 8601 format)",
+)
+@click.option(
+    "--end-time",
+    type=click.DateTime(),
+    help="Filter runs started before this time (ISO 8601 format)",
 )
 @click.option(
     "--limit",
@@ -47,8 +58,10 @@ def runs() -> None:
 @async_command
 async def list_runs(
     ctx: click.Context,
-    workflow: str | None,
+    query: str | None,
     status: str | None,
+    start_time: datetime | None,
+    end_time: datetime | None,
     limit: int,
 ) -> None:
     """
@@ -59,11 +72,17 @@ async def list_runs(
         # List all runs
         pyworkflow runs list
 
-        # List runs for specific workflow
-        pyworkflow runs list --workflow my_workflow
+        # Search runs by workflow name or input
+        pyworkflow runs list --query order
 
         # List failed runs
         pyworkflow runs list --status failed
+
+        # List runs from today
+        pyworkflow runs list --start-time 2025-01-01
+
+        # List runs in a time range
+        pyworkflow runs list --start-time 2025-01-01T00:00:00 --end-time 2025-01-02T00:00:00
 
         # List with limit
         pyworkflow runs list --limit 10
@@ -82,9 +101,11 @@ async def list_runs(
 
     # List runs
     try:
-        runs_list = await storage.list_runs(
-            workflow_name=workflow,
+        runs_list, _next_cursor = await storage.list_runs(
+            query=query,
             status=status_filter,
+            start_time=start_time,
+            end_time=end_time,
             limit=limit,
         )
 

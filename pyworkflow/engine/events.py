@@ -110,12 +110,12 @@ def create_workflow_started_event(
     )
 
 
-def create_workflow_completed_event(run_id: str, result: Any) -> Event:
+def create_workflow_completed_event(run_id: str, result: Any, workflow_name: str) -> Event:
     """Create a workflow completed event."""
     return Event(
         run_id=run_id,
         type=EventType.WORKFLOW_COMPLETED,
-        data={"result": result},
+        data={"result": result, "workflow_name": workflow_name},
     )
 
 
@@ -234,7 +234,7 @@ def create_step_started_event(
     )
 
 
-def create_step_completed_event(run_id: str, step_id: str, result: Any) -> Event:
+def create_step_completed_event(run_id: str, step_id: str, result: Any, step_name: str) -> Event:
     """Create a step completed event."""
     return Event(
         run_id=run_id,
@@ -242,6 +242,7 @@ def create_step_completed_event(run_id: str, step_id: str, result: Any) -> Event
         data={
             "step_id": step_id,
             "result": result,
+            "step_name": step_name,
         },
     )
 

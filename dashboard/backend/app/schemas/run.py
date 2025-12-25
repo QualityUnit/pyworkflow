@@ -37,4 +37,18 @@ class RunListResponse(BaseModel):
     items: list[RunResponse]
     count: int
     limit: int = 100
-    offset: int = 0
+    next_cursor: str | None = None
+
+
+class StartRunRequest(BaseModel):
+    """Request model for starting a new workflow run."""
+
+    workflow_name: str
+    kwargs: dict[str, Any] = {}
+
+
+class StartRunResponse(BaseModel):
+    """Response model for a newly started workflow run."""
+
+    run_id: str
+    workflow_name: str

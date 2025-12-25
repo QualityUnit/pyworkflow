@@ -45,7 +45,7 @@ async def send_survey_email(user: dict) -> dict:
     return {**user, "survey_sent": True}
 
 
-@workflow()
+@workflow(tags=["celery", "durable"])
 async def onboarding_workflow(user_id: str) -> dict:
     """
     User onboarding workflow with scheduled emails.

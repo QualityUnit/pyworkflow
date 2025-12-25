@@ -62,7 +62,7 @@ async def check_for_updates(cursor: str | None) -> tuple[str | None, list]:
 
 
 # --- Example 1: Batch Processing Workflow ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["local", "durable"])
 async def batch_processor(offset: int = 0, batch_size: int = 10) -> str:
     """
     Process items in batches, continuing as new for each batch.
@@ -90,7 +90,7 @@ async def batch_processor(offset: int = 0, batch_size: int = 10) -> str:
 
 
 # --- Example 2: Polling Workflow ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["local", "durable"])
 async def polling_workflow(cursor: str | None = None, poll_count: int = 0) -> str:
     """
     Poll for updates indefinitely, continuing as new to reset history.
@@ -120,7 +120,7 @@ async def polling_workflow(cursor: str | None = None, poll_count: int = 0) -> st
 
 
 # --- Example 3: Counter Workflow (Simple Demo) ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["local", "durable"])
 async def countdown_workflow(count: int) -> str:
     """
     Simple countdown that demonstrates continue_as_new.

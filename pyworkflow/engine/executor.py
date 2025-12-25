@@ -167,7 +167,7 @@ async def start(
         durable=effective_durable,
         idempotency_key=idempotency_key,
         max_duration=workflow_meta.max_duration,
-        metadata=workflow_meta.metadata,
+        metadata={},  # Run-level metadata
     )
 
 

@@ -53,7 +53,7 @@ async def finalize_batch(batch: dict) -> dict:
 
 
 # --- Workflow ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["local", "durable"])
 async def batch_workflow(batch_id: str) -> dict:
     """Long-running batch processing workflow with sleep."""
     batch = await prepare_batch(batch_id)

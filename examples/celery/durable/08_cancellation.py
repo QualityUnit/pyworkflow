@@ -121,7 +121,7 @@ async def cancel_demo_refund_payment(order_id: str) -> None:
 
 
 # --- Workflow with Cancellation Handling ---
-@workflow()
+@workflow(tags=["celery", "durable"])
 async def cancellable_order_workflow(order_id: str) -> dict:
     """
     Order processing workflow with cancellation handling.
@@ -207,7 +207,7 @@ async def cancel_demo_long_running_step(items: list) -> list:
 
 
 # --- Alternative: Workflow without cleanup ---
-@workflow()
+@workflow(tags=["celery", "durable"])
 async def cancel_demo_simple_workflow(data: str) -> str:
     """
     Simple workflow without explicit cancellation handling.

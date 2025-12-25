@@ -931,7 +931,7 @@ def list_workflows_cmd(ctx: click.Context) -> None:
             {
                 "name": name,
                 "max_duration": meta.max_duration or "None",
-                "metadata": meta.metadata,
+                "tags": meta.tags or [],
             }
             for name, meta in workflows_dict.items()
         ]
@@ -946,11 +946,11 @@ def list_workflows_cmd(ctx: click.Context) -> None:
             {
                 "Name": name,
                 "Max Duration": meta.max_duration or "-",
-                "Metadata": json.dumps(meta.metadata) if meta.metadata else "-",
+                "Tags": ", ".join(meta.tags) if meta.tags else "-",
             }
             for name, meta in workflows_dict.items()
         ]
-        format_table(data, ["Name", "Max Duration", "Metadata"], title="Registered Workflows")
+        format_table(data, ["Name", "Max Duration", "Tags"], title="Registered Workflows")
 
 
 @workflows.command(name="info")
@@ -987,7 +987,7 @@ def workflow_info(ctx: click.Context, workflow_name: str) -> None:
         data = {
             "name": workflow_meta.name,
             "max_duration": workflow_meta.max_duration,
-            "metadata": workflow_meta.metadata,
+            "tags": workflow_meta.tags or [],
             "function": {
                 "name": workflow_meta.original_func.__name__,
                 "module": workflow_meta.original_func.__module__,
@@ -1002,9 +1002,7 @@ def workflow_info(ctx: click.Context, workflow_name: str) -> None:
             "Max Duration": workflow_meta.max_duration or "None",
             "Function": workflow_meta.original_func.__name__,
             "Module": workflow_meta.original_func.__module__,
-            "Metadata": json.dumps(workflow_meta.metadata, indent=2)
-            if workflow_meta.metadata
-            else "{}",
+            "Tags": ", ".join(workflow_meta.tags) if workflow_meta.tags else "-",
         }
 
         if workflow_meta.original_func.__doc__:

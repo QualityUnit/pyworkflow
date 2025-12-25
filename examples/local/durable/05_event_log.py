@@ -44,7 +44,7 @@ async def step_c(value: int) -> int:
 
 
 # --- Workflows ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["local", "durable"])
 async def simple_workflow(value: int) -> int:
     """Simple 2-step workflow."""
     result = await step_a(value)
@@ -52,7 +52,7 @@ async def simple_workflow(value: int) -> int:
     return result
 
 
-@workflow(durable=True)
+@workflow(durable=True, tags=["local", "durable"])
 async def complex_workflow(value: int) -> int:
     """More complex 3-step workflow."""
     result = await step_a(value)

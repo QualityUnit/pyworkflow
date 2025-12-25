@@ -1,12 +1,11 @@
 """Repository for workflow run data access."""
 
+from datetime import datetime
+
 from pyworkflow.engine.events import Event
 from pyworkflow.storage.base import StorageBackend
 from pyworkflow.storage.schemas import (
-    Hook,
-    HookStatus,
     RunStatus,
-    StepExecution,
     WorkflowRun,
 )
 
@@ -24,27 +23,33 @@ class RunRepository:
 
     async def list_runs(
         self,
-        workflow_name: str | None = None,
+        query: str | None = None,
         status: RunStatus | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
         limit: int = 100,
-        offset: int = 0,
-    ) -> list[WorkflowRun]:
-        """List workflow runs with optional filtering.
+        cursor: str | None = None,
+    ) -> tuple[list[WorkflowRun], str | None]:
+        """List workflow runs with optional filtering and cursor-based pagination.
 
         Args:
-            workflow_name: Filter by workflow name.
+            query: Case-insensitive search in workflow name and input kwargs.
             status: Filter by run status.
+            start_time: Filter runs started at or after this time.
+            end_time: Filter runs started before this time.
             limit: Maximum number of results.
-            offset: Number of results to skip.
+            cursor: Run ID to start after (for pagination).
 
         Returns:
-            List of workflow runs.
+            Tuple of (list of workflow runs, next_cursor or None).
         """
         return await self.storage.list_runs(
-            workflow_name=workflow_name,
+            query=query,
             status=status,
+            start_time=start_time,
+            end_time=end_time,
             limit=limit,
-            offset=offset,
+            cursor=cursor,
         )
 
     async def get_run(self, run_id: str) -> WorkflowRun | None:
@@ -73,39 +78,3 @@ class RunRepository:
             List of events ordered by sequence.
         """
         return await self.storage.get_events(run_id, event_types=event_types)
-
-    async def list_steps(self, run_id: str) -> list[StepExecution]:
-        """List all steps for a workflow run.
-
-        Args:
-            run_id: The run ID.
-
-        Returns:
-            List of step executions.
-        """
-        return await self.storage.list_steps(run_id)
-
-    async def list_hooks(
-        self,
-        run_id: str | None = None,
-        status: HookStatus | None = None,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> list[Hook]:
-        """List hooks with optional filtering.
-
-        Args:
-            run_id: Filter by workflow run ID.
-            status: Filter by hook status.
-            limit: Maximum number of results.
-            offset: Number of results to skip.
-
-        Returns:
-            List of hooks.
-        """
-        return await self.storage.list_hooks(
-            run_id=run_id,
-            status=status,
-            limit=limit,
-            offset=offset,
-        )

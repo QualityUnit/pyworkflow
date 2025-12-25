@@ -63,7 +63,6 @@ def scheduled_workflow(
     name: str | None = None,
     durable: bool | None = None,
     max_duration: str | None = None,
-    metadata: dict[str, Any] | None = None,
     recover_on_worker_loss: bool | None = None,
     max_recovery_attempts: int | None = None,
 ) -> Callable:
@@ -86,7 +85,6 @@ def scheduled_workflow(
         name: Optional workflow name (defaults to function name)
         durable: Whether workflow is durable (None = use configured default)
         max_duration: Optional max duration (e.g., "1h", "30m")
-        metadata: Optional metadata dictionary
         recover_on_worker_loss: Whether to auto-recover on worker failure
         max_recovery_attempts: Max recovery attempts on worker failure
 
@@ -146,7 +144,6 @@ def scheduled_workflow(
             func=wrapper,
             original_func=func,
             max_duration=max_duration,
-            metadata=metadata,
         )
 
         # Store standard workflow metadata on wrapper
@@ -154,7 +151,6 @@ def scheduled_workflow(
         wrapper.__workflow_name__ = workflow_name  # type: ignore[attr-defined]
         wrapper.__workflow_durable__ = durable  # type: ignore[attr-defined]
         wrapper.__workflow_max_duration__ = max_duration  # type: ignore[attr-defined]
-        wrapper.__workflow_metadata__ = metadata or {}  # type: ignore[attr-defined]
         wrapper.__workflow_recover_on_worker_loss__ = recover_on_worker_loss  # type: ignore[attr-defined]
         wrapper.__workflow_max_recovery_attempts__ = max_recovery_attempts  # type: ignore[attr-defined]
 

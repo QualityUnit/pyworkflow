@@ -132,11 +132,21 @@ _config: PyWorkflowConfig | None = None
 _config_loaded_from_yaml: bool = False
 
 
-def configure(**kwargs: Any) -> None:
+def configure(
+    *,
+    module: str | None = None,
+    discover: bool = True,
+    **kwargs: Any,
+) -> None:
     """
     Configure PyWorkflow defaults.
 
     Args:
+        module: Python module path to discover workflows from (e.g., "myapp.workflows").
+            If provided and discover=True, the module will be imported to register
+            workflows decorated with @workflow.
+        discover: If True (default) and module is provided, automatically discover
+            and register workflows from the specified module.
         default_runtime: Default runtime ("local", "celery", "lambda", "durable-lambda")
         default_durable: Whether workflows are durable by default
         default_retries: Default number of retries for steps
@@ -164,6 +174,9 @@ def configure(**kwargs: Any) -> None:
         ...     default_durable=True,
         ...     storage=InMemoryStorageBackend(),
         ... )
+
+        >>> # Configure with workflow discovery
+        >>> pyworkflow.configure(module="myapp.workflows")
     """
     global _config
     if _config is None:
@@ -188,6 +201,87 @@ def configure(**kwargs: Any) -> None:
             raise ValueError(
                 f"Unknown config option: {key}. Valid options: {', '.join(valid_keys)}"
             )
+
+    # Auto-discover workflows if module is specified
+    if discover and module:
+        from pyworkflow.discovery import discover_workflows
+
+        discover_workflows(module_path=module)
+
+
+def configure_from_yaml(path: str | Path, discover: bool = True) -> None:
+    """
+    Configure PyWorkflow from a specific YAML file.
+
+    Unlike the automatic YAML loading in get_config(), this function:
+    - Requires an explicit path
+    - Raises FileNotFoundError if the file doesn't exist
+    - Raises ValueError if YAML parsing fails
+    - Optionally discovers workflows from the 'module' field in the YAML
+
+    Args:
+        path: Path to the YAML configuration file
+        discover: If True (default), automatically discover and register
+            workflows from the 'module' or 'modules' field in the YAML file.
+            Set to False to skip discovery.
+
+    Raises:
+        FileNotFoundError: If the specified file doesn't exist
+        ValueError: If the YAML file is invalid or cannot be parsed
+        ImportError: If PyYAML is not installed
+        DiscoveryError: If workflow module discovery fails (when discover=True)
+
+    Example:
+        >>> import pyworkflow
+        >>> pyworkflow.configure_from_yaml("/etc/pyworkflow/config.yaml")
+
+        >>> # Skip workflow discovery
+        >>> pyworkflow.configure_from_yaml("/etc/pyworkflow/config.yaml", discover=False)
+    """
+    global _config, _config_loaded_from_yaml
+
+    config_path = Path(path)
+
+    if not config_path.exists():
+        raise FileNotFoundError(f"PyWorkflow configuration file not found: {config_path}")
+
+    try:
+        import yaml
+    except ImportError:
+        raise ImportError(
+            "PyYAML is required for YAML configuration. Install it with: pip install pyyaml"
+        )
+
+    try:
+        with open(config_path) as f:
+            yaml_config = yaml.safe_load(f) or {}
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML in {config_path}: {e}")
+
+    # Map YAML keys to config attributes (same logic as _config_from_yaml)
+    runtime = yaml_config.get("runtime", "local")
+    durable = runtime == "celery"  # Celery runtime defaults to durable
+
+    # Create storage from config
+    storage = _create_storage_from_config(yaml_config.get("storage", {}))
+
+    # Get celery broker
+    celery_config = yaml_config.get("celery", {})
+    celery_broker = celery_config.get("broker")
+
+    _config = PyWorkflowConfig(
+        default_runtime=runtime,
+        default_durable=durable,
+        storage=storage,
+        celery_broker=celery_broker,
+    )
+    _config_loaded_from_yaml = True
+
+    # Auto-discover workflows if enabled
+    if discover:
+        from pyworkflow.discovery import discover_workflows
+
+        discover_workflows(config=yaml_config, config_path=config_path)
 
 
 def get_config() -> PyWorkflowConfig:

@@ -346,7 +346,7 @@ async def _start_child_on_worker(
         parent_run_id=ctx.run_id,
         nesting_depth=child_depth,
         max_duration=workflow_meta.max_duration,
-        metadata=workflow_meta.metadata or {},
+        metadata={},  # Run-level metadata
     )
     await storage.create_run(child_run)
 

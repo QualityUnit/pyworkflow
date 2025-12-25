@@ -7,35 +7,43 @@ import type {
   RunListResponse,
   RunDetail,
   EventListResponse,
-  StepListResponse,
-  HookListResponse,
+  StartRunRequest,
+  StartRunResponse,
 } from './types'
 
 export interface ListRunsParams {
-  workflow_name?: string
+  query?: string
   status?: string
+  start_time?: string  // ISO 8601 datetime
+  end_time?: string    // ISO 8601 datetime
   limit?: number
-  offset?: number
+  cursor?: string
 }
 
 export async function listRuns(params: ListRunsParams = {}): Promise<RunListResponse> {
   const searchParams = new URLSearchParams()
 
-  if (params.workflow_name) {
-    searchParams.set('workflow_name', params.workflow_name)
+  if (params.query) {
+    searchParams.set('query', params.query)
   }
   if (params.status) {
     searchParams.set('status', params.status)
   }
+  if (params.start_time) {
+    searchParams.set('start_time', params.start_time)
+  }
+  if (params.end_time) {
+    searchParams.set('end_time', params.end_time)
+  }
   if (params.limit !== undefined) {
     searchParams.set('limit', params.limit.toString())
   }
-  if (params.offset !== undefined) {
-    searchParams.set('offset', params.offset.toString())
+  if (params.cursor) {
+    searchParams.set('cursor', params.cursor)
   }
 
-  const query = searchParams.toString()
-  const path = query ? `/api/v1/runs?${query}` : '/api/v1/runs'
+  const queryString = searchParams.toString()
+  const path = queryString ? `/api/v1/runs?${queryString}` : '/api/v1/runs'
 
   return api.get<RunListResponse>(path)
 }
@@ -48,10 +56,16 @@ export async function getRunEvents(runId: string): Promise<EventListResponse> {
   return api.get<EventListResponse>(`/api/v1/runs/${runId}/events`)
 }
 
-export async function getRunSteps(runId: string): Promise<StepListResponse> {
-  return api.get<StepListResponse>(`/api/v1/runs/${runId}/steps`)
+export async function startRun(request: StartRunRequest): Promise<StartRunResponse> {
+  return api.post<StartRunResponse>('/api/v1/runs', request)
 }
 
-export async function getRunHooks(runId: string): Promise<HookListResponse> {
-  return api.get<HookListResponse>(`/api/v1/runs/${runId}/hooks`)
+/**
+ * Cancel a running workflow.
+ * TODO: Implement when backend supports cancellation.
+ */
+export async function cancelRun(_runId: string): Promise<void> {
+  // TODO: Implement when backend supports cancellation
+  // return api.post<void>(`/api/v1/runs/${runId}/cancel`)
+  throw new Error('Cancel run not yet implemented')
 }

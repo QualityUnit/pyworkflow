@@ -42,15 +42,23 @@ class TestWorkflowDecorator:
 
         assert timed_workflow.__workflow_max_duration__ == "2h"
 
-    def test_workflow_decorator_with_metadata(self):
-        """Test workflow decorator with metadata."""
-        metadata = {"team": "backend", "priority": "high"}
+    def test_workflow_decorator_with_tags(self):
+        """Test workflow decorator with tags."""
+        tags = ["backend", "critical"]
 
-        @workflow(metadata=metadata)
-        async def meta_workflow():
+        @workflow(tags=tags)
+        async def tagged_workflow():
             return "success"
 
-        assert meta_workflow.__workflow_metadata__ == metadata
+        assert tagged_workflow.__workflow_tags__ == tags
+
+    def test_workflow_decorator_with_too_many_tags(self):
+        """Test workflow decorator rejects more than 3 tags."""
+        with pytest.raises(ValueError, match="at most 3 tags"):
+
+            @workflow(tags=["a", "b", "c", "d"])
+            async def too_many_tags_workflow():
+                return "success"
 
     @pytest.mark.asyncio
     async def test_workflow_execution(self):

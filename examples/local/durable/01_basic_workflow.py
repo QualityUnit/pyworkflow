@@ -47,7 +47,7 @@ async def send_notification(order: dict) -> dict:
 
 
 # --- Workflow ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["local", "durable"])
 async def order_workflow(order_id: str, amount: float) -> dict:
     """Complete order processing workflow."""
     order = await process_order(order_id)

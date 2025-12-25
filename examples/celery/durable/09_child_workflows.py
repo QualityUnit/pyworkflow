@@ -60,7 +60,7 @@ async def send_email(recipient: str, subject: str) -> dict:
 
 
 # --- Child Workflows ---
-@workflow(name="child_demo_payment_workflow")
+@workflow(name="child_demo_payment_workflow", tags=["celery", "durable"])
 async def payment_workflow(order_id: str, amount: float) -> dict:
     """Child workflow for payment processing."""
     print(f"  [PaymentWorkflow] Starting for order {order_id}")
@@ -69,7 +69,7 @@ async def payment_workflow(order_id: str, amount: float) -> dict:
     return result
 
 
-@workflow(name="child_demo_shipping_workflow")
+@workflow(name="child_demo_shipping_workflow", tags=["celery", "durable"])
 async def shipping_workflow(order_id: str) -> dict:
     """Child workflow for shipping."""
     print(f"  [ShippingWorkflow] Starting for order {order_id}")
@@ -78,7 +78,7 @@ async def shipping_workflow(order_id: str) -> dict:
     return result
 
 
-@workflow(name="child_demo_notification_workflow")
+@workflow(name="child_demo_notification_workflow", tags=["celery", "durable"])
 async def notification_workflow(email: str, order_id: str) -> dict:
     """Child workflow for sending notifications."""
     print(f"  [NotificationWorkflow] Starting for {email}")
@@ -88,7 +88,7 @@ async def notification_workflow(email: str, order_id: str) -> dict:
 
 
 # --- Parent Workflow ---
-@workflow()
+@workflow(tags=["celery", "durable"])
 async def order_fulfillment_workflow(
     order_id: str,
     amount: float,

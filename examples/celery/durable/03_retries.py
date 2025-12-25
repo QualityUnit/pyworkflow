@@ -59,7 +59,7 @@ async def process_response(response: dict) -> dict:
     return {**response, "processed": True}
 
 
-@workflow()
+@workflow(tags=["celery", "durable"])
 async def retry_demo_workflow(endpoint: str) -> dict:
     """
     Workflow demonstrating automatic retry handling.

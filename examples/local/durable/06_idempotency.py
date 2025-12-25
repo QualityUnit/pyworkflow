@@ -55,7 +55,7 @@ async def send_confirmation(order: dict) -> dict:
 
 
 # --- Workflow ---
-@workflow(durable=True)
+@workflow(durable=True, tags=["local", "durable"])
 async def order_workflow(order_id: str, amount: float) -> dict:
     """Complete order workflow (must be idempotent)."""
     order = await create_order(order_id, amount)

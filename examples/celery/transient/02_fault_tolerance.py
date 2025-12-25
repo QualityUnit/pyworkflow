@@ -87,6 +87,7 @@ async def upload_result(image: dict) -> dict:
 @workflow(
     durable=False,
     recover_on_worker_loss=False,  # DEFAULT for transient - no auto-recovery
+    tags=["celery", "transient"],
 )
 async def image_processor(image_id: str) -> dict:
     """
@@ -157,6 +158,7 @@ async def generate_report(batch: dict) -> dict:
     durable=False,
     recover_on_worker_loss=True,  # Enable recovery - restarts from scratch
     max_recovery_attempts=3,  # Allow up to 3 restarts
+    tags=["celery", "transient"],
 )
 async def batch_processor(batch_id: str) -> dict:
     """

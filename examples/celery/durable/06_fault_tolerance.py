@@ -83,6 +83,7 @@ async def send_notification(data: dict) -> dict:
 @workflow(
     recover_on_worker_loss=True,  # Enable automatic recovery (default for durable)
     max_recovery_attempts=5,  # Allow up to 5 recovery attempts
+    tags=["celery", "durable"],
 )
 async def data_pipeline(data_id: str) -> dict:
     """
@@ -144,6 +145,7 @@ async def data_pipeline(data_id: str) -> dict:
 @workflow(
     recover_on_worker_loss=False,  # Disable recovery for this workflow
     max_recovery_attempts=0,
+    tags=["celery", "durable"],
 )
 async def critical_pipeline(data_id: str) -> dict:
     """

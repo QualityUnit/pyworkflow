@@ -5,12 +5,23 @@ from typing import Any
 from pydantic import BaseModel
 
 
+class WorkflowParameter(BaseModel):
+    """Response model for a workflow parameter."""
+
+    name: str
+    type: str  # "string", "number", "boolean", "object", "array", "any"
+    required: bool
+    default: Any | None = None
+
+
 class WorkflowResponse(BaseModel):
     """Response model for a registered workflow."""
 
     name: str
+    description: str | None = None
     max_duration: str | None = None
-    metadata: dict[str, Any] = {}
+    tags: list[str] = []
+    parameters: list[WorkflowParameter] = []
 
 
 class WorkflowListResponse(BaseModel):

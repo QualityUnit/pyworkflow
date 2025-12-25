@@ -506,7 +506,7 @@ class LocalContext(WorkflowContext):
             result = await self._execute_func(func, *args, **kwargs)
 
             # Record completion
-            await self._record_step_complete(step_id, result)
+            await self._record_step_complete(step_id, step_name, result)
 
             # Cache result
             self._step_results[step_id] = result
@@ -551,7 +551,7 @@ class LocalContext(WorkflowContext):
         )
         await self._get_storage().record_event(event)
 
-    async def _record_step_complete(self, step_id: str, result: Any) -> None:
+    async def _record_step_complete(self, step_id: str, step_name: str, result: Any) -> None:
         """Record step completed event."""
         from pyworkflow.engine.events import create_step_completed_event
         from pyworkflow.serialization.encoder import serialize
@@ -560,6 +560,7 @@ class LocalContext(WorkflowContext):
             run_id=self._run_id,
             step_id=step_id,
             result=serialize(result),
+            step_name=step_name,
         )
         await self._get_storage().record_event(event)
 

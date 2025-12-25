@@ -209,7 +209,7 @@ async def execute_workflow_with_context(
             # Validate event limits before recording completion
             await ctx.validate_event_limits()
 
-            completion_event = create_workflow_completed_event(run_id, serialize(result))
+            completion_event = create_workflow_completed_event(run_id, serialize(result), workflow_name)
             await storage.record_event(completion_event)
 
         logger.info(

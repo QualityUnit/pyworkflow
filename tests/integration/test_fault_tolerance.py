@@ -114,6 +114,7 @@ class TestInterruptedEventRecording:
             run_id="test_run",
             step_id="step_1",
             result=serialize(42),
+            step_name="test_step",
         )
         await storage.record_event(step_event)
 
@@ -221,11 +222,13 @@ class TestEventReplayWithInterruption:
                 run_id="test_run",
                 step_id="step_1",
                 result=serialize({"processed": True}),
+                step_name="step_1",
             ),
             create_step_completed_event(
                 run_id="test_run",
                 step_id="step_2",
                 result=serialize(100),
+                step_name="step_2",
             ),
             create_workflow_interrupted_event(
                 run_id="test_run",

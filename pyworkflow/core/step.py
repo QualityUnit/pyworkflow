@@ -197,7 +197,7 @@ def step(
 
                 # Record completion event
                 completion_event = create_step_completed_event(
-                    run_id=ctx.run_id, step_id=step_id, result=serialize(result)
+                    run_id=ctx.run_id, step_id=step_id, result=serialize(result), step_name=step_name
                 )
                 await ctx.storage.record_event(completion_event)  # type: ignore[union-attr]
 

@@ -3,7 +3,7 @@
 from app.repositories.run_repository import RunRepository
 from app.schemas.event import EventListResponse
 from app.schemas.hook import HookListResponse
-from app.schemas.run import RunDetailResponse, RunListResponse
+from app.schemas.run import RunDetailResponse, RunListResponse, StartRunRequest, StartRunResponse
 from app.schemas.step import StepListResponse
 from app.services.run_service import RunService
 from pyworkflow.storage.base import StorageBackend
@@ -68,24 +68,13 @@ class RunController:
         """
         return await self.service.get_events(run_id)
 
-    async def get_steps(self, run_id: str) -> StepListResponse:
-        """Get steps for a run.
+    async def start_run(self, request: StartRunRequest) -> StartRunResponse:
+        """Start a new workflow run.
 
         Args:
-            run_id: The run ID.
+            request: The start run request containing workflow name and kwargs.
 
         Returns:
-            StepListResponse with run steps.
+            StartRunResponse with run_id and workflow_name.
         """
-        return await self.service.get_steps(run_id)
-
-    async def get_hooks(self, run_id: str) -> HookListResponse:
-        """Get hooks for a run.
-
-        Args:
-            run_id: The run ID.
-
-        Returns:
-            HookListResponse with run hooks.
-        """
-        return await self.service.get_hooks(run_id)
+        return await self.service.start_run(request)

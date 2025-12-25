@@ -2,7 +2,7 @@
  * Workflows table component with TanStack React Table.
  */
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
   type ColumnDef,
@@ -20,6 +20,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table'
 import { MoreHorizontal, Play, List } from 'lucide-react'
+import { NewRunModal } from './new-run-modal'
 import {
   Table,
   TableBody,
@@ -65,18 +66,31 @@ export function WorkflowsTable({ workflows }: WorkflowsTableProps) {
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
 
-  const handleViewRuns = (workflowName: string) => {
-    navigate({ to: '/runs', search: { workflow_name: workflowName } })
-  }
+  // Modal state
+  const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(null)
+  const [isNewRunModalOpen, setIsNewRunModalOpen] = useState(false)
 
-  const handleNewRun = (workflowName: string) => {
-    // TODO: Implement new workflow run functionality
-    console.log('New run for workflow:', workflowName)
-  }
+  const handleViewRuns = useCallback(
+    (workflowName: string) => {
+      navigate({ to: '/runs', search: { workflow_name: workflowName } })
+    },
+    [navigate]
+  )
 
-  const handleRowClick = (workflowName: string) => {
-    navigate({ to: '/workflows/$name', params: { name: workflowName } })
-  }
+  const handleNewRun = useCallback(
+    (workflow: Workflow) => {
+      setSelectedWorkflow(workflow)
+      setIsNewRunModalOpen(true)
+    },
+    []
+  )
+
+  const handleRowClick = useCallback(
+    (workflowName: string) => {
+      navigate({ to: '/workflows/$name', params: { name: workflowName } })
+    },
+    [navigate]
+  )
 
   const columns: ColumnDef<Workflow>[] = [
     {
@@ -165,7 +179,7 @@ export function WorkflowsTable({ workflows }: WorkflowsTableProps) {
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation()
-                    handleNewRun(workflow.name)
+                    handleNewRun(workflow)
                   }}
                 >
                   <Play className="mr-2 h-4 w-4" />
@@ -306,6 +320,12 @@ export function WorkflowsTable({ workflows }: WorkflowsTableProps) {
       </div>
 
       <DataTablePagination table={table} className="mt-auto" />
+
+      <NewRunModal
+        workflow={selectedWorkflow}
+        open={isNewRunModalOpen}
+        onOpenChange={setIsNewRunModalOpen}
+      />
     </div>
   )
 }

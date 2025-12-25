@@ -6,12 +6,11 @@ from app.controllers.run_controller import RunController
 from app.dependencies import get_storage
 from app.schemas.event import EventListResponse
 from app.schemas.hook import HookListResponse
-from app.schemas.run import RunDetailResponse, RunListResponse
+from app.schemas.run import RunDetailResponse, RunListResponse, StartRunRequest, StartRunResponse
 from app.schemas.step import StepListResponse
 from pyworkflow.storage.base import StorageBackend
 
 router = APIRouter()
-
 
 @router.get("", response_model=RunListResponse)
 async def list_runs(
@@ -43,6 +42,32 @@ async def list_runs(
         limit=limit,
         offset=offset,
     )
+
+
+@router.post("", response_model=StartRunResponse, status_code=201)
+async def start_run(
+        request: StartRunRequest,
+        storage: StorageBackend = Depends(get_storage),
+) -> StartRunResponse:
+    """Start a new workflow run.
+
+    Args:
+        request: Start run request with workflow name and kwargs.
+        storage: Storage backend (injected).
+
+    Returns:
+        StartRunResponse with run_id and workflow_name.
+
+    Raises:
+        HTTPException: 404 if workflow not found, 400 for validation errors.
+    """
+    controller = RunController(storage)
+    try:
+        return await controller.start_run(request)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/{run_id}", response_model=RunDetailResponse)
@@ -93,51 +118,3 @@ async def get_run_events(
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
 
     return await controller.get_events(run_id)
-
-
-@router.get("/{run_id}/steps", response_model=StepListResponse)
-async def get_run_steps(
-    run_id: str,
-    storage: StorageBackend = Depends(get_storage),
-) -> StepListResponse:
-    """Get all steps for a workflow run.
-
-    Args:
-        run_id: The run ID.
-        storage: Storage backend (injected).
-
-    Returns:
-        StepListResponse with run steps.
-    """
-    controller = RunController(storage)
-
-    # Verify run exists
-    run = await controller.get_run(run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
-
-    return await controller.get_steps(run_id)
-
-
-@router.get("/{run_id}/hooks", response_model=HookListResponse)
-async def get_run_hooks(
-    run_id: str,
-    storage: StorageBackend = Depends(get_storage),
-) -> HookListResponse:
-    """Get all hooks for a workflow run.
-
-    Args:
-        run_id: The run ID.
-        storage: Storage backend (injected).
-
-    Returns:
-        HookListResponse with run hooks.
-    """
-    controller = RunController(storage)
-
-    # Verify run exists
-    run = await controller.get_run(run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
-
-    return await controller.get_hooks(run_id)

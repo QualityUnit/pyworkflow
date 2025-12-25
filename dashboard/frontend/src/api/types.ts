@@ -13,11 +13,19 @@ export type RunStatus =
   | 'cancelled'
 
 // Workflow types
+export interface WorkflowParameter {
+  name: string
+  type: 'string' | 'number' | 'boolean' | 'array' | 'object' | 'any'
+  required: boolean
+  default: unknown
+}
+
 export interface Workflow {
   name: string
   description: string | null
   max_duration: string | null
   tags: string[]
+  parameters: WorkflowParameter[]
 }
 
 export interface WorkflowListResponse {
@@ -110,4 +118,15 @@ export interface HookListResponse {
 export interface HealthResponse {
   status: string
   storage_healthy: boolean
+}
+
+// Start run types
+export interface StartRunRequest {
+  workflow_name: string
+  kwargs: Record<string, unknown>
+}
+
+export interface StartRunResponse {
+  run_id: string
+  workflow_name: string
 }

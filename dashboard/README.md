@@ -89,8 +89,6 @@ VITE_API_URL=http://localhost:8585
 | `GET` | `/api/v1/runs` | List workflow runs |
 | `GET` | `/api/v1/runs/{run_id}` | Get run details |
 | `GET` | `/api/v1/runs/{run_id}/events` | Get run events |
-| `GET` | `/api/v1/runs/{run_id}/steps` | Get run steps |
-| `GET` | `/api/v1/runs/{run_id}/hooks` | Get run hooks |
 
 ## Features
 

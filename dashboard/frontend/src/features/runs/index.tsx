@@ -2,35 +2,16 @@
  * Runs list page.
  */
 
-import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
+import { RefreshCw, X } from 'lucide-react'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { GithubStarButton } from '@/components/github-star-button'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { useRuns } from '@/hooks/use-runs'
 import { RunsTable } from './components/runs-table'
-import { X } from 'lucide-react'
-
-const statusOptions = [
-  { value: 'all', label: 'All Statuses' },
-  { value: 'pending', label: 'Pending' },
-  { value: 'running', label: 'Running' },
-  { value: 'suspended', label: 'Suspended' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'failed', label: 'Failed' },
-  { value: 'interrupted', label: 'Interrupted' },
-  { value: 'cancelled', label: 'Cancelled' },
-]
 
 interface RunsListProps {
   workflowName?: string
@@ -38,13 +19,11 @@ interface RunsListProps {
 
 export function RunsList({ workflowName }: RunsListProps) {
   const navigate = useNavigate()
-  const [status, setStatus] = useState<string>('all')
-  const [limit] = useState(50)
 
+  // Fetch all runs - filtering is done client-side in the table
   const { data, isLoading, error, refetch } = useRuns({
     workflow_name: workflowName,
-    status: status === 'all' ? undefined : status,
-    limit,
+    limit: 1000,
   })
 
   const clearWorkflowFilter = () => {
@@ -54,45 +33,38 @@ export function RunsList({ workflowName }: RunsListProps) {
   return (
     <>
       <Header>
-        <h1 className="text-lg font-semibold">
-          {workflowName ? `Runs: ${workflowName}` : 'Workflow Runs'}
-        </h1>
+        <h1 className="text-lg font-semibold">Workflow Runs</h1>
         <div className="ms-auto flex items-center space-x-4">
+          <Button variant="ghost" size="icon" onClick={() => refetch()}>
+            <RefreshCw className="h-4 w-4" />
+            <span className="sr-only">Refresh</span>
+          </Button>
           <ThemeSwitch />
           <GithubStarButton />
         </div>
       </Header>
 
-      <Main>
-        <div className="mb-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            {workflowName && (
-              <Badge variant="secondary" className="flex items-center gap-1">
-                Workflow: {workflowName}
-                <button
-                  onClick={clearWorkflowFilter}
-                  className="ml-1 hover:bg-muted rounded-full p-0.5"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            )}
-            <Select value={status} onValueChange={setStatus}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Filter by status" />
-              </SelectTrigger>
-              <SelectContent>
-                {statusOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+      <Main fixed>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight">
+              {workflowName ? `Runs: ${workflowName}` : 'Workflow Runs'}
+            </h2>
+            <p className="text-muted-foreground">
+              {data ? `${data.count} run${data.count !== 1 ? 's' : ''}` : 'Loading...'}
+            </p>
           </div>
-          <Button variant="outline" onClick={() => refetch()}>
-            Refresh
-          </Button>
+          {workflowName && (
+            <Badge variant="secondary" className="flex items-center gap-1">
+              Filtered by workflow: {workflowName}
+              <button
+                onClick={clearWorkflowFilter}
+                className="ml-1 hover:bg-muted rounded-full p-0.5"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          )}
         </div>
 
         {isLoading && (
@@ -107,11 +79,11 @@ export function RunsList({ workflowName }: RunsListProps) {
           </div>
         )}
 
-        {data && <RunsTable runs={data.items} />}
-
         {data && (
-          <div className="mt-4 text-sm text-muted-foreground">
-            Showing {data.items.length} of {data.count} runs
+          <div className="-mx-4 flex-1 overflow-auto px-4 py-1 lg:flex-row lg:space-x-12 lg:space-y-0">
+            <div className="@container/content h-full">
+              <RunsTable runs={data.items} />
+            </div>
           </div>
         )}
       </Main>

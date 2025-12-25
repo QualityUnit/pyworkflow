@@ -2,13 +2,21 @@
 
 import json
 from datetime import UTC, datetime
+from typing import Any
 
+import pyworkflow
 from app.repositories.run_repository import RunRepository
 from app.schemas.event import EventListResponse, EventResponse
 from app.schemas.hook import HookListResponse, HookResponse
-from app.schemas.run import RunDetailResponse, RunListResponse, RunResponse
+from app.schemas.run import (
+    RunDetailResponse,
+    RunListResponse,
+    RunResponse,
+    StartRunRequest,
+    StartRunResponse,
+)
 from app.schemas.step import StepListResponse, StepResponse
-from pyworkflow.storage.schemas import RunStatus
+from pyworkflow.storage.schemas import RunStatus, WorkflowRun
 
 
 class RunService:
@@ -102,70 +110,7 @@ class RunService:
             count=len(items),
         )
 
-    async def get_steps(self, run_id: str) -> StepListResponse:
-        """Get all steps for a workflow run.
-
-        Args:
-            run_id: The run ID.
-
-        Returns:
-            StepListResponse with list of steps.
-        """
-        steps = await self.repository.list_steps(run_id)
-
-        items = [
-            StepResponse(
-                step_id=step.step_id,
-                run_id=step.run_id,
-                step_name=step.step_name,
-                status=step.status.value,
-                attempt=step.attempt,
-                max_retries=step.max_retries,
-                created_at=step.created_at,
-                started_at=step.started_at,
-                completed_at=step.completed_at,
-                duration_seconds=self._calculate_duration(step.started_at, step.completed_at),
-                error=step.error,
-            )
-            for step in steps
-        ]
-
-        return StepListResponse(
-            items=items,
-            count=len(items),
-        )
-
-    async def get_hooks(self, run_id: str) -> HookListResponse:
-        """Get all hooks for a workflow run.
-
-        Args:
-            run_id: The run ID.
-
-        Returns:
-            HookListResponse with list of hooks.
-        """
-        hooks = await self.repository.list_hooks(run_id=run_id)
-
-        items = [
-            HookResponse(
-                hook_id=hook.hook_id,
-                run_id=hook.run_id,
-                name=hook.name,
-                status=hook.status.value,
-                created_at=hook.created_at,
-                received_at=hook.received_at,
-                expires_at=hook.expires_at,
-                has_payload=hook.payload is not None,
-            )
-            for hook in hooks
-        ]
-
-        return HookListResponse(
-            items=items,
-            count=len(items),
-        )
-
-    def _run_to_response(self, run) -> RunResponse:
+    def _run_to_response(self, run: WorkflowRun) -> RunResponse:
         """Convert WorkflowRun to RunResponse.
 
         Args:
@@ -186,7 +131,7 @@ class RunService:
             recovery_attempts=run.recovery_attempts,
         )
 
-    def _run_to_detail_response(self, run) -> RunDetailResponse:
+    def _run_to_detail_response(self, run: WorkflowRun) -> RunDetailResponse:
         """Convert WorkflowRun to RunDetailResponse.
 
         Args:
@@ -245,7 +190,7 @@ class RunService:
 
         return (end_time - started_at).total_seconds()
 
-    def _safe_json_parse(self, value: str | None):
+    def _safe_json_parse(self, value: str | None) -> Any:
         """Safely parse a JSON string.
 
         Args:
@@ -261,3 +206,31 @@ class RunService:
             return json.loads(value)
         except (json.JSONDecodeError, TypeError):
             return value
+
+    async def start_run(self, request: StartRunRequest) -> StartRunResponse:
+        """Start a new workflow run.
+
+        Args:
+            request: The start run request containing workflow name and kwargs.
+
+        Returns:
+            StartRunResponse with run_id and workflow_name.
+
+        Raises:
+            ValueError: If workflow not found.
+        """
+        # Get the workflow metadata
+        workflow_meta = pyworkflow.get_workflow(request.workflow_name)
+        if workflow_meta is None:
+            raise ValueError(f"Workflow '{request.workflow_name}' not found")
+
+        # Start the workflow using pyworkflow.start()
+        run_id = await pyworkflow.start(
+            workflow_meta.func,
+            **request.kwargs,
+        )
+
+        return StartRunResponse(
+            run_id=run_id,
+            workflow_name=request.workflow_name,
+        )

@@ -7,8 +7,8 @@ import type {
   RunListResponse,
   RunDetail,
   EventListResponse,
-  StepListResponse,
-  HookListResponse,
+  StartRunRequest,
+  StartRunResponse,
 } from './types'
 
 export interface ListRunsParams {
@@ -48,10 +48,16 @@ export async function getRunEvents(runId: string): Promise<EventListResponse> {
   return api.get<EventListResponse>(`/api/v1/runs/${runId}/events`)
 }
 
-export async function getRunSteps(runId: string): Promise<StepListResponse> {
-  return api.get<StepListResponse>(`/api/v1/runs/${runId}/steps`)
+export async function startRun(request: StartRunRequest): Promise<StartRunResponse> {
+  return api.post<StartRunResponse>('/api/v1/runs', request)
 }
 
-export async function getRunHooks(runId: string): Promise<HookListResponse> {
-  return api.get<HookListResponse>(`/api/v1/runs/${runId}/hooks`)
+/**
+ * Cancel a running workflow.
+ * TODO: Implement when backend supports cancellation.
+ */
+export async function cancelRun(_runId: string): Promise<void> {
+  // TODO: Implement when backend supports cancellation
+  // return api.post<void>(`/api/v1/runs/${runId}/cancel`)
+  throw new Error('Cancel run not yet implemented')
 }

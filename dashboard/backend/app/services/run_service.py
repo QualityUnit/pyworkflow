@@ -7,7 +7,6 @@ from typing import Any
 import pyworkflow
 from app.repositories.run_repository import RunRepository
 from app.schemas.event import EventListResponse, EventResponse
-from app.schemas.hook import HookListResponse, HookResponse
 from app.schemas.run import (
     RunDetailResponse,
     RunListResponse,
@@ -15,7 +14,6 @@ from app.schemas.run import (
     StartRunRequest,
     StartRunResponse,
 )
-from app.schemas.step import StepListResponse, StepResponse
 from pyworkflow.storage.schemas import RunStatus, WorkflowRun
 
 

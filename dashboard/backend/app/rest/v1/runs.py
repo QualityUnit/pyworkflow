@@ -7,9 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.controllers.run_controller import RunController
 from app.dependencies import get_storage
 from app.schemas.event import EventListResponse
-from app.schemas.hook import HookListResponse
 from app.schemas.run import RunDetailResponse, RunListResponse, StartRunRequest, StartRunResponse
-from app.schemas.step import StepListResponse
 from pyworkflow.storage.base import StorageBackend
 
 router = APIRouter()

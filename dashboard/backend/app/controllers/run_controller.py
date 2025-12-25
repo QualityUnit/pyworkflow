@@ -4,9 +4,7 @@ from datetime import datetime
 
 from app.repositories.run_repository import RunRepository
 from app.schemas.event import EventListResponse
-from app.schemas.hook import HookListResponse
 from app.schemas.run import RunDetailResponse, RunListResponse, StartRunRequest, StartRunResponse
-from app.schemas.step import StepListResponse
 from app.services.run_service import RunService
 from pyworkflow.storage.base import StorageBackend
 

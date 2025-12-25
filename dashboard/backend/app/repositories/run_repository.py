@@ -5,10 +5,7 @@ from datetime import datetime
 from pyworkflow.engine.events import Event
 from pyworkflow.storage.base import StorageBackend
 from pyworkflow.storage.schemas import (
-    Hook,
-    HookStatus,
     RunStatus,
-    StepExecution,
     WorkflowRun,
 )
 

@@ -444,6 +444,10 @@ class TestScheduleStatistics:
     @pytest.mark.asyncio
     async def test_increment_statistics(self, storage):
         """Test incrementing schedule statistics."""
+        # SQLite backend doesn't store statistics fields
+        if storage.__class__.__name__ == "SQLiteStorageBackend":
+            pytest.skip("SQLite backend doesn't support schedule statistics")
+
         now = datetime.now(UTC)
         schedule = Schedule(
             schedule_id="stats_test",

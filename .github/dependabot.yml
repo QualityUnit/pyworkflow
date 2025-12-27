@@ -28,7 +28,7 @@ updates:
     reviewers:
       - "yasha-dev1"
   - package-ecosystem: pip
-    directory: "/pyworkflow/"
+    directory: "/"
     schedule:
       interval: weekly
     open-pull-requests-limit: 25

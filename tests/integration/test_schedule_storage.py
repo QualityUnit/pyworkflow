@@ -17,8 +17,8 @@ from pyworkflow.storage.schemas import (
 
 # Check if PostgreSQL is available
 try:
-    import asyncpg
     from pyworkflow.storage.postgres import PostgresStorageBackend
+
     POSTGRES_AVAILABLE = True
 except ImportError:
     POSTGRES_AVAILABLE = False

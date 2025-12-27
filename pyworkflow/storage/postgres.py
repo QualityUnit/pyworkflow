@@ -23,6 +23,7 @@ from pyworkflow.storage.schemas import (
     OverlapPolicy,
     RunStatus,
     Schedule,
+    ScheduleSpec,
     ScheduleStatus,
     StepExecution,
     StepStatus,
@@ -104,7 +105,8 @@ class PostgresStorageBackend(StorageBackend):
         if not self._pool:
             await self.connect()
 
-        async with self._pool.acquire() as conn:
+        pool = self._ensure_connected()
+        async with pool.acquire() as conn:
             # Workflow runs table
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS workflow_runs (
@@ -465,27 +467,26 @@ class PostgresStorageBackend(StorageBackend):
         """Record an event to the append-only event log."""
         pool = self._ensure_connected()
 
-        async with pool.acquire() as conn:
+        async with pool.acquire() as conn, conn.transaction():
             # Get next sequence number and insert in a transaction
-            async with conn.transaction():
-                row = await conn.fetchrow(
-                    "SELECT COALESCE(MAX(sequence), -1) + 1 FROM events WHERE run_id = $1",
-                    event.run_id,
-                )
-                sequence = row[0] if row else 0
+            row = await conn.fetchrow(
+                "SELECT COALESCE(MAX(sequence), -1) + 1 FROM events WHERE run_id = $1",
+                event.run_id,
+            )
+            sequence = row[0] if row else 0
 
-                await conn.execute(
-                    """
-                    INSERT INTO events (event_id, run_id, sequence, type, timestamp, data)
-                    VALUES ($1, $2, $3, $4, $5, $6)
-                    """,
-                    event.event_id,
-                    event.run_id,
-                    sequence,
-                    event.type.value,
-                    event.timestamp,
-                    json.dumps(event.data),
-                )
+            await conn.execute(
+                """
+                INSERT INTO events (event_id, run_id, sequence, type, timestamp, data)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                event.event_id,
+                event.run_id,
+                sequence,
+                event.type.value,
+                event.timestamp,
+                json.dumps(event.data),
+            )
 
     async def get_events(
         self,
@@ -575,7 +576,7 @@ class PostgresStorageBackend(StorageBackend):
                 step.input_kwargs,
                 step.result,
                 step.error,
-                step.retry_count,
+                step.attempt,
             )
 
     async def get_step(self, step_id: str) -> StepExecution | None:
@@ -831,7 +832,7 @@ class PostgresStorageBackend(StorageBackend):
         pool = self._ensure_connected()
 
         # Find the first run in the chain
-        current_id = run_id
+        current_id: str | None = run_id
         async with pool.acquire() as conn:
             while True:
                 row = await conn.fetchrow(
@@ -907,6 +908,9 @@ class PostgresStorageBackend(StorageBackend):
         """Create a new schedule record."""
         pool = self._ensure_connected()
 
+        # Derive spec_type from the ScheduleSpec
+        spec_type = "cron" if schedule.spec.cron else ("interval" if schedule.spec.interval else "calendar")
+
         async with pool.acquire() as conn:
             await conn.execute(
                 """
@@ -919,21 +923,21 @@ class PostgresStorageBackend(StorageBackend):
                 """,
                 schedule.schedule_id,
                 schedule.workflow_name,
-                schedule.spec,
-                schedule.spec_type,
-                schedule.timezone,
-                schedule.input_args,
-                schedule.input_kwargs,
+                json.dumps(schedule.spec.to_dict()),
+                spec_type,
+                schedule.spec.timezone,
+                schedule.args,
+                schedule.kwargs,
                 schedule.status.value,
                 schedule.overlap_policy.value,
                 schedule.next_run_time,
-                schedule.last_run_time,
+                schedule.last_run_at,
                 json.dumps(schedule.running_run_ids),
-                json.dumps(schedule.metadata),
+                "{}",  # metadata - not in current dataclass
                 schedule.created_at,
                 schedule.updated_at,
-                schedule.paused_at,
-                schedule.deleted_at,
+                None,  # paused_at - not in current dataclass
+                None,  # deleted_at - not in current dataclass
             )
 
     async def get_schedule(self, schedule_id: str) -> Schedule | None:
@@ -954,6 +958,9 @@ class PostgresStorageBackend(StorageBackend):
         """Update an existing schedule."""
         pool = self._ensure_connected()
 
+        # Derive spec_type from the ScheduleSpec
+        spec_type = "cron" if schedule.spec.cron else ("interval" if schedule.spec.interval else "calendar")
+
         async with pool.acquire() as conn:
             await conn.execute(
                 """
@@ -965,20 +972,20 @@ class PostgresStorageBackend(StorageBackend):
                 WHERE schedule_id = $16
                 """,
                 schedule.workflow_name,
-                schedule.spec,
-                schedule.spec_type,
-                schedule.timezone,
-                schedule.input_args,
-                schedule.input_kwargs,
+                json.dumps(schedule.spec.to_dict()),
+                spec_type,
+                schedule.spec.timezone,
+                schedule.args,
+                schedule.kwargs,
                 schedule.status.value,
                 schedule.overlap_policy.value,
                 schedule.next_run_time,
-                schedule.last_run_time,
+                schedule.last_run_at,
                 json.dumps(schedule.running_run_ids),
-                json.dumps(schedule.metadata),
+                "{}",  # metadata - not in current dataclass
                 schedule.updated_at,
-                schedule.paused_at,
-                schedule.deleted_at,
+                None,  # paused_at - not in current dataclass
+                None,  # deleted_at - not in current dataclass
                 schedule.schedule_id,
             )
 
@@ -1131,7 +1138,7 @@ class PostgresStorageBackend(StorageBackend):
             input_kwargs=row["input_kwargs"],
             result=row["result"],
             error=row["error"],
-            retry_count=row["retry_count"],
+            attempt=row["retry_count"] or 1,
         )
 
     def _row_to_hook(self, row: asyncpg.Record) -> Hook:
@@ -1150,22 +1157,21 @@ class PostgresStorageBackend(StorageBackend):
 
     def _row_to_schedule(self, row: asyncpg.Record) -> Schedule:
         """Convert database row to Schedule object."""
+        # Parse the spec from JSON and create ScheduleSpec
+        spec_data = json.loads(row["spec"]) if row["spec"] else {}
+        spec = ScheduleSpec.from_dict(spec_data)
+
         return Schedule(
             schedule_id=row["schedule_id"],
             workflow_name=row["workflow_name"],
-            spec=row["spec"],
-            spec_type=row["spec_type"],
-            timezone=row["timezone"],
-            input_args=row["input_args"],
-            input_kwargs=row["input_kwargs"],
+            spec=spec,
             status=ScheduleStatus(row["status"]),
+            args=row["input_args"],
+            kwargs=row["input_kwargs"],
             overlap_policy=OverlapPolicy(row["overlap_policy"]),
             next_run_time=row["next_run_time"],
-            last_run_time=row["last_run_time"],
+            last_run_at=row["last_run_time"],
             running_run_ids=json.loads(row["running_run_ids"]) if row["running_run_ids"] else [],
-            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
             created_at=row["created_at"],
             updated_at=row["updated_at"],
-            paused_at=row["paused_at"],
-            deleted_at=row["deleted_at"],
         )

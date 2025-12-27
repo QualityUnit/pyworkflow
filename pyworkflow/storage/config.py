@@ -56,8 +56,9 @@ def storage_to_config(storage: StorageBackend | None) -> dict[str, Any] | None:
         }
     elif class_name == "PostgresStorageBackend":
         config: dict[str, Any] = {"type": "postgres"}
-        if getattr(storage, "dsn", None):
-            config["dsn"] = storage.dsn
+        dsn = getattr(storage, "dsn", None)
+        if dsn:
+            config["dsn"] = dsn
         else:
             config["host"] = getattr(storage, "host", "localhost")
             config["port"] = getattr(storage, "port", 5432)

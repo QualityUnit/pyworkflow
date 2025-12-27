@@ -5,25 +5,19 @@ These tests verify the PostgresStorageBackend implementation.
 For integration tests with a real PostgreSQL database, see tests/integration/.
 """
 
-import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from pyworkflow.engine.events import Event, EventType
+from pyworkflow.engine.events import EventType
 from pyworkflow.storage.schemas import (
-    Hook,
     HookStatus,
     OverlapPolicy,
     RunStatus,
-    Schedule,
     ScheduleStatus,
-    StepExecution,
     StepStatus,
-    WorkflowRun,
 )
-
 
 # Skip all tests if asyncpg is not installed
 pytest.importorskip("asyncpg")

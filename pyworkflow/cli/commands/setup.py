@@ -568,8 +568,8 @@ def _setup_docker_infrastructure(
 
     # Add PostgreSQL health check if using postgres storage
     if storage_type == "postgres":
-        postgres_port = int(config_data.get("postgres_port", "5432"))
-        health_checks["PostgreSQL"] = {"type": "tcp", "host": "localhost", "port": postgres_port}
+        pg_port = int(config_data.get("postgres_port", "5432"))
+        health_checks["PostgreSQL"] = {"type": "tcp", "host": "localhost", "port": pg_port}
 
     # Only check dashboard health if it was started
     if dashboard_available:

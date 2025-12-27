@@ -451,9 +451,7 @@ class TestWorkflowRunOperations:
         mock_conn.execute = AsyncMock()
         mock_conn.commit = AsyncMock()
 
-        await backend.update_run_status(
-            "run_123", RunStatus.COMPLETED, result='"done"', error=None
-        )
+        await backend.update_run_status("run_123", RunStatus.COMPLETED, result='"done"', error=None)
 
         mock_conn.execute.assert_called_once()
         call_args = mock_conn.execute.call_args

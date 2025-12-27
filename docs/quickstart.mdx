@@ -11,33 +11,113 @@ Install PyWorkflow using pip:
 pip install pyworkflow
 ```
 
-## Prerequisites
+## Create a New Project
 
-PyWorkflow requires Redis and Celery workers for distributed execution.
+The fastest way to get started is with the `quickstart` command:
+
+```bash
+pyworkflow quickstart
+```
+
+This interactive command will:
+1. Create a `workflows/` directory with sample workflows
+2. Generate `pyworkflow.config.yaml` configuration
+3. Optionally start Docker services (Redis + Dashboard)
+
+<Accordion title="Quickstart Output Example">
+```
+============================================================
+  PyWorkflow Quickstart
+============================================================
+
+Select a project template:
+  ❯ Basic - Order processing and notifications (2 workflows)
+
+Storage backend:
+  ❯ SQLite - Single file database (recommended)
+
+Start Docker services (Redis + Dashboard)? [Y/n]
+
+Creating project structure...
+  ✓ Created: workflows/__init__.py
+  ✓ Created: workflows/orders.py
+  ✓ Created: workflows/notifications.py
+  ✓ Created: pyworkflow.config.yaml
+
+============================================================
+Project Created!
+============================================================
+
+Next steps:
+
+  1. Start a worker:
+     $ pyworkflow worker start
+
+  2. Run a workflow:
+     $ pyworkflow workflows run process_order \
+         --input '{"order_id": "123", "amount": 49.99}'
+
+  3. View the dashboard:
+     Open http://localhost:5173 in your browser
+```
+</Accordion>
+
+### Non-Interactive Mode
+
+For CI/CD or scripting, use non-interactive mode:
+
+```bash
+# Create project with defaults (SQLite storage, start Docker)
+pyworkflow quickstart --non-interactive
+
+# Create project without Docker
+pyworkflow quickstart --non-interactive --skip-docker
+
+# Use file storage instead of SQLite
+pyworkflow quickstart --non-interactive --storage file
+```
+
+---
+
+## Manual Setup
+
+If you prefer to set up manually or need more control:
 
 <Tabs>
   <Tab title="Docker Compose (Recommended)">
-    The easiest way to get started is with Docker Compose:
+    Generate Docker configuration and start services:
 
     ```bash
-    cd devops
-    docker-compose up -d
+    # Generate docker-compose.yml and config
+    pyworkflow setup
+
+    # Start services
+    docker compose up -d
     ```
 
-    This starts Redis, Celery workers, and Celery Beat automatically.
+    This starts Redis and the PyWorkflow Dashboard.
   </Tab>
-  <Tab title="Manual Setup">
+  <Tab title="Manual">
     Start each component manually:
 
     ```bash
     # 1. Start Redis
     docker run -d -p 6379:6379 redis:7-alpine
 
-    # 2. Start Celery worker(s)
-    celery -A pyworkflow.celery.app worker --loglevel=info
+    # 2. Create config file
+    cat > pyworkflow.config.yaml << EOF
+    module: workflows
+    runtime: celery
+    storage:
+      type: sqlite
+      base_path: pyworkflow_data/pyworkflow.db
+    celery:
+      broker: redis://localhost:6379/0
+      result_backend: redis://localhost:6379/1
+    EOF
 
-    # 3. Start Celery Beat (for automatic sleep resumption)
-    celery -A pyworkflow.celery.app beat --loglevel=info
+    # 3. Start Celery worker
+    pyworkflow worker start
     ```
   </Tab>
 </Tabs>

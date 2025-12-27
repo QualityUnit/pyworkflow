@@ -21,8 +21,10 @@ from pyworkflow.storage.base import StorageBackend
 from pyworkflow.storage.schemas import (
     Hook,
     HookStatus,
+    OverlapPolicy,
     RunStatus,
     Schedule,
+    ScheduleSpec,
     ScheduleStatus,
     StepExecution,
     WorkflowRun,
@@ -74,8 +76,12 @@ class SQLiteStorageBackend(StorageBackend):
         if not self._db:
             await self.connect()
 
+        # At this point self._db is guaranteed to be set
+        assert self._db is not None
+        db = self._db
+
         # Workflow runs table
-        await self._db.execute("""
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS workflow_runs (
                 run_id TEXT PRIMARY KEY,
                 workflow_name TEXT NOT NULL,
@@ -103,24 +109,22 @@ class SQLiteStorageBackend(StorageBackend):
         """)
 
         # Indexes for workflow_runs
-        await self._db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_runs_status ON workflow_runs(status)"
-        )
-        await self._db.execute(
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_runs_status ON workflow_runs(status)")
+        await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_runs_workflow_name ON workflow_runs(workflow_name)"
         )
-        await self._db.execute(
+        await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_runs_created_at ON workflow_runs(created_at DESC)"
         )
-        await self._db.execute(
+        await db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency_key ON workflow_runs(idempotency_key) WHERE idempotency_key IS NOT NULL"
         )
-        await self._db.execute(
+        await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_runs_parent_run_id ON workflow_runs(parent_run_id)"
         )
 
         # Events table
-        await self._db.execute("""
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS events (
                 event_id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL,
@@ -133,15 +137,13 @@ class SQLiteStorageBackend(StorageBackend):
         """)
 
         # Indexes for events
-        await self._db.execute(
+        await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_run_id_sequence ON events(run_id, sequence)"
         )
-        await self._db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)"
-        )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)")
 
         # Steps table
-        await self._db.execute("""
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS steps (
                 step_id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL,
@@ -160,12 +162,10 @@ class SQLiteStorageBackend(StorageBackend):
         """)
 
         # Indexes for steps
-        await self._db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_steps_run_id ON steps(run_id)"
-        )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_steps_run_id ON steps(run_id)")
 
         # Hooks table
-        await self._db.execute("""
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS hooks (
                 hook_id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL,
@@ -181,18 +181,12 @@ class SQLiteStorageBackend(StorageBackend):
         """)
 
         # Indexes for hooks
-        await self._db.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_hooks_token ON hooks(token)"
-        )
-        await self._db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_hooks_run_id ON hooks(run_id)"
-        )
-        await self._db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_hooks_status ON hooks(status)"
-        )
+        await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_hooks_token ON hooks(token)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_hooks_run_id ON hooks(run_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_hooks_status ON hooks(status)")
 
         # Schedules table
-        await self._db.execute("""
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS schedules (
                 schedule_id TEXT PRIMARY KEY,
                 workflow_name TEXT NOT NULL,
@@ -215,18 +209,16 @@ class SQLiteStorageBackend(StorageBackend):
         """)
 
         # Indexes for schedules
-        await self._db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_schedules_status ON schedules(status)"
-        )
-        await self._db.execute(
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_schedules_status ON schedules(status)")
+        await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_schedules_next_run_time ON schedules(next_run_time)"
         )
-        await self._db.execute(
+        await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_schedules_workflow_name ON schedules(workflow_name)"
         )
 
         # Cancellation flags table (simple key-value for run cancellation)
-        await self._db.execute("""
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS cancellation_flags (
                 run_id TEXT PRIMARY KEY,
                 created_at TIMESTAMP NOT NULL,
@@ -234,7 +226,7 @@ class SQLiteStorageBackend(StorageBackend):
             )
         """)
 
-        await self._db.commit()
+        await db.commit()
 
     def _ensure_connected(self) -> aiosqlite.Connection:
         """Ensure database is connected."""
@@ -288,9 +280,7 @@ class SQLiteStorageBackend(StorageBackend):
         """Retrieve a workflow run by ID."""
         db = self._ensure_connected()
 
-        async with db.execute(
-            "SELECT * FROM workflow_runs WHERE run_id = ?", (run_id,)
-        ) as cursor:
+        async with db.execute("SELECT * FROM workflow_runs WHERE run_id = ?", (run_id,)) as cursor:
             row = await cursor.fetchone()
 
         if not row:
@@ -383,7 +373,9 @@ class SQLiteStorageBackend(StorageBackend):
         params: list[Any] = []
 
         if cursor:
-            conditions.append("created_at < (SELECT created_at FROM workflow_runs WHERE run_id = ?)")
+            conditions.append(
+                "created_at < (SELECT created_at FROM workflow_runs WHERE run_id = ?)"
+            )
             params.append(cursor)
 
         if query:
@@ -413,8 +405,8 @@ class SQLiteStorageBackend(StorageBackend):
             LIMIT ?
         """
 
-        async with db.execute(sql, tuple(params)) as cursor:
-            rows = await cursor.fetchall()
+        async with db.execute(sql, tuple(params)) as db_cursor:
+            rows = list(await db_cursor.fetchall())
 
         has_more = len(rows) > limit
         if has_more:
@@ -495,7 +487,7 @@ class SQLiteStorageBackend(StorageBackend):
                 ORDER BY sequence DESC
                 LIMIT 1
             """
-            params = (run_id, event_type)
+            params: tuple[str, ...] = (run_id, event_type)
         else:
             sql = """
                 SELECT * FROM events
@@ -519,6 +511,9 @@ class SQLiteStorageBackend(StorageBackend):
         """Create a step execution record."""
         db = self._ensure_connected()
 
+        # Convert schema attempt (1-based) to DB retry_count (0-based)
+        retry_count = step.attempt - 1 if step.attempt > 0 else 0
+
         await db.execute(
             """
             INSERT INTO steps (
@@ -538,7 +533,7 @@ class SQLiteStorageBackend(StorageBackend):
                 step.input_kwargs,
                 step.result,
                 step.error,
-                step.retry_count,
+                retry_count,
             ),
         )
         await db.commit()
@@ -547,9 +542,7 @@ class SQLiteStorageBackend(StorageBackend):
         """Retrieve a step execution by ID."""
         db = self._ensure_connected()
 
-        async with db.execute(
-            "SELECT * FROM steps WHERE step_id = ?", (step_id,)
-        ) as cursor:
+        async with db.execute("SELECT * FROM steps WHERE step_id = ?", (step_id,)) as cursor:
             row = await cursor.fetchone()
 
         if not row:
@@ -633,9 +626,7 @@ class SQLiteStorageBackend(StorageBackend):
         """Retrieve a hook by ID."""
         db = self._ensure_connected()
 
-        async with db.execute(
-            "SELECT * FROM hooks WHERE hook_id = ?", (hook_id,)
-        ) as cursor:
+        async with db.execute("SELECT * FROM hooks WHERE hook_id = ?", (hook_id,)) as cursor:
             row = await cursor.fetchone()
 
         if not row:
@@ -647,9 +638,7 @@ class SQLiteStorageBackend(StorageBackend):
         """Retrieve a hook by its token."""
         db = self._ensure_connected()
 
-        async with db.execute(
-            "SELECT * FROM hooks WHERE token = ?", (token,)
-        ) as cursor:
+        async with db.execute("SELECT * FROM hooks WHERE token = ?", (token,)) as cursor:
             row = await cursor.fetchone()
 
         if not row:
@@ -751,9 +740,7 @@ class SQLiteStorageBackend(StorageBackend):
         """Clear the cancellation flag for a workflow run."""
         db = self._ensure_connected()
 
-        await db.execute(
-            "DELETE FROM cancellation_flags WHERE run_id = ?", (run_id,)
-        )
+        await db.execute("DELETE FROM cancellation_flags WHERE run_id = ?", (run_id,))
         await db.commit()
 
     # Continue-As-New Chain Operations
@@ -784,7 +771,7 @@ class SQLiteStorageBackend(StorageBackend):
         db = self._ensure_connected()
 
         # Find the first run in the chain
-        current_id = run_id
+        current_id: str | None = run_id
         while True:
             async with db.execute(
                 "SELECT continued_from_run_id FROM workflow_runs WHERE run_id = ?",
@@ -824,7 +811,7 @@ class SQLiteStorageBackend(StorageBackend):
                 WHERE parent_run_id = ? AND status = ?
                 ORDER BY created_at ASC
             """
-            params = (parent_run_id, status.value)
+            params: tuple[str, ...] = (parent_run_id, status.value)
         else:
             sql = """
                 SELECT * FROM workflow_runs
@@ -857,6 +844,11 @@ class SQLiteStorageBackend(StorageBackend):
         """Create a new schedule record."""
         db = self._ensure_connected()
 
+        # Extract spec components from the nested ScheduleSpec
+        spec_value = schedule.spec.cron or schedule.spec.interval or ""
+        spec_type = "cron" if schedule.spec.cron else "interval"
+        timezone = schedule.spec.timezone
+
         await db.execute(
             """
             INSERT INTO schedules (
@@ -869,21 +861,23 @@ class SQLiteStorageBackend(StorageBackend):
             (
                 schedule.schedule_id,
                 schedule.workflow_name,
-                schedule.spec,
-                schedule.spec_type,
-                schedule.timezone,
-                schedule.input_args,
-                schedule.input_kwargs,
+                spec_value,
+                spec_type,
+                timezone,
+                schedule.args,
+                schedule.kwargs,
                 schedule.status.value,
                 schedule.overlap_policy.value,
                 schedule.next_run_time.isoformat() if schedule.next_run_time else None,
-                schedule.last_run_time.isoformat() if schedule.last_run_time else None,
+                schedule.last_run_at.isoformat() if schedule.last_run_at else None,
                 json.dumps(schedule.running_run_ids),
-                json.dumps(schedule.metadata),
+                json.dumps({}),  # metadata not in schema, store empty
                 schedule.created_at.isoformat(),
-                schedule.updated_at.isoformat(),
-                schedule.paused_at.isoformat() if schedule.paused_at else None,
-                schedule.deleted_at.isoformat() if schedule.deleted_at else None,
+                schedule.updated_at.isoformat()
+                if schedule.updated_at
+                else datetime.now(UTC).isoformat(),
+                None,  # paused_at - derived from status
+                None,  # deleted_at - derived from status
             ),
         )
         await db.commit()
@@ -906,6 +900,16 @@ class SQLiteStorageBackend(StorageBackend):
         """Update an existing schedule."""
         db = self._ensure_connected()
 
+        # Extract spec components from the nested ScheduleSpec
+        spec_value = schedule.spec.cron or schedule.spec.interval or ""
+        spec_type = "cron" if schedule.spec.cron else "interval"
+        timezone = schedule.spec.timezone
+
+        # Determine paused_at and deleted_at from status
+        now = datetime.now(UTC)
+        paused_at = now if schedule.status == ScheduleStatus.PAUSED else None
+        deleted_at = now if schedule.status == ScheduleStatus.DELETED else None
+
         await db.execute(
             """
             UPDATE schedules SET
@@ -917,20 +921,20 @@ class SQLiteStorageBackend(StorageBackend):
             """,
             (
                 schedule.workflow_name,
-                schedule.spec,
-                schedule.spec_type,
-                schedule.timezone,
-                schedule.input_args,
-                schedule.input_kwargs,
+                spec_value,
+                spec_type,
+                timezone,
+                schedule.args,
+                schedule.kwargs,
                 schedule.status.value,
                 schedule.overlap_policy.value,
                 schedule.next_run_time.isoformat() if schedule.next_run_time else None,
-                schedule.last_run_time.isoformat() if schedule.last_run_time else None,
+                schedule.last_run_at.isoformat() if schedule.last_run_at else None,
                 json.dumps(schedule.running_run_ids),
-                json.dumps(schedule.metadata),
-                schedule.updated_at.isoformat(),
-                schedule.paused_at.isoformat() if schedule.paused_at else None,
-                schedule.deleted_at.isoformat() if schedule.deleted_at else None,
+                json.dumps({}),  # metadata not in schema, store empty
+                schedule.updated_at.isoformat() if schedule.updated_at else now.isoformat(),
+                paused_at.isoformat() if paused_at else None,
+                deleted_at.isoformat() if deleted_at else None,
                 schedule.schedule_id,
             ),
         )
@@ -1027,7 +1031,7 @@ class SQLiteStorageBackend(StorageBackend):
 
     # Helper methods for converting database rows to domain objects
 
-    def _row_to_workflow_run(self, row: tuple) -> WorkflowRun:
+    def _row_to_workflow_run(self, row: Any) -> WorkflowRun:
         """Convert database row to WorkflowRun object."""
         return WorkflowRun(
             run_id=row[0],
@@ -1053,7 +1057,7 @@ class SQLiteStorageBackend(StorageBackend):
             continued_to_run_id=row[20],
         )
 
-    def _row_to_event(self, row: tuple) -> Event:
+    def _row_to_event(self, row: Any) -> Event:
         """Convert database row to Event object."""
         return Event(
             event_id=row[0],
@@ -1064,10 +1068,12 @@ class SQLiteStorageBackend(StorageBackend):
             data=json.loads(row[5]) if row[5] else {},
         )
 
-    def _row_to_step_execution(self, row: tuple) -> StepExecution:
+    def _row_to_step_execution(self, row: Any) -> StepExecution:
         """Convert database row to StepExecution object."""
         from pyworkflow.storage.schemas import StepStatus
 
+        # Map DB retry_count (0-based) to schema attempt (1-based)
+        retry_count = row[11] if row[11] is not None else 0
         return StepExecution(
             step_id=row[0],
             run_id=row[1],
@@ -1080,10 +1086,10 @@ class SQLiteStorageBackend(StorageBackend):
             input_kwargs=row[8],
             result=row[9],
             error=row[10],
-            retry_count=row[11],
+            attempt=retry_count + 1,
         )
 
-    def _row_to_hook(self, row: tuple) -> Hook:
+    def _row_to_hook(self, row: Any) -> Hook:
         """Convert database row to Hook object."""
         return Hook(
             hook_id=row[0],
@@ -1097,26 +1103,34 @@ class SQLiteStorageBackend(StorageBackend):
             metadata=json.loads(row[8]) if row[8] else {},
         )
 
-    def _row_to_schedule(self, row: tuple) -> Schedule:
+    def _row_to_schedule(self, row: Any) -> Schedule:
         """Convert database row to Schedule object."""
-        from pyworkflow.storage.schemas import OverlapPolicy
+        # DB columns: schedule_id[0], workflow_name[1], spec[2], spec_type[3], timezone[4],
+        # input_args[5], input_kwargs[6], status[7], overlap_policy[8], next_run_time[9],
+        # last_run_time[10], running_run_ids[11], metadata[12], created_at[13], updated_at[14],
+        # paused_at[15], deleted_at[16]
+
+        # Reconstruct ScheduleSpec from flattened DB columns
+        spec_value = row[2]
+        spec_type = row[3]
+        timezone = row[4] or "UTC"
+
+        if spec_type == "cron":
+            spec = ScheduleSpec(cron=spec_value, timezone=timezone)
+        else:
+            spec = ScheduleSpec(interval=spec_value, timezone=timezone)
 
         return Schedule(
             schedule_id=row[0],
             workflow_name=row[1],
-            spec=row[2],
-            spec_type=row[3],
-            timezone=row[4],
-            input_args=row[5],
-            input_kwargs=row[6],
+            spec=spec,
             status=ScheduleStatus(row[7]),
+            args=row[5] or "[]",
+            kwargs=row[6] or "{}",
             overlap_policy=OverlapPolicy(row[8]),
-            next_run_time=datetime.fromisoformat(row[9]) if row[9] else None,
-            last_run_time=datetime.fromisoformat(row[10]) if row[10] else None,
-            running_run_ids=json.loads(row[11]) if row[11] else [],
-            metadata=json.loads(row[12]) if row[12] else {},
             created_at=datetime.fromisoformat(row[13]),
-            updated_at=datetime.fromisoformat(row[14]),
-            paused_at=datetime.fromisoformat(row[15]) if row[15] else None,
-            deleted_at=datetime.fromisoformat(row[16]) if row[16] else None,
+            updated_at=datetime.fromisoformat(row[14]) if row[14] else None,
+            last_run_at=datetime.fromisoformat(row[10]) if row[10] else None,
+            next_run_time=datetime.fromisoformat(row[9]) if row[9] else None,
+            running_run_ids=json.loads(row[11]) if row[11] else [],
         )

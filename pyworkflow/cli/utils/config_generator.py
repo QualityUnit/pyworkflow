@@ -105,10 +105,7 @@ def write_yaml_config(
         >>> config_path = write_yaml_config(yaml_content)
         >>> print(f"Config written to {config_path}")
     """
-    if path is None:
-        path = Path.cwd() / "pyworkflow.config.yaml"
-    else:
-        path = Path(path)
+    path = Path.cwd() / "pyworkflow.config.yaml" if path is None else Path(path)
 
     # Backup existing config if requested
     if backup and path.exists():
@@ -140,10 +137,7 @@ def load_yaml_config(path: Path | None = None) -> dict[str, Any]:
         >>> print(config.get("runtime"))
         celery
     """
-    if path is None:
-        path = Path.cwd() / "pyworkflow.config.yaml"
-    else:
-        path = Path(path)
+    path = Path.cwd() / "pyworkflow.config.yaml" if path is None else Path(path)
 
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
@@ -176,10 +170,7 @@ def find_yaml_config(start_path: Path | None = None) -> Path | None:
         >>> if config_path:
         ...     print(f"Found config at {config_path}")
     """
-    if start_path is None:
-        start_path = Path.cwd()
-    else:
-        start_path = Path(start_path)
+    start_path = Path.cwd() if start_path is None else Path(start_path)
 
     # Search current directory and parents
     for directory in [start_path] + list(start_path.parents):

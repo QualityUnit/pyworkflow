@@ -37,6 +37,7 @@ async def get_storage() -> StorageBackend:
                 storage = FileStorageBackend(settings.storage_path)
             elif settings.storage_type == "sqlite":
                 from pyworkflow.storage.sqlite import SQLiteStorageBackend
+
                 db_path = f"{settings.storage_path}/pyworkflow.db"
                 storage = SQLiteStorageBackend(db_path)
             elif settings.storage_type == "memory":

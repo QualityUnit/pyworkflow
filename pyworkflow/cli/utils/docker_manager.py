@@ -95,6 +95,7 @@ def generate_docker_compose_content(
         # For SQLite, storage_path is a file (e.g., ./pyworkflow_data/pyworkflow.db)
         # We need to mount the directory, not the file
         from pathlib import Path
+
         path_obj = Path(storage_path)
         if storage_type == "sqlite" and path_obj.suffix == ".db":
             # Mount the parent directory
@@ -104,7 +105,7 @@ def generate_docker_compose_content(
             volume_mapping = storage_path
 
     # Ensure volume_mapping is a proper path (starts with ./ or / for bind mount)
-    if not volume_mapping.startswith(('./', '/', '~')):
+    if not volume_mapping.startswith(("./", "/", "~")):
         volume_mapping = f"./{volume_mapping}"
 
     template = f"""services:
@@ -437,7 +438,9 @@ def check_service_health(service_checks: dict[str, dict[str, Any]]) -> dict[str,
         elif check_type == "http":
             url = check_config["url"]
             expected_status = check_config.get("expected_status", 200)
-            results[service_name] = wait_for_http_service(url, timeout=5, expected_status=expected_status)
+            results[service_name] = wait_for_http_service(
+                url, timeout=5, expected_status=expected_status
+            )
 
         else:
             results[service_name] = False

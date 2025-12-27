@@ -593,7 +593,11 @@ class DynamoDBStorageBackend(StorageBackend):
     async def get_step(self, step_id: str) -> StepExecution | None:
         """Retrieve a step execution by ID."""
         # Steps are stored under their run, so we need to scan
+        # Note: For high-volume production use, consider adding a GSI on step_id
         async with self._get_client() as client:
+            items = []
+
+            # Scan with pagination to find the step
             response = await client.scan(
                 TableName=self.table_name,
                 FilterExpression="entity_type = :et AND step_id = :sid",
@@ -601,10 +605,23 @@ class DynamoDBStorageBackend(StorageBackend):
                     ":et": {"S": "step"},
                     ":sid": {"S": step_id},
                 },
-                Limit=1,
             )
 
-            items = response.get("Items", [])
+            items.extend(response.get("Items", []))
+
+            # Continue scanning if there are more pages and we haven't found it
+            while "LastEvaluatedKey" in response and not items:
+                response = await client.scan(
+                    TableName=self.table_name,
+                    FilterExpression="entity_type = :et AND step_id = :sid",
+                    ExpressionAttributeValues={
+                        ":et": {"S": "step"},
+                        ":sid": {"S": step_id},
+                    },
+                    ExclusiveStartKey=response["LastEvaluatedKey"],
+                )
+                items.extend(response.get("Items", []))
+
             if not items:
                 return None
 

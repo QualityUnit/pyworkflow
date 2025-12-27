@@ -69,7 +69,7 @@ class TestSQLiteStorageBackendInit:
     def test_init_creates_parent_directory(self, tmp_path):
         """Test that initialization creates parent directories."""
         nested_path = tmp_path / "nested" / "dir" / "test.db"
-        backend = SQLiteStorageBackend(db_path=str(nested_path))
+        _backend = SQLiteStorageBackend(db_path=str(nested_path))  # noqa: F841
 
         # Parent should be created during __init__
         assert nested_path.parent.exists()

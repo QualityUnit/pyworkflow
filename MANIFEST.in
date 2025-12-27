@@ -1,0 +1,42 @@
+# Include essential files
+include README.md
+include LICENSE
+include CLAUDE.md
+include DISTRIBUTED.md
+include RELEASING.md
+include pyproject.toml
+
+# Include documentation
+recursive-include docs *.md *.mdx
+
+# Include examples
+recursive-include examples *.py *.yaml *.yml
+
+# Include tests (for source distribution)
+recursive-include tests *.py
+
+# Include type information
+include pyworkflow/py.typed
+recursive-include pyworkflow *.pyi
+
+# Exclude build artifacts
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude .DS_Store
+global-exclude *.so
+global-exclude .git*
+
+# Exclude build directories
+prune build
+prune dist
+prune *.egg-info
+prune .venv
+prune .idea
+prune .pytest_cache
+prune .mypy_cache
+prune .ruff_cache
+
+# Exclude workflow data
+prune workflow_data
+prune pyworkflow_data
+prune .workflow-data

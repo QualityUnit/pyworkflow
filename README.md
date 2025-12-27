@@ -28,29 +28,65 @@ PyWorkflow is a workflow orchestration framework that enables you to build compl
 
 ### Installation
 
+**Basic installation** (File and Memory storage backends):
 ```bash
-pip install pyworkflow
+pip install pyworkflow-engine
+```
+
+**With optional storage backends:**
+```bash
+# Redis backend (includes Redis as Celery broker)
+pip install pyworkflow-engine[redis]
+
+# SQLite backend
+pip install pyworkflow-engine[sqlite]
+
+# PostgreSQL backend
+pip install pyworkflow-engine[postgres]
+
+# All storage backends
+pip install pyworkflow-engine[all]
+
+# Development (includes all backends + dev tools)
+pip install pyworkflow-engine[dev]
 ```
 
 ### Prerequisites
 
-PyWorkflow requires Redis and Celery workers for distributed execution:
+**For distributed execution** (recommended for production):
 
+PyWorkflow uses Celery for distributed task execution. You need a message broker:
+
+**Option 1: Redis (recommended)**
 ```bash
-# 1. Start Redis
+# Install Redis support
+pip install pyworkflow-engine[redis]
+
+# Start Redis
 docker run -d -p 6379:6379 redis:7-alpine
 
-# 2. Start Celery worker(s)
+# Start Celery worker(s)
 celery -A pyworkflow.celery.app worker --loglevel=info
 
-# 3. Start Celery Beat (for automatic sleep resumption)
+# Start Celery Beat (for automatic sleep resumption)
 celery -A pyworkflow.celery.app beat --loglevel=info
 ```
 
-Or use the CLI to set up Docker infrastructure (recommended):
-
+Or use the CLI to set up Docker infrastructure:
 ```bash
 pyworkflow setup
+```
+
+**Option 2: Other brokers** (RabbitMQ, etc.)
+```bash
+# Celery supports multiple brokers
+# Configure via environment: CELERY_BROKER_URL=amqp://localhost
+```
+
+**For local development/testing:**
+```bash
+# No broker needed - use in-process execution
+pyworkflow configure --runtime local
 ```
 
 See [DISTRIBUTED.md](DISTRIBUTED.md) for complete deployment guide.
@@ -245,12 +281,13 @@ PyWorkflow uses event sourcing to achieve durable, fault-tolerant execution:
 
 PyWorkflow supports pluggable storage backends:
 
-| Backend | Status | Use Case |
-|---------|--------|----------|
-| **File** | ✅ Complete | Development, single-machine deployments |
-| **Redis** | 📋 Planned | Production, distributed deployments |
-| **PostgreSQL** | 📋 Planned | Enterprise, complex queries |
-| **SQLite** | 📋 Planned | Embedded applications |
+| Backend | Status | Installation | Use Case |
+|---------|--------|--------------|----------|
+| **File** | ✅ Complete | Included | Development, single-machine |
+| **Memory** | ✅ Complete | Included | Testing, ephemeral workflows |
+| **SQLite** | ✅ Complete | `pip install pyworkflow-engine[sqlite]` | Embedded, local persistence |
+| **PostgreSQL** | ✅ Complete | `pip install pyworkflow-engine[postgres]` | Production, enterprise |
+| **Redis** | 📋 Planned | `pip install pyworkflow-engine[redis]` | High-performance, distributed |
 
 ---
 
@@ -536,7 +573,7 @@ Contributions are welcome!
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/pyworkflow
+git clone https://github.com/QualityUnit/pyworkflow
 cd pyworkflow
 
 # Install with Poetry
@@ -572,6 +609,6 @@ Apache License 2.0 - See [LICENSE](LICENSE) file for details.
 
 ## Links
 
-- **GitHub**: https://github.com/yourusername/pyworkflow
-- **Documentation**: (Coming soon)
-- **Issues**: https://github.com/yourusername/pyworkflow/issues
+- **Documentation**: https://docs.pyworkflow.dev
+- **GitHub**: https://github.com/QualityUnit/pyworkflow
+- **Issues**: https://github.com/QualityUnit/pyworkflow/issues

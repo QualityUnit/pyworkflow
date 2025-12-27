@@ -130,7 +130,15 @@ def config_to_storage(config: dict[str, Any] | None = None) -> StorageBackend:
         return SQLiteStorageBackend(db_path=db_path)
 
     elif storage_type == "redis":
-        from pyworkflow.storage.redis import RedisStorageBackend
+        try:
+            from pyworkflow.storage.redis import RedisStorageBackend
+        except ImportError:
+            raise ValueError(
+                "Redis storage backend is not yet implemented. "
+                "Use 'file', 'sqlite', or 'postgres' storage. "
+                "Redis support is planned for a future release. "
+                "Note: Redis can still be used as a Celery broker with 'pip install pyworkflow[redis]'."
+            )
 
         return RedisStorageBackend(
             host=config.get("host", "localhost"),

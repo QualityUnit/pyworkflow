@@ -23,11 +23,18 @@ try:
 except ImportError:
     SQLiteStorageBackend = None  # type: ignore
 
+# PostgreSQL backend - optional import (requires asyncpg)
+try:
+    from pyworkflow.storage.postgres import PostgresStorageBackend
+except ImportError:
+    PostgresStorageBackend = None  # type: ignore
+
 __all__ = [
     "StorageBackend",
     "FileStorageBackend",
     "InMemoryStorageBackend",
     "SQLiteStorageBackend",
+    "PostgresStorageBackend",
     "WorkflowRun",
     "StepExecution",
     "Hook",

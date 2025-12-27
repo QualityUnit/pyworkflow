@@ -47,11 +47,10 @@ celery -A pyworkflow.celery.app worker --loglevel=info
 celery -A pyworkflow.celery.app beat --loglevel=info
 ```
 
-Or use Docker Compose (recommended):
+Or use the CLI to set up Docker infrastructure (recommended):
 
 ```bash
-cd devops
-docker-compose up -d
+pyworkflow setup
 ```
 
 See [DISTRIBUTED.md](DISTRIBUTED.md) for complete deployment guide.
@@ -486,10 +485,9 @@ services:
       - "5555:5555"
 ```
 
-Start everything:
+Start everything using the CLI:
 ```bash
-cd devops
-docker-compose up -d
+pyworkflow setup
 ```
 
 See [DISTRIBUTED.md](DISTRIBUTED.md) for complete deployment guide with Kubernetes.

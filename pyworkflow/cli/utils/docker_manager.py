@@ -193,6 +193,112 @@ volumes:
     return template
 
 
+def generate_postgres_docker_compose_content(
+    postgres_host: str = "postgres",
+    postgres_port: int = 5432,
+    postgres_user: str = "pyworkflow",
+    postgres_password: str = "pyworkflow",
+    postgres_database: str = "pyworkflow",
+) -> str:
+    """
+    Generate docker-compose.yml content for PostgreSQL-based PyWorkflow services.
+
+    Args:
+        postgres_host: PostgreSQL host (container name for docker networking)
+        postgres_port: PostgreSQL port
+        postgres_user: PostgreSQL user
+        postgres_password: PostgreSQL password
+        postgres_database: PostgreSQL database name
+
+    Returns:
+        docker-compose.yml content as string
+
+    Example:
+        >>> compose_content = generate_postgres_docker_compose_content()
+    """
+    template = f"""services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pyworkflow-postgres
+    ports:
+      - "{postgres_port}:5432"
+    environment:
+      - POSTGRES_USER={postgres_user}
+      - POSTGRES_PASSWORD={postgres_password}
+      - POSTGRES_DB={postgres_database}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {postgres_user} -d {postgres_database}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: pyworkflow-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  dashboard-backend:
+    image: yashabro/pyworkflow-dashboard-backend:latest
+    container_name: pyworkflow-dashboard-backend
+    working_dir: /app/project
+    ports:
+      - "8585:8585"
+    environment:
+      - DASHBOARD_PYWORKFLOW_CONFIG_PATH=/app/project/pyworkflow.config.yaml
+      - DASHBOARD_STORAGE_TYPE=postgres
+      - DASHBOARD_POSTGRES_HOST={postgres_host}
+      - DASHBOARD_POSTGRES_PORT=5432
+      - DASHBOARD_POSTGRES_USER={postgres_user}
+      - DASHBOARD_POSTGRES_PASSWORD={postgres_password}
+      - DASHBOARD_POSTGRES_DATABASE={postgres_database}
+      - DASHBOARD_HOST=0.0.0.0
+      - DASHBOARD_PORT=8585
+      - DASHBOARD_CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
+      - PYWORKFLOW_CELERY_BROKER=redis://redis:6379/0
+      - PYWORKFLOW_CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - PYTHONPATH=/app/project
+    volumes:
+      - .:/app/project:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  dashboard-frontend:
+    image: yashabro/pyworkflow-dashboard-frontend:latest
+    container_name: pyworkflow-dashboard-frontend
+    ports:
+      - "5173:80"
+    environment:
+      - VITE_API_URL=http://localhost:8585
+    depends_on:
+      - dashboard-backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+"""
+
+    return template
+
+
 def write_docker_compose(content: str, path: Path) -> None:
     """
     Write docker-compose.yml to file.

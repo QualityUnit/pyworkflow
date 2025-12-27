@@ -22,6 +22,7 @@ from pyworkflow.cli.utils.docker_manager import (
     check_docker_available,
     check_service_health,
     generate_docker_compose_content,
+    generate_postgres_docker_compose_content,
     run_docker_command,
     write_docker_compose,
 )
@@ -86,7 +87,7 @@ def _flatten_yaml_config(nested_config: dict) -> dict:
 )
 @click.option(
     "--storage",
-    type=click.Choice(["file", "memory", "sqlite", "dynamodb"], case_sensitive=False),
+    type=click.Choice(["file", "memory", "sqlite", "postgres", "dynamodb"], case_sensitive=False),
     help="Storage backend type",
 )
 @click.option(
@@ -245,6 +246,11 @@ def _run_setup(
         storage_path=config_data.get("storage_path"),
         broker_url=config_data["broker_url"],
         result_backend=config_data["result_backend"],
+        postgres_host=config_data.get("postgres_host"),
+        postgres_port=config_data.get("postgres_port"),
+        postgres_user=config_data.get("postgres_user"),
+        postgres_password=config_data.get("postgres_password"),
+        postgres_database=config_data.get("postgres_database"),
         dynamodb_table_name=config_data.get("dynamodb_table_name"),
         dynamodb_region=config_data.get("dynamodb_region"),
         dynamodb_endpoint_url=config_data.get("dynamodb_endpoint_url"),
@@ -292,6 +298,21 @@ def _check_sqlite_available() -> bool:
         return False
 
 
+def _check_postgres_available() -> bool:
+    """
+    Check if asyncpg is installed for PostgreSQL support.
+
+    Returns:
+        True if asyncpg is available, False otherwise
+    """
+    try:
+        import asyncpg  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def _run_interactive_configuration(
     non_interactive: bool,
     module_override: str | None,
@@ -325,8 +346,9 @@ def _run_interactive_configuration(
     config_data["result_backend"] = "redis://localhost:6379/1"
     print_info("✓ Broker: Redis (will be started via Docker)")
 
-    # Check if SQLite is available
+    # Check if SQLite and PostgreSQL are available
     sqlite_available = _check_sqlite_available()
+    postgres_available = _check_postgres_available()
 
     # Storage backend
     if storage_override:
@@ -345,6 +367,16 @@ def _run_interactive_configuration(
             print_info("  pyenv install 3.13.5")
             print_info("")
             print_info("Or choose a different storage backend: --storage file")
+            raise click.Abort()
+        # Validate if postgres was requested but not available
+        if storage_type == "postgres" and not postgres_available:
+            print_error("\nPostgreSQL storage backend is not available!")
+            print_info("\nasyncpg package is not installed.")
+            print_info("To fix this, install asyncpg:")
+            print_info("")
+            print_info("  pip install asyncpg")
+            print_info("")
+            print_info("Or choose a different storage backend: --storage sqlite")
             raise click.Abort()
     elif non_interactive:
         if sqlite_available:
@@ -365,11 +397,15 @@ def _run_interactive_configuration(
             raise click.Abort()
     else:
         print_info("")
-        # Build choices based on SQLite availability
+        # Build choices based on available backends
         choices = []
         if sqlite_available:
             choices.append(
                 {"name": "SQLite - Single file database (recommended)", "value": "sqlite"}
+            )
+        if postgres_available:
+            choices.append(
+                {"name": "PostgreSQL - Scalable production database", "value": "postgres"}
             )
         choices.extend(
             [
@@ -386,6 +422,10 @@ def _run_interactive_configuration(
         if not sqlite_available:
             print_warning("\nNote: SQLite is not available in your Python build")
             print_info("To enable SQLite, install libsqlite3-dev and rebuild Python")
+            print_info("")
+
+        if not postgres_available:
+            print_info("Note: PostgreSQL backend available after: pip install asyncpg")
             print_info("")
 
         storage_type = select(
@@ -418,6 +458,38 @@ def _run_interactive_configuration(
             )
 
         config_data["storage_path"] = final_storage_path
+
+    # PostgreSQL connection (for postgres backend)
+    if storage_type == "postgres":
+        if non_interactive:
+            # Use default connection settings for non-interactive mode
+            config_data["postgres_host"] = "localhost"
+            config_data["postgres_port"] = "5432"
+            config_data["postgres_user"] = "pyworkflow"
+            config_data["postgres_password"] = "pyworkflow"
+            config_data["postgres_database"] = "pyworkflow"
+        else:
+            print_info("\nConfigure PostgreSQL connection:")
+            config_data["postgres_host"] = input_text(
+                "PostgreSQL host:",
+                default="localhost",
+            )
+            config_data["postgres_port"] = input_text(
+                "PostgreSQL port:",
+                default="5432",
+            )
+            config_data["postgres_database"] = input_text(
+                "Database name:",
+                default="pyworkflow",
+            )
+            config_data["postgres_user"] = input_text(
+                "Database user:",
+                default="pyworkflow",
+            )
+            config_data["postgres_password"] = input_text(
+                "Database password:",
+                default="pyworkflow",
+            )
 
     # DynamoDB configuration
     elif storage_type == "dynamodb":
@@ -459,12 +531,23 @@ def _setup_docker_infrastructure(
     """
     print_info("\nSetting up Docker infrastructure...")
 
-    # Generate docker-compose.yml
+    # Generate docker-compose.yml based on storage type
     print_info("  Generating docker-compose.yml...")
-    compose_content = generate_docker_compose_content(
-        storage_type=config_data["storage_type"],
-        storage_path=config_data.get("storage_path"),
-    )
+    storage_type = config_data["storage_type"]
+
+    if storage_type == "postgres":
+        compose_content = generate_postgres_docker_compose_content(
+            postgres_host="postgres",
+            postgres_port=int(config_data.get("postgres_port", "5432")),
+            postgres_user=config_data.get("postgres_user", "pyworkflow"),
+            postgres_password=config_data.get("postgres_password", "pyworkflow"),
+            postgres_database=config_data.get("postgres_database", "pyworkflow"),
+        )
+    else:
+        compose_content = generate_docker_compose_content(
+            storage_type=storage_type,
+            storage_path=config_data.get("storage_path"),
+        )
 
     compose_path = Path.cwd() / "docker-compose.yml"
     write_docker_compose(compose_content, compose_path)
@@ -491,7 +574,10 @@ def _setup_docker_infrastructure(
     print_info("\n  Starting services...")
     print_info("")
 
+    # Include postgres in services to start if using postgres storage
     services_to_start = ["redis"]
+    if storage_type == "postgres":
+        services_to_start.insert(0, "postgres")
     if dashboard_available:
         services_to_start.extend(["dashboard-backend", "dashboard-frontend"])
 
@@ -504,7 +590,11 @@ def _setup_docker_infrastructure(
     if not success:
         print_error("\n  Failed to start services")
         print_info("\n  Troubleshooting:")
-        print_info("    • Check if ports 6379, 8585, 5173 are already in use")
+        ports_in_use = "6379, 8585, 5173"
+        if storage_type == "postgres":
+            postgres_port = config_data.get("postgres_port", "5432")
+            ports_in_use = f"{postgres_port}, {ports_in_use}"
+        print_info(f"    • Check if ports {ports_in_use} are already in use")
         print_info("    • View logs: docker compose logs")
         print_info("    • Try: docker compose down && docker compose up -d")
         return False
@@ -516,6 +606,11 @@ def _setup_docker_infrastructure(
     health_checks = {
         "Redis": {"type": "tcp", "host": "localhost", "port": 6379},
     }
+
+    # Add PostgreSQL health check if using postgres storage
+    if storage_type == "postgres":
+        pg_port = int(config_data.get("postgres_port", "5432"))
+        health_checks["PostgreSQL"] = {"type": "tcp", "host": "localhost", "port": pg_port}
 
     # Only check dashboard health if it was started
     if dashboard_available:
@@ -574,6 +669,9 @@ def _show_next_steps(
 
     if not skip_docker:
         print_info("\nServices running:")
+        if config_data.get("storage_type") == "postgres":
+            postgres_port = config_data.get("postgres_port", "5432")
+            print_info(f"  • PostgreSQL:         localhost:{postgres_port}")
         print_info("  • Redis:              redis://localhost:6379")
         if dashboard_available:
             print_info("  • Dashboard:          http://localhost:5173")

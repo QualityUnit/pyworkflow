@@ -54,6 +54,18 @@ def storage_to_config(storage: StorageBackend | None) -> dict[str, Any] | None:
             "port": getattr(storage, "port", 6379),
             "db": getattr(storage, "db", 0),
         }
+    elif class_name == "PostgresStorageBackend":
+        config: dict[str, Any] = {"type": "postgres"}
+        dsn = getattr(storage, "dsn", None)
+        if dsn:
+            config["dsn"] = dsn
+        else:
+            config["host"] = getattr(storage, "host", "localhost")
+            config["port"] = getattr(storage, "port", 5432)
+            config["user"] = getattr(storage, "user", "pyworkflow")
+            config["password"] = getattr(storage, "password", "")
+            config["database"] = getattr(storage, "database", "pyworkflow")
+        return config
     elif class_name == "DynamoDBStorageBackend":
         return {
             "type": "dynamodb",
@@ -125,6 +137,26 @@ def config_to_storage(config: dict[str, Any] | None = None) -> StorageBackend:
             port=config.get("port", 6379),
             db=config.get("db", 0),
         )
+
+    elif storage_type == "postgres":
+        try:
+            from pyworkflow.storage.postgres import PostgresStorageBackend
+        except ImportError:
+            raise ValueError(
+                "PostgreSQL storage backend is not available. Install asyncpg: pip install asyncpg"
+            )
+
+        # Support both DSN and individual parameters
+        if "dsn" in config:
+            return PostgresStorageBackend(dsn=config["dsn"])
+        else:
+            return PostgresStorageBackend(
+                host=config.get("host", "localhost"),
+                port=config.get("port", 5432),
+                user=config.get("user", "pyworkflow"),
+                password=config.get("password", ""),
+                database=config.get("database", "pyworkflow"),
+            )
 
     elif storage_type == "dynamodb":
         try:

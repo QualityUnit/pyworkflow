@@ -23,6 +23,12 @@ try:
 except ImportError:
     SQLiteStorageBackend = None  # type: ignore
 
+# PostgreSQL backend - optional import (requires asyncpg)
+try:
+    from pyworkflow.storage.postgres import PostgresStorageBackend
+except ImportError:
+    PostgresStorageBackend = None  # type: ignore
+
 # DynamoDB backend - optional import (requires aiobotocore)
 try:
     from pyworkflow.storage.dynamodb import DynamoDBStorageBackend
@@ -34,6 +40,7 @@ __all__ = [
     "FileStorageBackend",
     "InMemoryStorageBackend",
     "SQLiteStorageBackend",
+    "PostgresStorageBackend",
     "DynamoDBStorageBackend",
     "WorkflowRun",
     "StepExecution",

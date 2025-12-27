@@ -19,6 +19,11 @@ def generate_yaml_config(
     storage_path: str | None,
     broker_url: str,
     result_backend: str,
+    postgres_host: str | None = None,
+    postgres_port: str | None = None,
+    postgres_user: str | None = None,
+    postgres_password: str | None = None,
+    postgres_database: str | None = None,
     dynamodb_table_name: str | None = None,
     dynamodb_region: str | None = None,
     dynamodb_endpoint_url: str | None = None,
@@ -29,10 +34,15 @@ def generate_yaml_config(
     Args:
         module: Optional workflow module path (e.g., "myapp.workflows")
         runtime: Runtime type (e.g., "celery", "local")
-        storage_type: Storage backend type (e.g., "sqlite", "file", "memory", "dynamodb")
+        storage_type: Storage backend type (e.g., "sqlite", "file", "memory", "postgres")
         storage_path: Optional storage path for file/sqlite backends
         broker_url: Celery broker URL
         result_backend: Celery result backend URL
+        postgres_host: PostgreSQL host (for postgres backend)
+        postgres_port: PostgreSQL port (for postgres backend)
+        postgres_user: PostgreSQL user (for postgres backend)
+        postgres_password: PostgreSQL password (for postgres backend)
+        postgres_database: PostgreSQL database name (for postgres backend)
         dynamodb_table_name: Optional DynamoDB table name
         dynamodb_region: Optional AWS region for DynamoDB
         dynamodb_endpoint_url: Optional local DynamoDB endpoint URL
@@ -63,6 +73,17 @@ def generate_yaml_config(
     storage_config: dict[str, Any] = {"type": storage_type}
     if storage_path and storage_type in ["file", "sqlite"]:
         storage_config["base_path"] = storage_path
+    if storage_type == "postgres":
+        if postgres_host:
+            storage_config["host"] = postgres_host
+        if postgres_port:
+            storage_config["port"] = int(postgres_port)
+        if postgres_user:
+            storage_config["user"] = postgres_user
+        if postgres_password:
+            storage_config["password"] = postgres_password
+        if postgres_database:
+            storage_config["database"] = postgres_database
     elif storage_type == "dynamodb":
         if dynamodb_table_name:
             storage_config["table_name"] = dynamodb_table_name
@@ -230,6 +251,12 @@ def display_config_summary(config: dict[str, Any]) -> list[str]:
 
     if "base_path" in storage:
         lines.append(f"  Storage Path: {storage['base_path']}")
+    if storage_type == "postgres":
+        host = storage.get("host", "localhost")
+        port = storage.get("port", 5432)
+        database = storage.get("database", "pyworkflow")
+        user = storage.get("user", "pyworkflow")
+        lines.append(f"  PostgreSQL: {user}@{host}:{port}/{database}")
 
     # DynamoDB-specific config
     if storage_type == "dynamodb":
@@ -287,10 +314,10 @@ def validate_config(config: dict[str, Any]) -> tuple[bool, list[str]]:
         storage_type = storage.get("type")
         if not storage_type:
             errors.append("Missing storage 'type'")
-        elif storage_type not in ["file", "memory", "sqlite", "redis", "dynamodb"]:
+        elif storage_type not in ["file", "memory", "sqlite", "redis", "postgres", "dynamodb"]:
             errors.append(
                 f"Invalid storage type: {storage_type}. "
-                "Must be 'file', 'memory', 'sqlite', 'redis', or 'dynamodb'"
+                "Must be 'file', 'memory', 'sqlite', 'redis', 'postgres' or 'dynamodb'"
             )
 
     # Check Celery config if using celery runtime

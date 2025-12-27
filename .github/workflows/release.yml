@@ -1,0 +1,320 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Trigger on version tags (v0.1.0, v1.0.0, etc.)
+  workflow_dispatch:  # Allow manual triggering
+    inputs:
+      publish_to_pypi:
+        description: 'Publish to production PyPI (default: TestPyPI only)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write  # REQUIRED for PyPI trusted publishing (OIDC)
+
+jobs:
+  verify-version:
+    name: Verify Version Match
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+      tag-version: ${{ steps.get-tag.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version from pyproject.toml
+        id: get-version
+        run: |
+          VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Package version: $VERSION"
+
+      - name: Get version from tag
+        id: get-tag
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$TAG_VERSION" >> $GITHUB_OUTPUT
+          echo "Tag version: $TAG_VERSION"
+
+      - name: Verify version match
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if [ "${{ steps.get-version.outputs.version }}" != "${{ steps.get-tag.outputs.version }}" ]; then
+            echo "::error::Version mismatch! pyproject.toml=${{ steps.get-version.outputs.version }}, tag=${{ steps.get-tag.outputs.version }}"
+            exit 1
+          fi
+          echo "✅ Version match confirmed: ${{ steps.get-version.outputs.version }}"
+
+      - name: Verify version in __init__.py
+        run: |
+          INIT_VERSION=$(grep '^__version__ = ' pyworkflow/__init__.py | sed 's/__version__ = "\(.*\)"/\1/')
+          if [ "${{ steps.get-version.outputs.version }}" != "$INIT_VERSION" ]; then
+            echo "::error::Version mismatch! pyproject.toml=${{ steps.get-version.outputs.version }}, __init__.py=$INIT_VERSION"
+            exit 1
+          fi
+          echo "✅ __init__.py version matches: $INIT_VERSION"
+
+  build:
+    name: Build Distribution
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Clean old build artifacts
+        run: |
+          rm -rf dist/ build/ *.egg-info pyworkflow.egg-info
+
+      - name: Build package
+        run: |
+          python -m build
+          echo "📦 Build complete"
+          ls -lh dist/
+
+      - name: Verify build
+        run: |
+          twine check dist/*
+          echo "✅ Package validation passed"
+
+      - name: Display package info
+        run: |
+          tar -tzf dist/*.tar.gz | head -20
+          unzip -l dist/*.whl | head -20
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+          retention-days: 7
+
+  test:
+    name: Test Distribution
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Install from wheel
+        run: |
+          pip install dist/*.whl
+          echo "✅ Package installed from wheel"
+
+      - name: Verify installation
+        run: |
+          python -c "import pyworkflow; print(f'PyWorkflow version: {pyworkflow.__version__}')"
+          python -c "from pyworkflow import workflow, step, start; print('✅ Core imports successful')"
+          python -c "from pyworkflow.storage.file import FileStorageBackend; print('✅ File backend available')"
+          python -c "from pyworkflow.storage.memory import InMemoryStorageBackend; print('✅ Memory backend available')"
+
+      - name: Verify CLI
+        run: |
+          pyworkflow --version
+          pyworkflow --help
+
+      - name: Test optional extras are truly optional
+        run: |
+          # Verify SQLite and PostgreSQL imports fail gracefully
+          python -c "
+          try:
+              from pyworkflow.storage.sqlite import SQLiteStorageBackend
+              print('❌ SQLite should not be available without extra')
+              exit(1)
+          except ImportError:
+              print('✅ SQLite correctly unavailable')
+          "
+          python -c "
+          try:
+              from pyworkflow.storage.postgres import PostgresStorageBackend
+              print('❌ PostgreSQL should not be available without extra')
+              exit(1)
+          except ImportError:
+              print('✅ PostgreSQL correctly unavailable')
+          "
+
+      - name: Uninstall and test extras
+        run: |
+          pip uninstall -y pyworkflow
+          pip install dist/*.whl[sqlite]
+          python -c "from pyworkflow.storage.sqlite import SQLiteStorageBackend; print('✅ SQLite extra works')"
+
+  run-full-tests:
+    name: Run Full Test Suite
+    needs: build
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: pyworkflow
+          POSTGRES_PASSWORD: pyworkflow
+          POSTGRES_DB: pyworkflow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Install package with dev dependencies
+        run: |
+          pip install dist/*.whl[dev]
+
+      - name: Run unit tests
+        run: |
+          pytest tests/unit/ -v --tb=short
+
+      - name: Run integration tests
+        env:
+          REDIS_URL: redis://localhost:6379/0
+          POSTGRES_URL: postgresql://pyworkflow:pyworkflow@localhost:5432/pyworkflow_test
+        run: |
+          pytest tests/integration/ -v --tb=short
+
+  publish-to-testpypi:
+    name: Publish to TestPyPI
+    needs: [verify-version, build, test, run-full-tests]
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/pyworkflow-engine/
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+          print-hash: true
+
+      - name: Test installation from TestPyPI
+        run: |
+          sleep 30  # Wait for package to be available
+          pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ pyworkflow-engine==${{ needs.verify-version.outputs.version }} || true
+          echo "⚠️ TestPyPI installation test completed (may fail if dependencies unavailable on TestPyPI)"
+
+  publish-to-pypi:
+    name: Publish to Production PyPI
+    needs: [verify-version, build, test, run-full-tests, publish-to-testpypi]
+    # Only publish to production PyPI on tag push or manual workflow with approval
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_to_pypi == true)
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/pyworkflow-engine/
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          print-hash: true
+
+  create-github-release:
+    name: Create GitHub Release
+    needs: [verify-version, publish-to-pypi]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Generate release notes
+        id: release-notes
+        run: |
+          VERSION=${{ needs.verify-version.outputs.version }}
+          echo "## PyWorkflow v${VERSION}" > release-notes.md
+          echo "" >> release-notes.md
+          echo "### Installation" >> release-notes.md
+          echo '```bash' >> release-notes.md
+          echo "pip install pyworkflow==${VERSION}" >> release-notes.md
+          echo '```' >> release-notes.md
+          echo "" >> release-notes.md
+          echo "### What's Changed" >> release-notes.md
+          git log $(git describe --tags --abbrev=0 HEAD^)..HEAD --pretty=format:"- %s (%h)" >> release-notes.md || echo "- Initial release" >> release-notes.md
+          echo "" >> release-notes.md
+          echo "" >> release-notes.md
+          echo "**Full Changelog**: https://github.com/QualityUnit/pyworkflow/commits/v${VERSION}" >> release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*
+          body_path: release-notes.md
+          draft: false
+          prerelease: ${{ contains(needs.verify-version.outputs.version, 'a') || contains(needs.verify-version.outputs.version, 'b') || contains(needs.verify-version.outputs.version, 'rc') }}

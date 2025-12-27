@@ -42,6 +42,11 @@ def storage_to_config(storage: StorageBackend | None) -> dict[str, Any] | None:
         }
     elif class_name == "InMemoryStorageBackend":
         return {"type": "memory"}
+    elif class_name == "SQLiteStorageBackend":
+        return {
+            "type": "sqlite",
+            "base_path": str(getattr(storage, "db_path", "./pyworkflow_data/pyworkflow.db")),
+        }
     elif class_name == "RedisStorageBackend":
         return {
             "type": "redis",
@@ -91,6 +96,19 @@ def config_to_storage(config: dict[str, Any] | None = None) -> StorageBackend:
         from pyworkflow.storage.memory import InMemoryStorageBackend
 
         return InMemoryStorageBackend()
+
+    elif storage_type == "sqlite":
+        try:
+            from pyworkflow.storage.sqlite import SQLiteStorageBackend
+        except ImportError:
+            raise ValueError(
+                "SQLite storage backend is not available. "
+                "Python was compiled without SQLite support (_sqlite3 module missing). "
+                "Please use 'file' or 'memory' storage instead, or rebuild Python with SQLite support."
+            )
+
+        db_path = config.get("base_path") or "./pyworkflow_data/pyworkflow.db"
+        return SQLiteStorageBackend(db_path=db_path)
 
     elif storage_type == "redis":
         from pyworkflow.storage.redis import RedisStorageBackend

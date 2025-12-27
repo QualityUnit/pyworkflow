@@ -17,10 +17,17 @@ from pyworkflow.storage.schemas import (
     WorkflowRun,
 )
 
+# SQLite backend - optional import (requires sqlite3 in Python build)
+try:
+    from pyworkflow.storage.sqlite import SQLiteStorageBackend
+except ImportError:
+    SQLiteStorageBackend = None  # type: ignore
+
 __all__ = [
     "StorageBackend",
     "FileStorageBackend",
     "InMemoryStorageBackend",
+    "SQLiteStorageBackend",
     "WorkflowRun",
     "StepExecution",
     "Hook",

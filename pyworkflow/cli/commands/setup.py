@@ -1,259 +1,534 @@
-"""Environment setup command for PyWorkflow."""
+"""Interactive setup command for PyWorkflow."""
 
-import os
+import sys
+from pathlib import Path
 
 import click
 
 from pyworkflow.cli.output.formatters import (
-    format_json,
-    format_key_value,
     print_error,
     print_info,
     print_success,
     print_warning,
 )
+from pyworkflow.cli.utils.config_generator import (
+    display_config_summary,
+    find_yaml_config,
+    generate_yaml_config,
+    load_yaml_config,
+    write_yaml_config,
+)
+from pyworkflow.cli.utils.docker_manager import (
+    check_docker_available,
+    check_service_health,
+    create_dockerfiles,
+    generate_docker_compose_content,
+    run_docker_command,
+    write_docker_compose,
+)
+from pyworkflow.cli.utils.interactive import (
+    confirm,
+    filepath,
+    input_text,
+    select,
+    validate_module_path,
+)
 
 
 @click.command(name="setup")
 @click.option(
-    "--broker",
-    type=click.Choice(["redis", "rabbitmq"], case_sensitive=False),
-    default="redis",
-    help="Broker type to use (default: redis)",
-)
-@click.option(
-    "--broker-url",
-    help="Full broker URL (overrides --broker defaults)",
-)
-@click.option(
-    "--check",
+    "--non-interactive",
     is_flag=True,
-    help="Only check if environment is ready (no modifications)",
+    help="Run without prompts (use defaults)",
+)
+@click.option(
+    "--skip-docker",
+    is_flag=True,
+    help="Skip Docker infrastructure setup",
+)
+@click.option(
+    "--module",
+    help="Workflow module path (e.g., myapp.workflows)",
+)
+@click.option(
+    "--storage",
+    type=click.Choice(["file", "memory", "sqlite"], case_sensitive=False),
+    help="Storage backend type",
+)
+@click.option(
+    "--storage-path",
+    help="Storage path for file/sqlite backends",
 )
 @click.pass_context
 def setup(
     ctx: click.Context,
-    broker: str,
-    broker_url: str | None,
-    check: bool,
+    non_interactive: bool,
+    skip_docker: bool,
+    module: str | None,
+    storage: str | None,
+    storage_path: str | None,
 ) -> None:
     """
-    Setup and verify the PyWorkflow environment.
+    Interactive setup for PyWorkflow environment.
 
-    This command checks broker connectivity and displays configuration
-    information for running Celery workers.
+    This command will:
+      1. Detect or create pyworkflow.config.yaml
+      2. Generate docker-compose.yml and Dockerfiles
+      3. Start Redis and Dashboard services via Docker
+      4. Validate the complete setup
 
     Examples:
 
-        # Check Redis broker (default)
-        pyworkflow setup --check
+        # Interactive setup (recommended)
+        $ pyworkflow setup
 
-        # Check RabbitMQ broker
-        pyworkflow setup --broker rabbitmq --check
+        # Non-interactive with defaults
+        $ pyworkflow setup --non-interactive
 
-        # Check custom broker URL
-        pyworkflow setup --broker-url redis://myredis:6379/0 --check
+        # Skip Docker setup
+        $ pyworkflow setup --skip-docker
 
-        # Show full setup information
-        pyworkflow setup
+        # Specify options directly
+        $ pyworkflow setup --module myapp.workflows --storage sqlite
     """
-    config = ctx.obj.get("config", {})
-    output = ctx.obj.get("output", "table")
-
-    # Get broker configuration
-    celery_config = config.get("celery", {})
-
-    if broker_url:
-        final_broker_url = broker_url
-    elif "broker" in celery_config:
-        final_broker_url = celery_config["broker"]
-    elif broker == "rabbitmq":
-        final_broker_url = os.getenv(
-            "PYWORKFLOW_CELERY_BROKER",
-            "amqp://guest:guest@localhost:5672//",
+    try:
+        _run_setup(
+            ctx=ctx,
+            non_interactive=non_interactive,
+            skip_docker=skip_docker,
+            module_override=module,
+            storage_override=storage,
+            storage_path_override=storage_path,
         )
-    else:  # redis
-        final_broker_url = os.getenv(
-            "PYWORKFLOW_CELERY_BROKER",
-            "redis://localhost:6379/0",
+    except click.Abort:
+        print_warning("\nSetup cancelled by user")
+        sys.exit(1)
+    except Exception as e:
+        print_error(f"\nSetup failed: {str(e)}")
+        if ctx.obj.get("verbose"):
+            raise
+        sys.exit(1)
+
+
+def _run_setup(
+    ctx: click.Context,
+    non_interactive: bool,
+    skip_docker: bool,
+    module_override: str | None,
+    storage_override: str | None,
+    storage_path_override: str | None,
+) -> None:
+    """Main setup workflow."""
+    # 1. Welcome & Banner
+    _print_welcome()
+
+    # 2. Pre-flight checks
+    docker_available, docker_error = check_docker_available()
+    if not docker_available:
+        print_warning(f"Docker: {docker_error}")
+        if not skip_docker:
+            if non_interactive:
+                print_info("Continuing without Docker (--non-interactive mode)")
+                skip_docker = True
+            else:
+                if not confirm("Continue without Docker?", default=False):
+                    print_info("\nPlease install Docker and try again:")
+                    print_info("  https://docs.docker.com/get-docker/")
+                    raise click.Abort()
+                skip_docker = True
+
+    # 3. Detect existing config
+    config_path = Path.cwd() / "pyworkflow.config.yaml"
+    config_data = None
+
+    existing_config = find_yaml_config()
+    if existing_config and not non_interactive:
+        print_info(f"\nFound existing config: {existing_config}")
+
+        choice = select(
+            "What would you like to do?",
+            choices=[
+                {"name": "Use existing configuration", "value": "use"},
+                {"name": "View configuration first", "value": "view"},
+                {"name": "Create new configuration", "value": "new"},
+            ],
         )
 
-    # Result backend
-    if "result_backend" in celery_config:
-        result_backend = celery_config["result_backend"]
-    else:
-        result_backend = os.getenv(
-            "PYWORKFLOW_CELERY_RESULT_BACKEND",
-            "redis://localhost:6379/1",
+        if choice == "use":
+            config_data = load_yaml_config(existing_config)
+            print_success("Using existing configuration")
+
+        elif choice == "view":
+            # Display config
+            print_info("\nCurrent configuration:")
+            print_info("-" * 50)
+            with open(existing_config) as f:
+                for line in f:
+                    print_info(f"  {line.rstrip()}")
+            print_info("-" * 50)
+
+            if confirm("\nUse this configuration?"):
+                config_data = load_yaml_config(existing_config)
+
+    # 4. Interactive configuration (if needed)
+    if not config_data:
+        config_data = _run_interactive_configuration(
+            non_interactive=non_interactive,
+            module_override=module_override,
+            storage_override=storage_override,
+            storage_path_override=storage_path_override,
         )
 
-    print_info("PyWorkflow Environment Setup")
-    print_info("=" * 40)
+    # 5. Display summary
+    print_info("")
+    # Convert flat config_data to nested structure for display
+    display_config = {
+        "module": config_data.get("module"),
+        "runtime": config_data["runtime"],
+        "storage": {
+            "type": config_data["storage_type"],
+            "base_path": config_data.get("storage_path"),
+        },
+        "celery": {
+            "broker": config_data["broker_url"],
+            "result_backend": config_data["result_backend"],
+        },
+    }
+    for line in display_config_summary(display_config):
+        print_info(line)
+
+    if not non_interactive:
+        if not confirm("\nProceed with this configuration?"):
+            print_warning("Setup cancelled")
+            raise click.Abort()
+
+    # 6. Write configuration file
+    print_info("\nGenerating configuration...")
+    yaml_content = generate_yaml_config(
+        module=config_data.get("module"),
+        runtime=config_data["runtime"],
+        storage_type=config_data["storage_type"],
+        storage_path=config_data.get("storage_path"),
+        broker_url=config_data["broker_url"],
+        result_backend=config_data["result_backend"],
+    )
+
+    config_file_path = write_yaml_config(yaml_content, config_path, backup=True)
+    print_success(f"Configuration saved: {config_file_path}")
+
+    # 7. Docker setup (if enabled)
+    dashboard_available = False
+    if not skip_docker:
+        dashboard_available = _setup_docker_infrastructure(
+            config_data=config_data,
+            non_interactive=non_interactive,
+        )
+
+    # 8. Final validation
+    _validate_setup(config_data, skip_docker)
+
+    # 9. Show next steps
+    _show_next_steps(config_data, skip_docker, dashboard_available)
+
+
+def _print_welcome() -> None:
+    """Print welcome banner."""
+    print_info("")
+    print_info("=" * 60)
+    print_info("  PyWorkflow Interactive Setup")
+    print_info("=" * 60)
     print_info("")
 
-    # Check broker connectivity
-    broker_ok = _check_broker(final_broker_url)
 
-    # Check result backend connectivity
-    backend_ok = _check_result_backend(result_backend)
+def _check_sqlite_available() -> bool:
+    """
+    Check if SQLite is available in the Python build.
 
-    # Show configuration
-    config_data = {
-        "Broker Type": broker.upper(),
-        "Broker URL": final_broker_url,
-        "Broker Status": "Connected" if broker_ok else "Not Connected",
-        "Result Backend": result_backend,
-        "Backend Status": "Connected" if backend_ok else "Not Connected",
+    Returns:
+        True if SQLite is available, False otherwise
+    """
+    try:
+        import sqlite3  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _run_interactive_configuration(
+    non_interactive: bool,
+    module_override: str | None,
+    storage_override: str | None,
+    storage_path_override: str | None,
+) -> dict[str, str]:
+    """Run interactive configuration prompts."""
+    print_info("Let's configure PyWorkflow for your project...\n")
+
+    config_data: dict[str, str] = {}
+
+    # Module (optional)
+    if module_override:
+        config_data["module"] = module_override
+    elif not non_interactive:
+        if confirm("Do you want to specify a workflow module now?", default=False):
+            module = input_text(
+                "Workflow module path (e.g., myapp.workflows):",
+                default="",
+                validate=validate_module_path,
+            )
+            if module:
+                config_data["module"] = module
+
+    # Runtime (currently only Celery)
+    config_data["runtime"] = "celery"
+    print_info("✓ Runtime: Celery (distributed workers)")
+
+    # Broker (currently only Redis)
+    config_data["broker_url"] = "redis://localhost:6379/0"
+    config_data["result_backend"] = "redis://localhost:6379/1"
+    print_info("✓ Broker: Redis (will be started via Docker)")
+
+    # Check if SQLite is available
+    sqlite_available = _check_sqlite_available()
+
+    # Storage backend
+    if storage_override:
+        storage_type = storage_override.lower()
+        # Validate if sqlite was requested but not available
+        if storage_type == "sqlite" and not sqlite_available:
+            print_error("\nSQLite storage backend is not available!")
+            print_info("\nYour Python installation was built without SQLite support.")
+            print_info("To fix this, install SQLite development libraries and rebuild Python:")
+            print_info("")
+            print_info("  # On Ubuntu/Debian:")
+            print_info("  sudo apt-get install libsqlite3-dev")
+            print_info("")
+            print_info("  # Then rebuild Python:")
+            print_info("  pyenv uninstall 3.13.5")
+            print_info("  pyenv install 3.13.5")
+            print_info("")
+            print_info("Or choose a different storage backend: --storage file")
+            raise click.Abort()
+    elif non_interactive:
+        if sqlite_available:
+            storage_type = "sqlite"
+        else:
+            print_error("\nSQLite storage backend is not available!")
+            print_info("\nYour Python installation was built without SQLite support.")
+            print_info("To fix this, install SQLite development libraries and rebuild Python:")
+            print_info("")
+            print_info("  # On Ubuntu/Debian:")
+            print_info("  sudo apt-get install libsqlite3-dev")
+            print_info("")
+            print_info("  # Then rebuild Python:")
+            print_info("  pyenv uninstall 3.13.5")
+            print_info("  pyenv install 3.13.5")
+            print_info("")
+            print_info("To use setup in non-interactive mode, specify: --storage file")
+            raise click.Abort()
+    else:
+        print_info("")
+        # Build choices based on SQLite availability
+        choices = []
+        if sqlite_available:
+            choices.append({"name": "SQLite - Single file database (recommended)", "value": "sqlite"})
+        choices.extend([
+            {"name": "File - JSON files on disk" + (" (recommended)" if not sqlite_available else ""), "value": "file"},
+            {"name": "Memory - In-memory only (dev/testing)", "value": "memory"},
+        ])
+
+        if not sqlite_available:
+            print_warning("\nNote: SQLite is not available in your Python build")
+            print_info("To enable SQLite, install libsqlite3-dev and rebuild Python")
+            print_info("")
+
+        storage_type = select(
+            "Choose storage backend:",
+            choices=choices,
+        )
+
+    config_data["storage_type"] = storage_type
+
+    # Storage path (for file/sqlite)
+    if storage_type in ["file", "sqlite"]:
+        if storage_path_override:
+            final_storage_path = storage_path_override
+        elif non_interactive:
+            final_storage_path = (
+                "./pyworkflow_data/pyworkflow.db"
+                if storage_type == "sqlite"
+                else "./pyworkflow_data"
+            )
+        else:
+            default_path = (
+                "./pyworkflow_data/pyworkflow.db"
+                if storage_type == "sqlite"
+                else "./pyworkflow_data"
+            )
+            final_storage_path = filepath(
+                "Storage path:",
+                default=default_path,
+                only_directories=(storage_type == "file"),
+            )
+
+        config_data["storage_path"] = final_storage_path
+
+    return config_data
+
+
+def _setup_docker_infrastructure(
+    config_data: dict[str, str],
+    non_interactive: bool,
+) -> bool:
+    """Set up Docker infrastructure.
+
+    Returns:
+        True if dashboard is available, False otherwise
+    """
+    print_info("\nSetting up Docker infrastructure...")
+
+    # Generate docker-compose.yml
+    print_info("  Generating docker-compose.yml...")
+    compose_content = generate_docker_compose_content(
+        storage_type=config_data["storage_type"],
+        storage_path=config_data.get("storage_path"),
+    )
+
+    compose_path = Path.cwd() / "docker-compose.yml"
+    write_docker_compose(compose_content, compose_path)
+    print_success(f"  Created: {compose_path}")
+
+    # Create Dockerfiles
+    print_info("  Generating Dockerfiles...")
+    backend_df, frontend_df = create_dockerfiles()
+    print_success(f"  Created: {backend_df.name}")
+    print_success(f"  Created: {frontend_df.name}")
+
+    # Build images
+    print_info("\n  Building Docker images (this may take a few minutes)...")
+    print_info("")
+    build_success, output = run_docker_command(
+        ["build"],
+        compose_file=compose_path,
+        stream_output=True,
+    )
+
+    dashboard_available = build_success
+    if not build_success:
+        print_warning("\n  Dashboard build failed (this is expected if dashboard is not set up)")
+        print_info("\n  Continuing with Redis setup only...")
+        print_info("  You can still use PyWorkflow without the dashboard.")
+    else:
+        print_success("\n  Images built successfully")
+
+    # Start services
+    print_info("\n  Starting services...")
+    print_info("")
+
+    # Only start dashboard if build succeeded
+    services_to_start = ["redis"]
+    if dashboard_available:
+        services_to_start.extend(["dashboard-backend", "dashboard-frontend"])
+
+    success, output = run_docker_command(
+        ["up", "-d"] + services_to_start,
+        compose_file=compose_path,
+        stream_output=True,
+    )
+
+    if not success:
+        print_error("\n  Failed to start services")
+        print_info("\n  Troubleshooting:")
+        print_info("    • Check if ports 6379, 8585, 5173 are already in use")
+        print_info("    • View logs: docker compose logs")
+        print_info("    • Try: docker compose down && docker compose up -d")
+        return False
+
+    print_success("\n  Services started")
+
+    # Health checks
+    print_info("\n  Checking service health...")
+    health_checks = {
+        "Redis": {"type": "tcp", "host": "localhost", "port": 6379},
     }
 
-    # Get storage config
-    storage_type = ctx.obj.get("storage_type") or config.get("storage", {}).get("type", "file")
-    storage_path = ctx.obj.get("storage_path") or config.get("storage", {}).get(
-        "base_path", "./workflow_data"
-    )
-    config_data["Storage Backend"] = storage_type
-    if storage_type == "file":
-        config_data["Storage Path"] = storage_path
+    # Only check dashboard health if it was started
+    if dashboard_available:
+        health_checks["Dashboard Backend"] = {"type": "http", "url": "http://localhost:8585/api/v1/health"}
+        health_checks["Dashboard Frontend"] = {"type": "http", "url": "http://localhost:5173"}
 
-    # Check if Celery is installed
-    celery_installed = _check_celery_installed()
-    config_data["Celery"] = "Installed" if celery_installed else "Not Installed"
+    health_results = check_service_health(health_checks)
 
-    if output == "json":
-        json_data = {
-            "broker": {
-                "type": broker,
-                "url": final_broker_url,
-                "connected": broker_ok,
-            },
-            "result_backend": {
-                "url": result_backend,
-                "connected": backend_ok,
-            },
-            "storage": {
-                "type": storage_type,
-                "path": storage_path if storage_type == "file" else None,
-            },
-            "celery_installed": celery_installed,
-            "ready": broker_ok and backend_ok and celery_installed,
-        }
-        format_json(json_data)
-    else:
-        format_key_value(config_data, title="Configuration")
-
-    # Status summary
-    print_info("")
-
-    if broker_ok and backend_ok and celery_installed:
-        print_success("Environment is ready!")
-        print_info("")
-        print_info("Next steps:")
-        print_info("  1. Start a worker:  pyworkflow worker run")
-        print_info("  2. Run a workflow:  pyworkflow workflows run <workflow_name>")
-    else:
-        print_warning("Environment has issues:")
-
-        if not celery_installed:
-            print_error("  - Celery is not installed")
-            print_info("    Fix: pip install celery[redis]")
-
-        if not broker_ok:
-            print_error(f"  - Cannot connect to broker: {final_broker_url}")
-            if broker == "redis":
-                print_info("    Fix: docker run -d -p 6379:6379 redis:7-alpine")
-            else:
-                print_info("    Fix: docker run -d -p 5672:5672 rabbitmq:3-management")
-
-        if not backend_ok:
-            print_error(f"  - Cannot connect to result backend: {result_backend}")
-            print_info("    Fix: Ensure Redis is running for result storage")
-
-
-def _check_celery_installed() -> bool:
-    """Check if Celery is installed."""
-    try:
-        import celery  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
-
-
-def _check_broker(broker_url: str) -> bool:
-    """Check if the broker is accessible."""
-    try:
-        if broker_url.startswith("redis://"):
-            return _check_redis(broker_url)
-        elif broker_url.startswith("amqp://"):
-            return _check_rabbitmq(broker_url)
+    for service_name, healthy in health_results.items():
+        if healthy:
+            print_success(f"  {service_name}: Ready")
         else:
-            # Unknown broker type, assume it works
-            return True
-    except Exception:
-        return False
+            print_warning(f"  {service_name}: Not responding (may still be starting)")
+
+    return dashboard_available
 
 
-def _check_redis(url: str) -> bool:
-    """Check Redis connectivity."""
-    try:
-        import redis
+def _validate_setup(config_data: dict[str, str], skip_docker: bool) -> None:
+    """Validate the setup."""
+    print_info("\nValidating setup...")
 
-        # Parse URL
-        client = redis.from_url(url, socket_timeout=2)
-        client.ping()
-        return True
-    except ImportError:
-        # redis-py not installed, try with socket
-        return _check_redis_socket(url)
-    except Exception:
-        return False
+    checks_passed = True
 
-
-def _check_redis_socket(url: str) -> bool:
-    """Check Redis connectivity using raw socket."""
-    import socket
-    from urllib.parse import urlparse
-
-    try:
-        parsed = urlparse(url)
-        host = parsed.hostname or "localhost"
-        port = parsed.port or 6379
-
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2)
-        result = sock.connect_ex((host, port))
-        sock.close()
-        return result == 0
-    except Exception:
-        return False
-
-
-def _check_rabbitmq(url: str) -> bool:
-    """Check RabbitMQ connectivity."""
-    import socket
-    from urllib.parse import urlparse
-
-    try:
-        parsed = urlparse(url)
-        host = parsed.hostname or "localhost"
-        port = parsed.port or 5672
-
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2)
-        result = sock.connect_ex((host, port))
-        sock.close()
-        return result == 0
-    except Exception:
-        return False
-
-
-def _check_result_backend(url: str) -> bool:
-    """Check result backend connectivity."""
-    if url.startswith("redis://"):
-        return _check_redis(url)
-    elif url.startswith("rpc://"):
-        # RPC backend uses the broker, assume it works
-        return True
+    # Check config file exists
+    config_path = Path.cwd() / "pyworkflow.config.yaml"
+    if config_path.exists():
+        print_success("  Configuration file: OK")
     else:
-        # Unknown backend, assume it works
-        return True
+        print_error("  Configuration file: Missing")
+        checks_passed = False
+
+    # Check docker compose file (if docker enabled)
+    if not skip_docker:
+        compose_path = Path.cwd() / "docker-compose.yml"
+        if compose_path.exists():
+            print_success("  Docker Compose file: OK")
+        else:
+            print_warning("  Docker Compose file: Missing")
+
+    if checks_passed:
+        print_success("\nValidation passed!")
+    else:
+        print_warning("\nValidation completed with warnings")
+
+
+def _show_next_steps(config_data: dict[str, str], skip_docker: bool, dashboard_available: bool = False) -> None:
+    """Display next steps to the user."""
+    print_info("\n" + "=" * 60)
+    print_success("Setup Complete!")
+    print_info("=" * 60)
+
+    if not skip_docker:
+        print_info("\nServices running:")
+        print_info("  • Redis:              redis://localhost:6379")
+        if dashboard_available:
+            print_info("  • Dashboard:          http://localhost:5173")
+            print_info("  • Dashboard API:      http://localhost:8585/docs")
+
+    print_info("\nNext steps:")
+    print_info("")
+    print_info("  1. Start a Celery worker:")
+    print_info("     $ pyworkflow worker run")
+    print_info("")
+    print_info("  2. Run a workflow:")
+    print_info("     $ pyworkflow workflows run <workflow_name>")
+
+    if not skip_docker and dashboard_available:
+        print_info("")
+        print_info("  3. View the dashboard:")
+        print_info("     Open http://localhost:5173 in your browser")
+
+    if not config_data.get("module"):
+        print_info("")
+        print_warning("  Note: No workflow module configured yet")
+        print_info("        Add 'module: your.workflows' to pyworkflow.config.yaml")
+
+    if not skip_docker:
+        print_info("")
+        print_info("To stop services:")
+        print_info("  $ docker compose down")
+
+    print_info("")

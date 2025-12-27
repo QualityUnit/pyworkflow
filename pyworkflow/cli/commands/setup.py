@@ -283,6 +283,7 @@ def _check_sqlite_available() -> bool:
     """
     try:
         import sqlite3  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -364,11 +365,19 @@ def _run_interactive_configuration(
         # Build choices based on SQLite availability
         choices = []
         if sqlite_available:
-            choices.append({"name": "SQLite - Single file database (recommended)", "value": "sqlite"})
-        choices.extend([
-            {"name": "File - JSON files on disk" + (" (recommended)" if not sqlite_available else ""), "value": "file"},
-            {"name": "Memory - In-memory only (dev/testing)", "value": "memory"},
-        ])
+            choices.append(
+                {"name": "SQLite - Single file database (recommended)", "value": "sqlite"}
+            )
+        choices.extend(
+            [
+                {
+                    "name": "File - JSON files on disk"
+                    + (" (recommended)" if not sqlite_available else ""),
+                    "value": "file",
+                },
+                {"name": "Memory - In-memory only (dev/testing)", "value": "memory"},
+            ]
+        )
 
         if not sqlite_available:
             print_warning("\nNote: SQLite is not available in your Python build")
@@ -480,7 +489,10 @@ def _setup_docker_infrastructure(
 
     # Only check dashboard health if it was started
     if dashboard_available:
-        health_checks["Dashboard Backend"] = {"type": "http", "url": "http://localhost:8585/api/v1/health"}
+        health_checks["Dashboard Backend"] = {
+            "type": "http",
+            "url": "http://localhost:8585/api/v1/health",
+        }
         health_checks["Dashboard Frontend"] = {"type": "http", "url": "http://localhost:5173"}
 
     health_results = check_service_health(health_checks)
@@ -522,7 +534,9 @@ def _validate_setup(config_data: dict[str, str], skip_docker: bool) -> None:
         print_warning("\nValidation completed with warnings")
 
 
-def _show_next_steps(config_data: dict[str, str], skip_docker: bool, dashboard_available: bool = False) -> None:
+def _show_next_steps(
+    config_data: dict[str, str], skip_docker: bool, dashboard_available: bool = False
+) -> None:
     """Display next steps to the user."""
     print_info("\n" + "=" * 60)
     print_success("Setup Complete!")

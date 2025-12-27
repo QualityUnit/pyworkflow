@@ -84,9 +84,7 @@ def select(
             # Dict format: {"name": "...", "value": "..."}
             for c in choices:
                 if isinstance(c, dict):
-                    choice_objects.append(
-                        Choice(value=c.get("value", c["name"]), name=c["name"])
-                    )
+                    choice_objects.append(Choice(value=c.get("value", c["name"]), name=c["name"]))
 
         return inquirer.select(
             message=message,
@@ -227,9 +225,7 @@ def multiselect(
         if choices and isinstance(choices[0], str):
             for c in choices:
                 if isinstance(c, str):
-                    choice_objects.append(
-                        Choice(value=c, name=c, enabled=(c in (default or [])))
-                    )
+                    choice_objects.append(Choice(value=c, name=c, enabled=(c in (default or []))))
         else:
             # Dict format: {"name": "...", "value": "..."}
             for c in choices:
@@ -285,6 +281,7 @@ def password(message: str, validate: Callable[[str], bool | str] | None = None) 
 
 
 # Validation helper functions
+
 
 def validate_module_path(value: str) -> bool | str:
     """

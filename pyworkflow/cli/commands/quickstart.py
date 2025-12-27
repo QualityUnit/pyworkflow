@@ -311,9 +311,7 @@ def _run_quickstart(
             start_docker = True
         else:
             print_info("")
-            start_docker = confirm(
-                "Start Docker services (Redis + Dashboard)?", default=True
-            )
+            start_docker = confirm("Start Docker services (Redis + Dashboard)?", default=True)
 
     # 6. Create project structure
     print_info("\nCreating project structure...")
@@ -321,9 +319,7 @@ def _run_quickstart(
 
     # 7. Generate config
     storage_path = (
-        "pyworkflow_data/pyworkflow.db"
-        if storage_type == "sqlite"
-        else "pyworkflow_data"
+        "pyworkflow_data/pyworkflow.db" if storage_type == "sqlite" else "pyworkflow_data"
     )
 
     yaml_content = generate_yaml_config(
@@ -484,7 +480,7 @@ def _show_next_steps(docker_started: bool, dashboard_available: bool) -> None:
     print_info("")
     print_info("  2. Run a workflow:")
     print_info("     $ pyworkflow workflows run process_order \\")
-    print_info("         --input '{\"order_id\": \"123\", \"amount\": 49.99}'")
+    print_info('         --input \'{"order_id": "123", "amount": 49.99}\'')
 
     if docker_started and dashboard_available:
         print_info("")

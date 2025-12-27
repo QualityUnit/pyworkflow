@@ -46,15 +46,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Initialize and connect storage backend
     storage = await get_storage()
-    if hasattr(storage, 'connect'):
+    if hasattr(storage, "connect"):
         await storage.connect()
-    if hasattr(storage, 'initialize'):
+    if hasattr(storage, "initialize"):
         await storage.initialize()
 
     yield
 
     # Shutdown - disconnect storage
-    if hasattr(storage, 'disconnect'):
+    if hasattr(storage, "disconnect"):
         await storage.disconnect()
 
 

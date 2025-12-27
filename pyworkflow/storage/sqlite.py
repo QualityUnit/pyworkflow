@@ -109,9 +109,7 @@ class SQLiteStorageBackend(StorageBackend):
         """)
 
         # Indexes for workflow_runs
-        await db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_runs_status ON workflow_runs(status)"
-        )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_runs_status ON workflow_runs(status)")
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_runs_workflow_name ON workflow_runs(workflow_name)"
         )
@@ -142,9 +140,7 @@ class SQLiteStorageBackend(StorageBackend):
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_run_id_sequence ON events(run_id, sequence)"
         )
-        await db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)"
-        )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)")
 
         # Steps table
         await db.execute("""
@@ -166,9 +162,7 @@ class SQLiteStorageBackend(StorageBackend):
         """)
 
         # Indexes for steps
-        await db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_steps_run_id ON steps(run_id)"
-        )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_steps_run_id ON steps(run_id)")
 
         # Hooks table
         await db.execute("""
@@ -187,15 +181,9 @@ class SQLiteStorageBackend(StorageBackend):
         """)
 
         # Indexes for hooks
-        await db.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_hooks_token ON hooks(token)"
-        )
-        await db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_hooks_run_id ON hooks(run_id)"
-        )
-        await db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_hooks_status ON hooks(status)"
-        )
+        await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_hooks_token ON hooks(token)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_hooks_run_id ON hooks(run_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_hooks_status ON hooks(status)")
 
         # Schedules table
         await db.execute("""
@@ -221,9 +209,7 @@ class SQLiteStorageBackend(StorageBackend):
         """)
 
         # Indexes for schedules
-        await db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_schedules_status ON schedules(status)"
-        )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_schedules_status ON schedules(status)")
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_schedules_next_run_time ON schedules(next_run_time)"
         )
@@ -294,9 +280,7 @@ class SQLiteStorageBackend(StorageBackend):
         """Retrieve a workflow run by ID."""
         db = self._ensure_connected()
 
-        async with db.execute(
-            "SELECT * FROM workflow_runs WHERE run_id = ?", (run_id,)
-        ) as cursor:
+        async with db.execute("SELECT * FROM workflow_runs WHERE run_id = ?", (run_id,)) as cursor:
             row = await cursor.fetchone()
 
         if not row:
@@ -389,7 +373,9 @@ class SQLiteStorageBackend(StorageBackend):
         params: list[Any] = []
 
         if cursor:
-            conditions.append("created_at < (SELECT created_at FROM workflow_runs WHERE run_id = ?)")
+            conditions.append(
+                "created_at < (SELECT created_at FROM workflow_runs WHERE run_id = ?)"
+            )
             params.append(cursor)
 
         if query:
@@ -556,9 +542,7 @@ class SQLiteStorageBackend(StorageBackend):
         """Retrieve a step execution by ID."""
         db = self._ensure_connected()
 
-        async with db.execute(
-            "SELECT * FROM steps WHERE step_id = ?", (step_id,)
-        ) as cursor:
+        async with db.execute("SELECT * FROM steps WHERE step_id = ?", (step_id,)) as cursor:
             row = await cursor.fetchone()
 
         if not row:
@@ -642,9 +626,7 @@ class SQLiteStorageBackend(StorageBackend):
         """Retrieve a hook by ID."""
         db = self._ensure_connected()
 
-        async with db.execute(
-            "SELECT * FROM hooks WHERE hook_id = ?", (hook_id,)
-        ) as cursor:
+        async with db.execute("SELECT * FROM hooks WHERE hook_id = ?", (hook_id,)) as cursor:
             row = await cursor.fetchone()
 
         if not row:
@@ -656,9 +638,7 @@ class SQLiteStorageBackend(StorageBackend):
         """Retrieve a hook by its token."""
         db = self._ensure_connected()
 
-        async with db.execute(
-            "SELECT * FROM hooks WHERE token = ?", (token,)
-        ) as cursor:
+        async with db.execute("SELECT * FROM hooks WHERE token = ?", (token,)) as cursor:
             row = await cursor.fetchone()
 
         if not row:
@@ -760,9 +740,7 @@ class SQLiteStorageBackend(StorageBackend):
         """Clear the cancellation flag for a workflow run."""
         db = self._ensure_connected()
 
-        await db.execute(
-            "DELETE FROM cancellation_flags WHERE run_id = ?", (run_id,)
-        )
+        await db.execute("DELETE FROM cancellation_flags WHERE run_id = ?", (run_id,))
         await db.commit()
 
     # Continue-As-New Chain Operations
@@ -895,7 +873,9 @@ class SQLiteStorageBackend(StorageBackend):
                 json.dumps(schedule.running_run_ids),
                 json.dumps({}),  # metadata not in schema, store empty
                 schedule.created_at.isoformat(),
-                schedule.updated_at.isoformat() if schedule.updated_at else datetime.now(UTC).isoformat(),
+                schedule.updated_at.isoformat()
+                if schedule.updated_at
+                else datetime.now(UTC).isoformat(),
                 None,  # paused_at - derived from status
                 None,  # deleted_at - derived from status
             ),

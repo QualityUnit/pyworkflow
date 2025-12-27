@@ -916,7 +916,7 @@ class DynamoDBStorageBackend(StorageBackend):
         """Get all runs in a continue-as-new chain."""
         # Find the first run in the chain
         current_id: str | None = run_id
-        while True:
+        while current_id:
             run = await self.get_run(current_id)
             if not run or not run.continued_from_run_id:
                 break

@@ -15,7 +15,6 @@ from pyworkflow.engine.events import Event, EventType
 from pyworkflow.storage.schemas import (
     Hook,
     HookStatus,
-    OverlapPolicy,
     RunStatus,
     Schedule,
     ScheduleSpec,
@@ -1495,7 +1494,6 @@ class TestDynamoDBGSIQueries:
     @pytest.mark.asyncio
     async def test_gsi1_runs_by_status(self, backend):
         """Test that list_runs uses GSI1 for status queries."""
-        now = datetime.now(UTC)
         mock_client = AsyncMock()
         mock_client.query = AsyncMock(return_value={"Items": []})
 

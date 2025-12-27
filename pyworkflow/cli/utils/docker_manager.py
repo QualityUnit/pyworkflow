@@ -58,7 +58,7 @@ def check_docker_available() -> tuple[bool, str | None]:
         )
         if result.returncode == 0:
             return True, None
-    except:
+    except Exception:
         pass
 
     # Fallback: check legacy docker-compose
@@ -200,7 +200,7 @@ def get_docker_compose_command() -> list[str]:
         )
         if result.returncode == 0:
             return ["docker", "compose"]
-    except:
+    except Exception:
         pass
 
     # Fall back to legacy 'docker-compose'
@@ -251,8 +251,6 @@ def run_docker_command(
             GRAY = "\033[90m"
             RESET = "\033[0m"
             CLEAR_LINE = "\033[K"
-            SAVE_CURSOR = "\033[s"
-            RESTORE_CURSOR = "\033[u"
 
             spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
             spinner_running = True

@@ -125,6 +125,7 @@ def generate_docker_compose_content(
 
   dashboard-backend:
     image: yashabro/pyworkflow-dashboard-backend:latest
+    platform: linux/amd64
     container_name: pyworkflow-dashboard-backend
     working_dir: /app/project
     ports:
@@ -149,6 +150,7 @@ def generate_docker_compose_content(
 
   dashboard-frontend:
     image: yashabro/pyworkflow-dashboard-frontend:latest
+    platform: linux/amd64
     container_name: pyworkflow-dashboard-frontend
     ports:
       - "5173:80"

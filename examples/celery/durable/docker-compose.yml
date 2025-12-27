@@ -15,6 +15,7 @@ services:
 
   dashboard-backend:
     image: yashabro/pyworkflow-dashboard-backend:latest
+    platform: linux/amd64
     container_name: pyworkflow-dashboard-backend
     working_dir: /app/project
     ports:
@@ -39,6 +40,7 @@ services:
 
   dashboard-frontend:
     image: yashabro/pyworkflow-dashboard-frontend:latest
+    platform: linux/amd64
     container_name: pyworkflow-dashboard-frontend
     ports:
       - "5173:80"

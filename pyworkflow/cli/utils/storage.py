@@ -23,7 +23,7 @@ def create_storage(
     4. Default (file backend with ./workflow_data)
 
     Args:
-        backend_type: Storage backend type ("file", "memory", "redis", "sqlite")
+        backend_type: Storage backend type ("file", "memory", "redis", "sqlite", "dynamodb")
         path: Storage path (for file/sqlite backends)
         config: Configuration dict from pyworkflow.toml
 
@@ -55,13 +55,6 @@ def create_storage(
 
     logger.debug(f"Creating storage backend: {backend}")
 
-    # Check for unsupported backends (CLI-specific validation)
-    if backend == "sqlite":
-        logger.warning("SQLite backend not yet implemented in CLI")
-        raise ValueError(
-            "SQLite backend is not yet supported in the CLI. Use 'file' or 'memory' backends."
-        )
-
     # Resolve storage path with priority: CLI flag > config file > default
     storage_path = path
     if not storage_path and config:
@@ -81,6 +74,16 @@ def create_storage(
             storage_config["port"] = storage_section["port"]
         if "db" in storage_section:
             storage_config["db"] = storage_section["db"]
+
+    # Extract dynamodb config if present
+    if backend == "dynamodb" and config:
+        storage_section = config.get("storage", {})
+        if "table_name" in storage_section:
+            storage_config["table_name"] = storage_section["table_name"]
+        if "region" in storage_section:
+            storage_config["region"] = storage_section["region"]
+        if "endpoint_url" in storage_section:
+            storage_config["endpoint_url"] = storage_section["endpoint_url"]
 
     # Use unified config_to_storage
     storage = config_to_storage(storage_config)

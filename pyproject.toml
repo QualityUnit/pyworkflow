@@ -54,6 +54,9 @@ dependencies = [
 aws = [
     "aws-durable-execution-sdk-python>=0.1.0",
 ]
+dynamodb = [
+    "aiobotocore>=2.5.0",
+]
 dev = [
     # Testing
     "pytest>=7.4.0",
@@ -203,6 +206,8 @@ module = [
     "redis.*",
     "asyncpg.*",
     "aiosqlite.*",
+    "aiobotocore.*",
+    "botocore.*",
     "InquirerPy.*",
     "prompt_toolkit.*",
     "yaml.*",

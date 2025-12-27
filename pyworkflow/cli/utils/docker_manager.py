@@ -71,13 +71,15 @@ def check_docker_available() -> tuple[bool, str | None]:
 def generate_docker_compose_content(
     storage_type: str,
     storage_path: str | None = None,
+    dynamodb_endpoint_url: str | None = None,
 ) -> str:
     """
     Generate docker-compose.yml content for PyWorkflow services.
 
     Args:
-        storage_type: Storage backend type ("sqlite", "file", "memory")
+        storage_type: Storage backend type ("sqlite", "file", "memory", "dynamodb")
         storage_path: Path to storage (for file/sqlite backends)
+        dynamodb_endpoint_url: Optional local DynamoDB endpoint URL
 
     Returns:
         docker-compose.yml content as string
@@ -108,6 +110,31 @@ def generate_docker_compose_content(
     if not volume_mapping.startswith(("./", "/", "~")):
         volume_mapping = f"./{volume_mapping}"
 
+    # DynamoDB Local service (only for dynamodb storage type with local endpoint)
+    dynamodb_service = ""
+    dynamodb_depends = ""
+    dynamodb_env = ""
+    if storage_type == "dynamodb":
+        dynamodb_service = """
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: pyworkflow-dynamodb-local
+    ports:
+      - "8000:8000"
+    command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:8000 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+"""
+        dynamodb_depends = """
+      dynamodb-local:
+        condition: service_healthy"""
+        dynamodb_env = """
+      - DASHBOARD_DYNAMODB_ENDPOINT_URL=http://dynamodb-local:8000"""
+
     template = f"""services:
   redis:
     image: redis:7-alpine
@@ -122,7 +149,7 @@ def generate_docker_compose_content(
       timeout: 3s
       retries: 5
     restart: unless-stopped
-
+{dynamodb_service}
   dashboard-backend:
     image: yashabro/pyworkflow-dashboard-backend:latest
     container_name: pyworkflow-dashboard-backend
@@ -138,13 +165,13 @@ def generate_docker_compose_content(
       - DASHBOARD_CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
       - PYWORKFLOW_CELERY_BROKER=redis://redis:6379/0
       - PYWORKFLOW_CELERY_RESULT_BACKEND=redis://redis:6379/1
-      - PYTHONPATH=/app/project
+      - PYTHONPATH=/app/project{dynamodb_env}
     volumes:
       - .:/app/project:ro
       - {volume_mapping}:/app/project/pyworkflow_data
     depends_on:
       redis:
-        condition: service_healthy
+        condition: service_healthy{dynamodb_depends}
     restart: unless-stopped
 
   dashboard-frontend:

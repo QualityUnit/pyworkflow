@@ -23,11 +23,18 @@ try:
 except ImportError:
     SQLiteStorageBackend = None  # type: ignore
 
+# DynamoDB backend - optional import (requires aiobotocore)
+try:
+    from pyworkflow.storage.dynamodb import DynamoDBStorageBackend
+except ImportError:
+    DynamoDBStorageBackend = None  # type: ignore
+
 __all__ = [
     "StorageBackend",
     "FileStorageBackend",
     "InMemoryStorageBackend",
     "SQLiteStorageBackend",
+    "DynamoDBStorageBackend",
     "WorkflowRun",
     "StepExecution",
     "Hook",

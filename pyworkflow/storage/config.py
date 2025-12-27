@@ -54,6 +54,13 @@ def storage_to_config(storage: StorageBackend | None) -> dict[str, Any] | None:
             "port": getattr(storage, "port", 6379),
             "db": getattr(storage, "db", 0),
         }
+    elif class_name == "DynamoDBStorageBackend":
+        return {
+            "type": "dynamodb",
+            "table_name": getattr(storage, "table_name", "pyworkflow"),
+            "region": getattr(storage, "region", "us-east-1"),
+            "endpoint_url": getattr(storage, "endpoint_url", None),
+        }
     else:
         # Unknown backend - return minimal config
         return {"type": "unknown"}
@@ -117,6 +124,21 @@ def config_to_storage(config: dict[str, Any] | None = None) -> StorageBackend:
             host=config.get("host", "localhost"),
             port=config.get("port", 6379),
             db=config.get("db", 0),
+        )
+
+    elif storage_type == "dynamodb":
+        try:
+            from pyworkflow.storage.dynamodb import DynamoDBStorageBackend
+        except ImportError:
+            raise ValueError(
+                "DynamoDB storage backend is not available. "
+                "Please install the required dependencies with: pip install 'pyworkflow[dynamodb]'"
+            )
+
+        return DynamoDBStorageBackend(
+            table_name=config.get("table_name", "pyworkflow"),
+            region=config.get("region", "us-east-1"),
+            endpoint_url=config.get("endpoint_url"),
         )
 
     else:

@@ -4,6 +4,7 @@ from app.config import settings
 from pyworkflow import get_storage as pyworkflow_get_storage
 from pyworkflow.storage.base import StorageBackend
 from pyworkflow.storage.file import FileStorageBackend
+from pyworkflow.storage.memory import InMemoryStorageBackend
 
 _storage_instance: StorageBackend | None = None
 
@@ -34,6 +35,12 @@ async def get_storage() -> StorageBackend:
             # Create based on dashboard config
             if settings.storage_type == "file":
                 storage = FileStorageBackend(settings.storage_path)
+            elif settings.storage_type == "sqlite":
+                from pyworkflow.storage.sqlite import SQLiteStorageBackend
+                db_path = f"{settings.storage_path}/pyworkflow.db"
+                storage = SQLiteStorageBackend(db_path)
+            elif settings.storage_type == "memory":
+                storage = InMemoryStorageBackend()
             else:
                 raise ValueError(f"Unknown storage type: {settings.storage_type}")
 

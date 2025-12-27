@@ -87,7 +87,7 @@ Issues = "https://github.com/yourusername/pyworkflow/issues"
 pyworkflow = "pyworkflow.cli:main"
 
 [tool.setuptools]
-packages = ["pyworkflow"]
+packages = {find = {}}
 
 [tool.setuptools.package-data]
 pyworkflow = ["py.typed"]

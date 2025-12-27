@@ -40,13 +40,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _initialize_pyworkflow()
 
     # Reset cached storage instance to ensure fresh initialization
-    from app.dependencies.storage import reset_storage_cache
+    from app.dependencies.storage import reset_storage_cache, get_storage
 
     reset_storage_cache()
 
+    # Initialize and connect storage backend
+    storage = await get_storage()
+    if hasattr(storage, 'connect'):
+        await storage.connect()
+    if hasattr(storage, 'initialize'):
+        await storage.initialize()
+
     yield
 
-    # Shutdown (nothing to do currently)
+    # Shutdown - disconnect storage
+    if hasattr(storage, 'disconnect'):
+        await storage.disconnect()
 
 
 def create_app() -> FastAPI:

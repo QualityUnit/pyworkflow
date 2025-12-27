@@ -10,8 +10,8 @@ RUN apt-get update && \
 # Copy entire project for pyworkflow installation
 COPY . /pyworkflow_source
 
-# Install pyworkflow from source
-RUN pip install --no-cache-dir /pyworkflow_source
+# Install pyworkflow from source (force reinstall to avoid cache issues)
+RUN pip install --no-cache-dir --force-reinstall /pyworkflow_source
 
 # Install dashboard-specific dependencies
 RUN pip install --no-cache-dir \

@@ -341,6 +341,9 @@ async def _execute_child_workflow_on_worker(
     2. Recording completion/failure events in parent's log
     3. Triggering parent resumption if waiting
     """
+    # Ensure storage is connected (some backends like SQLite require this)
+    if hasattr(storage, "connect"):
+        await storage.connect()
 
     from pyworkflow.engine.events import (
         create_child_workflow_completed_event,
@@ -822,6 +825,10 @@ async def _start_workflow_on_worker(
     """
     from pyworkflow.config import get_config
 
+    # Ensure storage is connected (some backends like SQLite require this)
+    if hasattr(storage, "connect"):
+        await storage.connect()
+
     workflow_name = workflow_meta.name
     config = get_config()
 
@@ -1169,6 +1176,10 @@ async def _execute_scheduled_workflow(
     Returns:
         Workflow run ID if started, None if skipped
     """
+    # Ensure storage is connected (some backends like SQLite require this)
+    if hasattr(storage, "connect"):
+        await storage.connect()
+
     from pyworkflow.engine.events import create_schedule_triggered_event
     from pyworkflow.storage.schemas import ScheduleStatus
 
@@ -1311,6 +1322,10 @@ async def _resume_workflow_on_worker(
     This mirrors the logic from testing.py but runs on workers.
     """
     from pyworkflow.core.exceptions import WorkflowNotFoundError
+
+    # Ensure storage is connected (some backends like SQLite require this)
+    if hasattr(storage, "connect"):
+        await storage.connect()
 
     # Load workflow run
     run = await storage.get_run(run_id)

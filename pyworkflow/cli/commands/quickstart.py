@@ -18,7 +18,6 @@ from pyworkflow.cli.utils.config_generator import (
 from pyworkflow.cli.utils.docker_manager import (
     check_docker_available,
     check_service_health,
-    create_dockerfiles,
     generate_docker_compose_content,
     run_docker_command,
     write_docker_compose,
@@ -396,25 +395,18 @@ def _setup_docker(
     write_docker_compose(compose_content, compose_path)
     print_success(f"  Created: {compose_path.name}")
 
-    # Create Dockerfiles
-    backend_df, frontend_df = create_dockerfiles()
-    print_success(f"  Created: {backend_df.name}")
-    print_success(f"  Created: {frontend_df.name}")
-
-    # Build images
-    print_info("\n  Building Docker images (this may take a few minutes)...")
+    # Pull images
+    print_info("\n  Pulling Docker images...")
     print_info("")
-    build_success, _ = run_docker_command(
-        ["build"],
+    pull_success, _ = run_docker_command(
+        ["pull"],
         compose_file=compose_path,
         stream_output=True,
     )
 
-    dashboard_available = build_success
-    if not build_success:
-        print_warning(
-            "\n  Dashboard build failed (this is expected if dashboard is not set up)"
-        )
+    dashboard_available = pull_success
+    if not pull_success:
+        print_warning("\n  Failed to pull dashboard images")
         print_info("  Continuing with Redis setup only...")
 
     # Start services

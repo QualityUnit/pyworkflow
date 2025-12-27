@@ -10,7 +10,7 @@ RUN apt-get update && \
 # Copy entire project for pyworkflow installation
 COPY . /pyworkflow_source
 
-# Install pyworkflow from source (force reinstall to avoid cache issues)
+# Install pyworkflow from source
 RUN pip install --no-cache-dir --force-reinstall /pyworkflow_source
 
 # Install dashboard-specific dependencies
@@ -24,5 +24,4 @@ COPY dashboard/backend /app/dashboard
 
 EXPOSE 8585
 
-# Use absolute path since docker-compose may override working_dir
 CMD ["python", "/app/dashboard/main.py"]

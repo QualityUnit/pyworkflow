@@ -14,8 +14,6 @@ from typing import Any
 
 import httpx
 
-from pyworkflow.cli.output.formatters import print_error, print_info
-
 
 def check_docker_available() -> tuple[bool, str | None]:
     """
@@ -70,24 +68,6 @@ def check_docker_available() -> tuple[bool, str | None]:
     return False, "Docker Compose is not available. Upgrade Docker to get 'docker compose'."
 
 
-def get_pyworkflow_root() -> str:
-    """
-    Find the PyWorkflow project root directory.
-
-    Returns:
-        Absolute path to pyworkflow project root
-    """
-    import pyworkflow
-    from pathlib import Path
-
-    # Get the pyworkflow package location
-    pyworkflow_init = Path(pyworkflow.__file__)
-    # Go up from pyworkflow/__init__.py to project root
-    project_root = pyworkflow_init.parent.parent
-
-    return str(project_root.absolute())
-
-
 def generate_docker_compose_content(
     storage_type: str,
     storage_path: str | None = None,
@@ -108,9 +88,6 @@ def generate_docker_compose_content(
         ...     storage_path="./pyworkflow_data/pyworkflow.db"
         ... )
     """
-    # Get the PyWorkflow project root for build context
-    pyworkflow_root = get_pyworkflow_root()
-
     # Normalize storage path - extract directory for volume mapping
     if not storage_path:
         volume_mapping = "./pyworkflow_data"
@@ -146,9 +123,7 @@ def generate_docker_compose_content(
     restart: unless-stopped
 
   dashboard-backend:
-    build:
-      context: {pyworkflow_root}
-      dockerfile: dashboard.backend.Dockerfile
+    image: yashabro/pyworkflow-dashboard-backend:latest
     container_name: pyworkflow-dashboard-backend
     working_dir: /app/project
     ports:
@@ -172,9 +147,7 @@ def generate_docker_compose_content(
     restart: unless-stopped
 
   dashboard-frontend:
-    build:
-      context: {pyworkflow_root}
-      dockerfile: dashboard.frontend.Dockerfile
+    image: yashabro/pyworkflow-dashboard-frontend:latest
     container_name: pyworkflow-dashboard-frontend
     ports:
       - "5173:80"
@@ -427,118 +400,6 @@ def wait_for_http_service(
         time.sleep(1)
 
     return False
-
-
-def create_backend_dockerfile(target_path: Path) -> None:
-    """
-    Create Dockerfile for dashboard backend.
-
-    Args:
-        target_path: Where to write the Dockerfile
-    """
-    dockerfile_content = """FROM python:3.11-slim
-
-WORKDIR /app
-
-# Install system dependencies
-RUN apt-get update && \\
-    apt-get install -y --no-install-recommends gcc git && \\
-    rm -rf /var/lib/apt/lists/*
-
-# Copy entire project for pyworkflow installation
-COPY . /pyworkflow_source
-
-# Install pyworkflow from source (force reinstall to avoid cache issues)
-RUN pip install --no-cache-dir --force-reinstall /pyworkflow_source
-
-# Install dashboard-specific dependencies
-RUN pip install --no-cache-dir \\
-    fastapi==0.109.0 \\
-    uvicorn==0.27.0 \\
-    pydantic-settings==2.0.0
-
-# Copy dashboard backend code
-COPY dashboard/backend /app/dashboard
-
-EXPOSE 8585
-
-# Use absolute path since docker-compose may override working_dir
-CMD ["python", "/app/dashboard/main.py"]
-"""
-    target_path.write_text(dockerfile_content)
-
-
-def create_frontend_dockerfile(target_path: Path) -> None:
-    """
-    Create Dockerfile for dashboard frontend.
-
-    Args:
-        target_path: Where to write the Dockerfile
-    """
-    dockerfile_content = """FROM node:20-alpine AS builder
-
-WORKDIR /app
-
-# Copy package files
-COPY dashboard/frontend/package*.json ./
-
-# Install dependencies
-RUN npm ci
-
-# Copy source code
-COPY dashboard/frontend .
-
-# Build for production
-RUN npm run build
-
-# Production stage with nginx
-FROM nginx:alpine
-
-# Copy built assets
-COPY --from=builder /app/dist /usr/share/nginx/html
-
-# Create nginx configuration
-RUN echo 'server { \\
-    listen 80; \\
-    server_name localhost; \\
-    root /usr/share/nginx/html; \\
-    index index.html; \\
-    location / { \\
-        try_files $uri $uri/ /index.html; \\
-    } \\
-    # Enable gzip compression \\
-    gzip on; \\
-    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript; \\
-}' > /etc/nginx/conf.d/default.conf
-
-EXPOSE 80
-
-CMD ["nginx", "-g", "daemon off;"]
-"""
-    target_path.write_text(dockerfile_content)
-
-
-def create_dockerfiles() -> tuple[Path, Path]:
-    """
-    Create both backend and frontend Dockerfiles in PyWorkflow project root.
-
-    Returns:
-        Tuple of (backend_dockerfile_path, frontend_dockerfile_path)
-
-    Example:
-        >>> backend_df, frontend_df = create_dockerfiles()
-        >>> print(f"Created {backend_df} and {frontend_df}")
-    """
-    # Use project root for Dockerfiles (where docker-compose will build)
-    project_root = Path(get_pyworkflow_root())
-
-    backend_dockerfile = project_root / "dashboard.backend.Dockerfile"
-    frontend_dockerfile = project_root / "dashboard.frontend.Dockerfile"
-
-    create_backend_dockerfile(backend_dockerfile)
-    create_frontend_dockerfile(frontend_dockerfile)
-
-    return backend_dockerfile, frontend_dockerfile
 
 
 def check_service_health(service_checks: dict[str, dict[str, Any]]) -> dict[str, bool]:

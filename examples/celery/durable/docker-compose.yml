@@ -14,9 +14,7 @@ services:
     restart: unless-stopped
 
   dashboard-backend:
-    build:
-      context: /home/yasha/Desktop/projects/pyworkflow
-      dockerfile: dashboard.backend.Dockerfile
+    image: yashabro/pyworkflow-dashboard-backend:latest
     container_name: pyworkflow-dashboard-backend
     working_dir: /app/project
     ports:
@@ -40,9 +38,7 @@ services:
     restart: unless-stopped
 
   dashboard-frontend:
-    build:
-      context: /home/yasha/Desktop/projects/pyworkflow
-      dockerfile: dashboard.frontend.Dockerfile
+    image: yashabro/pyworkflow-dashboard-frontend:latest
     container_name: pyworkflow-dashboard-frontend
     ports:
       - "5173:80"

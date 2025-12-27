@@ -372,6 +372,7 @@ def run_docker_command(
                     sys.stdout.flush()
                     current_frame[0] += 1
                     import time
+
                     time.sleep(0.1)
                 # Clear spinner when done
                 sys.stdout.write(f"{CLEAR_LINE}\r")

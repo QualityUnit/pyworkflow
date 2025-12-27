@@ -304,6 +304,7 @@ def _check_postgres_available() -> bool:
     """
     try:
         import asyncpg  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -396,13 +397,23 @@ def _run_interactive_configuration(
         # Build choices based on available backends
         choices = []
         if sqlite_available:
-            choices.append({"name": "SQLite - Single file database (recommended)", "value": "sqlite"})
+            choices.append(
+                {"name": "SQLite - Single file database (recommended)", "value": "sqlite"}
+            )
         if postgres_available:
-            choices.append({"name": "PostgreSQL - Scalable production database", "value": "postgres"})
-        choices.extend([
-            {"name": "File - JSON files on disk" + (" (recommended)" if not sqlite_available else ""), "value": "file"},
-            {"name": "Memory - In-memory only (dev/testing)", "value": "memory"},
-        ])
+            choices.append(
+                {"name": "PostgreSQL - Scalable production database", "value": "postgres"}
+            )
+        choices.extend(
+            [
+                {
+                    "name": "File - JSON files on disk"
+                    + (" (recommended)" if not sqlite_available else ""),
+                    "value": "file",
+                },
+                {"name": "Memory - In-memory only (dev/testing)", "value": "memory"},
+            ]
+        )
 
         if not sqlite_available:
             print_warning("\nNote: SQLite is not available in your Python build")

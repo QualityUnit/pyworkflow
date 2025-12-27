@@ -24,7 +24,9 @@ except ImportError:
     POSTGRES_AVAILABLE = False
 
 # Get PostgreSQL connection info from environment
-POSTGRES_DSN = os.environ.get("TEST_POSTGRES_DSN", "postgresql://pyworkflow:pyworkflow@localhost:5432/pyworkflow_test")
+POSTGRES_DSN = os.environ.get(
+    "TEST_POSTGRES_DSN", "postgresql://pyworkflow:pyworkflow@localhost:5432/pyworkflow_test"
+)
 
 
 @pytest.fixture

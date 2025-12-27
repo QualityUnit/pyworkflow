@@ -77,7 +77,9 @@ class PostgresStorageBackend(StorageBackend):
     def _build_dsn(self) -> str:
         """Build DSN from individual parameters."""
         if self.password:
-            return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+            return (
+                f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+            )
         return f"postgresql://{self.user}@{self.host}:{self.port}/{self.database}"
 
     async def connect(self) -> None:
@@ -167,9 +169,7 @@ class PostgresStorageBackend(StorageBackend):
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_events_run_id_sequence ON events(run_id, sequence)"
             )
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)"
-            )
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)")
 
             # Steps table
             await conn.execute("""
@@ -190,9 +190,7 @@ class PostgresStorageBackend(StorageBackend):
             """)
 
             # Indexes for steps
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_steps_run_id ON steps(run_id)"
-            )
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_steps_run_id ON steps(run_id)")
 
             # Hooks table
             await conn.execute("""
@@ -210,15 +208,9 @@ class PostgresStorageBackend(StorageBackend):
             """)
 
             # Indexes for hooks
-            await conn.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_hooks_token ON hooks(token)"
-            )
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_hooks_run_id ON hooks(run_id)"
-            )
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_hooks_status ON hooks(status)"
-            )
+            await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_hooks_token ON hooks(token)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_hooks_run_id ON hooks(run_id)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_hooks_status ON hooks(status)")
 
             # Schedules table
             await conn.execute("""
@@ -313,9 +305,7 @@ class PostgresStorageBackend(StorageBackend):
         pool = self._ensure_connected()
 
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM workflow_runs WHERE run_id = $1", run_id
-            )
+            row = await conn.fetchrow("SELECT * FROM workflow_runs WHERE run_id = $1", run_id)
 
         if not row:
             return None
@@ -327,9 +317,7 @@ class PostgresStorageBackend(StorageBackend):
         pool = self._ensure_connected()
 
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM workflow_runs WHERE idempotency_key = $1", key
-            )
+            row = await conn.fetchrow("SELECT * FROM workflow_runs WHERE idempotency_key = $1", key)
 
         if not row:
             return None
@@ -414,12 +402,16 @@ class PostgresStorageBackend(StorageBackend):
         param_idx = 1
 
         if cursor:
-            conditions.append(f"created_at < (SELECT created_at FROM workflow_runs WHERE run_id = ${param_idx})")
+            conditions.append(
+                f"created_at < (SELECT created_at FROM workflow_runs WHERE run_id = ${param_idx})"
+            )
             params.append(cursor)
             param_idx += 1
 
         if query:
-            conditions.append(f"(workflow_name LIKE ${param_idx} OR input_kwargs LIKE ${param_idx + 1})")
+            conditions.append(
+                f"(workflow_name LIKE ${param_idx} OR input_kwargs LIKE ${param_idx + 1})"
+            )
             search_param = f"%{query}%"
             params.extend([search_param, search_param])
             param_idx += 2
@@ -584,9 +576,7 @@ class PostgresStorageBackend(StorageBackend):
         pool = self._ensure_connected()
 
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM steps WHERE step_id = $1", step_id
-            )
+            row = await conn.fetchrow("SELECT * FROM steps WHERE step_id = $1", step_id)
 
         if not row:
             return None
@@ -672,9 +662,7 @@ class PostgresStorageBackend(StorageBackend):
         pool = self._ensure_connected()
 
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM hooks WHERE hook_id = $1", hook_id
-            )
+            row = await conn.fetchrow("SELECT * FROM hooks WHERE hook_id = $1", hook_id)
 
         if not row:
             return None
@@ -686,9 +674,7 @@ class PostgresStorageBackend(StorageBackend):
         pool = self._ensure_connected()
 
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM hooks WHERE token = $1", token
-            )
+            row = await conn.fetchrow("SELECT * FROM hooks WHERE token = $1", token)
 
         if not row:
             return None
@@ -787,9 +773,7 @@ class PostgresStorageBackend(StorageBackend):
         pool = self._ensure_connected()
 
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT 1 FROM cancellation_flags WHERE run_id = $1", run_id
-            )
+            row = await conn.fetchrow("SELECT 1 FROM cancellation_flags WHERE run_id = $1", run_id)
 
         return row is not None
 
@@ -798,9 +782,7 @@ class PostgresStorageBackend(StorageBackend):
         pool = self._ensure_connected()
 
         async with pool.acquire() as conn:
-            await conn.execute(
-                "DELETE FROM cancellation_flags WHERE run_id = $1", run_id
-            )
+            await conn.execute("DELETE FROM cancellation_flags WHERE run_id = $1", run_id)
 
     # Continue-As-New Chain Operations
 
@@ -909,7 +891,9 @@ class PostgresStorageBackend(StorageBackend):
         pool = self._ensure_connected()
 
         # Derive spec_type from the ScheduleSpec
-        spec_type = "cron" if schedule.spec.cron else ("interval" if schedule.spec.interval else "calendar")
+        spec_type = (
+            "cron" if schedule.spec.cron else ("interval" if schedule.spec.interval else "calendar")
+        )
 
         async with pool.acquire() as conn:
             await conn.execute(
@@ -945,9 +929,7 @@ class PostgresStorageBackend(StorageBackend):
         pool = self._ensure_connected()
 
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM schedules WHERE schedule_id = $1", schedule_id
-            )
+            row = await conn.fetchrow("SELECT * FROM schedules WHERE schedule_id = $1", schedule_id)
 
         if not row:
             return None
@@ -959,7 +941,9 @@ class PostgresStorageBackend(StorageBackend):
         pool = self._ensure_connected()
 
         # Derive spec_type from the ScheduleSpec
-        spec_type = "cron" if schedule.spec.cron else ("interval" if schedule.spec.interval else "calendar")
+        spec_type = (
+            "cron" if schedule.spec.cron else ("interval" if schedule.spec.interval else "calendar")
+        )
 
         async with pool.acquire() as conn:
             await conn.execute(

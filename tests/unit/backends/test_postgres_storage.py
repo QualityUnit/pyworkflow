@@ -107,10 +107,13 @@ class TestPostgresStorageBackendConnection:
         """Test that connect creates a connection pool."""
         backend = PostgresStorageBackend(dsn="postgresql://test@localhost/test")
 
-        mock_pool = AsyncMock()
+        mock_pool = MagicMock()
         mock_pool.acquire = MagicMock(return_value=AsyncMock())
 
-        with patch("asyncpg.create_pool", return_value=mock_pool) as mock_create:
+        async def mock_create_pool(*args, **kwargs):
+            return mock_pool
+
+        with patch("asyncpg.create_pool", side_effect=mock_create_pool) as mock_create:
             # Mock the schema initialization
             backend._initialize_schema = AsyncMock()
 
@@ -184,7 +187,7 @@ class TestRowConversion:
             "event_id": "event_123",
             "run_id": "run_123",
             "sequence": 5,
-            "type": "step_completed",
+            "type": "step.completed",
             "timestamp": datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
             "data": '{"step_id": "step_1"}',
         }
@@ -213,7 +216,7 @@ class TestRowConversion:
             "input_kwargs": "{}",
             "result": '"success"',
             "error": None,
-            "retry_count": 0,
+            "retry_count": 2,
         }
 
         step = backend._row_to_step_execution(row)
@@ -221,7 +224,7 @@ class TestRowConversion:
         assert step.step_id == "step_123"
         assert step.step_name == "process_data"
         assert step.status == StepStatus.COMPLETED
-        assert step.retry_count == 0
+        assert step.attempt == 2
 
     def test_row_to_hook(self):
         """Test converting database row to Hook."""
@@ -253,7 +256,7 @@ class TestRowConversion:
         row = {
             "schedule_id": "sched_123",
             "workflow_name": "daily_report",
-            "spec": "0 9 * * *",
+            "spec": '{"cron": "0 9 * * *", "timezone": "UTC"}',
             "spec_type": "cron",
             "timezone": "UTC",
             "input_args": "[]",
@@ -274,6 +277,8 @@ class TestRowConversion:
 
         assert schedule.schedule_id == "sched_123"
         assert schedule.workflow_name == "daily_report"
+        assert schedule.spec.cron == "0 9 * * *"
+        assert schedule.spec.timezone == "UTC"
         assert schedule.status == ScheduleStatus.ACTIVE
         assert schedule.overlap_policy == OverlapPolicy.SKIP
         assert schedule.running_run_ids == ["run_1", "run_2"]

@@ -136,8 +136,7 @@ def config_to_storage(config: dict[str, Any] | None = None) -> StorageBackend:
             from pyworkflow.storage.postgres import PostgresStorageBackend
         except ImportError:
             raise ValueError(
-                "PostgreSQL storage backend is not available. "
-                "Install asyncpg: pip install asyncpg"
+                "PostgreSQL storage backend is not available. Install asyncpg: pip install asyncpg"
             )
 
         # Support both DSN and individual parameters

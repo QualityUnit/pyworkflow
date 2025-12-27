@@ -66,15 +66,19 @@ def create_celery_app(
     Create and configure a Celery application for PyWorkflow.
 
     Args:
-        broker_url: Celery broker URL (default: redis://localhost:6379/0)
-        result_backend: Result backend URL (default: redis://localhost:6379/1)
+        broker_url: Celery broker URL. Priority: parameter > PYWORKFLOW_CELERY_BROKER env var > redis://localhost:6379/0
+        result_backend: Result backend URL. Priority: parameter > PYWORKFLOW_CELERY_RESULT_BACKEND env var > redis://localhost:6379/1
         app_name: Application name
 
     Returns:
         Configured Celery application
 
+    Environment Variables:
+        PYWORKFLOW_CELERY_BROKER: Celery broker URL (used if broker_url param not provided)
+        PYWORKFLOW_CELERY_RESULT_BACKEND: Result backend URL (used if result_backend param not provided)
+
     Examples:
-        # Default configuration
+        # Default configuration (uses env vars if set, otherwise localhost Redis)
         app = create_celery_app()
 
         # Custom Redis
@@ -89,9 +93,17 @@ def create_celery_app(
             result_backend="redis://localhost:6379/1"
         )
     """
-    # Default to Redis if not specified
-    broker_url = broker_url or "redis://localhost:6379/0"
-    result_backend = result_backend or "redis://localhost:6379/1"
+    # Priority: parameter > environment variable > hardcoded default
+    broker_url = (
+        broker_url
+        or os.getenv("PYWORKFLOW_CELERY_BROKER")
+        or "redis://localhost:6379/0"
+    )
+    result_backend = (
+        result_backend
+        or os.getenv("PYWORKFLOW_CELERY_RESULT_BACKEND")
+        or "redis://localhost:6379/1"
+    )
 
     app = Celery(
         app_name,

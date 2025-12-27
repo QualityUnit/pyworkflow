@@ -25,9 +25,10 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
-import { useRun, useRunEvents, REFRESH_INTERVAL } from '@/hooks/use-runs'
+import { useRun, useRunEvents, REFRESH_INTERVAL, isActiveStatus } from '@/hooks/use-runs'
 import { StatusBadge } from './components/status-badge'
 import { EventsTable } from './components/events-table'
+import { WorkflowTimeline } from './components/workflow-timeline'
 import { ExternalLink, Copy, Check, ChevronDown, Filter } from 'lucide-react'
 import { useState, useCallback, useMemo } from 'react'
 import { toast } from 'sonner'
@@ -64,7 +65,7 @@ interface StepSummary {
 export function RunDetail({ runId }: RunDetailProps) {
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true)
   const { data: run, isLoading: runLoading, isFetching: runFetching, error: runError, refetch: refetchRun } = useRun(runId, { autoRefresh: autoRefreshEnabled })
-  const { data: events, isFetching: eventsFetching, refetch: refetchEvents } = useRunEvents(runId, { autoRefresh: autoRefreshEnabled })
+  const { data: events, isFetching: eventsFetching, refetch: refetchEvents } = useRunEvents(runId, { autoRefresh: autoRefreshEnabled, runStatus: run?.status })
   const isFetching = runFetching || eventsFetching
   const refetch = useCallback(() => {
     refetchRun()
@@ -341,15 +342,21 @@ export function RunDetail({ runId }: RunDetailProps) {
 
           <TabsContent value="events" className="mt-4">
             {events && (
-              <EventsTable
-                events={events.items}
-                initialStepFilter={stepFilter}
-                initialEventTypeFilter={eventTypeFilter}
-                onFiltersChange={(steps, types) => {
-                  setStepFilter(steps)
-                  setEventTypeFilter(types)
-                }}
-              />
+              <>
+                <WorkflowTimeline
+                  events={events.items}
+                  isActive={isActiveStatus(run?.status)}
+                />
+                <EventsTable
+                  events={events.items}
+                  initialStepFilter={stepFilter}
+                  initialEventTypeFilter={eventTypeFilter}
+                  onFiltersChange={(steps, types) => {
+                    setStepFilter(steps)
+                    setEventTypeFilter(types)
+                  }}
+                />
+              </>
             )}
           </TabsContent>
 

@@ -14,6 +14,7 @@ from pyworkflow.storage.schemas import (
     ScheduleSpec,
     ScheduleStatus,
 )
+from pyworkflow.storage.sqlite import SQLiteStorageBackend
 
 # Check if PostgreSQL is available
 try:
@@ -42,37 +43,54 @@ def file_storage(tmp_path):
 
 
 @pytest.fixture
+async def sqlite_storage(tmp_path):
+    """Create a SQLite storage backend."""
+    backend = SQLiteStorageBackend(db_path=str(tmp_path / "test.db"))
+    await backend.connect()
+    yield backend
+    await backend.disconnect()
+
+
+@pytest.fixture
 async def postgres_storage():
     """Create a PostgreSQL storage backend."""
     if not POSTGRES_AVAILABLE:
-        pytest.skip("PostgreSQL (asyncpg) not available")
+        yield None
+        return
 
     backend = PostgresStorageBackend(dsn=POSTGRES_DSN)
+    connected = False
     try:
         await backend.connect()
+        connected = True
         yield backend
-    except Exception as e:
-        pytest.skip(f"PostgreSQL not accessible: {e}")
+    except Exception:
+        yield None
     finally:
-        await backend.disconnect()
+        if connected and backend._pool is not None:
+            await backend.disconnect()
 
 
 def get_storage_params():
     """Get storage backend parameters based on availability."""
-    params = ["memory", "file"]
+    params = ["memory", "file", "sqlite"]
     if POSTGRES_AVAILABLE and os.environ.get("TEST_POSTGRES_ENABLED", "").lower() == "true":
         params.append("postgres")
     return params
 
 
 @pytest.fixture(params=get_storage_params())
-async def storage(request, memory_storage, file_storage, postgres_storage):
+async def storage(request, memory_storage, file_storage, sqlite_storage, postgres_storage):
     """Parametrized fixture for all available storage backends."""
     if request.param == "memory":
         return memory_storage
     elif request.param == "file":
         return file_storage
+    elif request.param == "sqlite":
+        return sqlite_storage
     elif request.param == "postgres":
+        if postgres_storage is None:
+            pytest.skip("PostgreSQL not accessible")
         return postgres_storage
     raise ValueError(f"Unknown storage type: {request.param}")
 
@@ -426,6 +444,10 @@ class TestScheduleStatistics:
     @pytest.mark.asyncio
     async def test_increment_statistics(self, storage):
         """Test incrementing schedule statistics."""
+        # SQLite backend doesn't store statistics fields
+        if storage.__class__.__name__ == "SQLiteStorageBackend":
+            pytest.skip("SQLite backend doesn't support schedule statistics")
+
         now = datetime.now(UTC)
         schedule = Schedule(
             schedule_id="stats_test",

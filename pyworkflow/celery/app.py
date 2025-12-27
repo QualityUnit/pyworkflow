@@ -94,11 +94,7 @@ def create_celery_app(
         )
     """
     # Priority: parameter > environment variable > hardcoded default
-    broker_url = (
-        broker_url
-        or os.getenv("PYWORKFLOW_CELERY_BROKER")
-        or "redis://localhost:6379/0"
-    )
+    broker_url = broker_url or os.getenv("PYWORKFLOW_CELERY_BROKER") or "redis://localhost:6379/0"
     result_backend = (
         result_backend
         or os.getenv("PYWORKFLOW_CELERY_RESULT_BACKEND")

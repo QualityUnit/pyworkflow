@@ -166,8 +166,8 @@ jobs:
 
       - name: Uninstall and test extras
         run: |
-          pip uninstall -y pyworkflow
-          pip install dist/*.whl[sqlite]
+          pip uninstall -y pyworkflow-engine
+          pip install "$(ls dist/*.whl)[sqlite]"
           python -c "from pyworkflow.storage.sqlite import SQLiteStorageBackend; print('✅ SQLite extra works')"
 
   run-full-tests:

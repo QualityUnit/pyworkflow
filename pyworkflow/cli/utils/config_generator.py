@@ -24,6 +24,9 @@ def generate_yaml_config(
     postgres_user: str | None = None,
     postgres_password: str | None = None,
     postgres_database: str | None = None,
+    dynamodb_table_name: str | None = None,
+    dynamodb_region: str | None = None,
+    dynamodb_endpoint_url: str | None = None,
 ) -> str:
     """
     Generate YAML configuration content.
@@ -40,6 +43,9 @@ def generate_yaml_config(
         postgres_user: PostgreSQL user (for postgres backend)
         postgres_password: PostgreSQL password (for postgres backend)
         postgres_database: PostgreSQL database name (for postgres backend)
+        dynamodb_table_name: Optional DynamoDB table name
+        dynamodb_region: Optional AWS region for DynamoDB
+        dynamodb_endpoint_url: Optional local DynamoDB endpoint URL
 
     Returns:
         YAML configuration as string
@@ -78,6 +84,13 @@ def generate_yaml_config(
             storage_config["password"] = postgres_password
         if postgres_database:
             storage_config["database"] = postgres_database
+    elif storage_type == "dynamodb":
+        if dynamodb_table_name:
+            storage_config["table_name"] = dynamodb_table_name
+        if dynamodb_region:
+            storage_config["region"] = dynamodb_region
+        if dynamodb_endpoint_url:
+            storage_config["endpoint_url"] = dynamodb_endpoint_url
     config["storage"] = storage_config
 
     # Celery configuration (only for celery runtime)
@@ -245,6 +258,15 @@ def display_config_summary(config: dict[str, Any]) -> list[str]:
         user = storage.get("user", "pyworkflow")
         lines.append(f"  PostgreSQL: {user}@{host}:{port}/{database}")
 
+    # DynamoDB-specific config
+    if storage_type == "dynamodb":
+        if "table_name" in storage:
+            lines.append(f"  DynamoDB Table: {storage['table_name']}")
+        if "region" in storage:
+            lines.append(f"  AWS Region: {storage['region']}")
+        if "endpoint_url" in storage:
+            lines.append(f"  Endpoint URL: {storage['endpoint_url']}")
+
     # Celery (if applicable)
     if runtime == "celery" and "celery" in config:
         celery = config["celery"]
@@ -292,10 +314,10 @@ def validate_config(config: dict[str, Any]) -> tuple[bool, list[str]]:
         storage_type = storage.get("type")
         if not storage_type:
             errors.append("Missing storage 'type'")
-        elif storage_type not in ["file", "memory", "sqlite", "redis", "postgres"]:
+        elif storage_type not in ["file", "memory", "sqlite", "redis", "postgres", "dynamodb"]:
             errors.append(
                 f"Invalid storage type: {storage_type}. "
-                "Must be 'file', 'memory', 'sqlite', 'redis', or 'postgres'"
+                "Must be 'file', 'memory', 'sqlite', 'redis', 'postgres' or 'dynamodb'"
             )
 
     # Check Celery config if using celery runtime

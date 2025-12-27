@@ -87,7 +87,7 @@ def _flatten_yaml_config(nested_config: dict) -> dict:
 )
 @click.option(
     "--storage",
-    type=click.Choice(["file", "memory", "sqlite", "postgres"], case_sensitive=False),
+    type=click.Choice(["file", "memory", "sqlite", "postgres", "dynamodb"], case_sensitive=False),
     help="Storage backend type",
 )
 @click.option(
@@ -251,6 +251,9 @@ def _run_setup(
         postgres_user=config_data.get("postgres_user"),
         postgres_password=config_data.get("postgres_password"),
         postgres_database=config_data.get("postgres_database"),
+        dynamodb_table_name=config_data.get("dynamodb_table_name"),
+        dynamodb_region=config_data.get("dynamodb_region"),
+        dynamodb_endpoint_url=config_data.get("dynamodb_endpoint_url"),
     )
 
     config_file_path = write_yaml_config(yaml_content, config_path, backup=True)
@@ -412,6 +415,7 @@ def _run_interactive_configuration(
                     "value": "file",
                 },
                 {"name": "Memory - In-memory only (dev/testing)", "value": "memory"},
+                {"name": "DynamoDB - AWS serverless storage (cloud)", "value": "dynamodb"},
             ]
         )
 
@@ -486,6 +490,32 @@ def _run_interactive_configuration(
                 "Database password:",
                 default="pyworkflow",
             )
+
+    # DynamoDB configuration
+    elif storage_type == "dynamodb":
+        if non_interactive:
+            config_data["dynamodb_table_name"] = "pyworkflow"
+            config_data["dynamodb_region"] = "us-east-1"
+        else:
+            table_name = input_text(
+                "DynamoDB table name:",
+                default="pyworkflow",
+            )
+            config_data["dynamodb_table_name"] = table_name
+
+            region = input_text(
+                "AWS region:",
+                default="us-east-1",
+            )
+            config_data["dynamodb_region"] = region
+
+            # Optional local endpoint for development
+            if confirm("Use local DynamoDB endpoint (for development)?", default=False):
+                endpoint = input_text(
+                    "Local endpoint URL:",
+                    default="http://localhost:8000",
+                )
+                config_data["dynamodb_endpoint_url"] = endpoint
 
     return config_data
 

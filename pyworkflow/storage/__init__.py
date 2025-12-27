@@ -29,12 +29,19 @@ try:
 except ImportError:
     PostgresStorageBackend = None  # type: ignore
 
+# DynamoDB backend - optional import (requires aiobotocore)
+try:
+    from pyworkflow.storage.dynamodb import DynamoDBStorageBackend
+except ImportError:
+    DynamoDBStorageBackend = None  # type: ignore
+
 __all__ = [
     "StorageBackend",
     "FileStorageBackend",
     "InMemoryStorageBackend",
     "SQLiteStorageBackend",
     "PostgresStorageBackend",
+    "DynamoDBStorageBackend",
     "WorkflowRun",
     "StepExecution",
     "Hook",

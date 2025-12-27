@@ -35,6 +35,41 @@ from pyworkflow.cli.utils.interactive import (
 )
 
 
+def _flatten_yaml_config(nested_config: dict) -> dict:
+    """
+    Convert nested YAML config to flat format expected by setup internals.
+
+    Nested format (from YAML):
+        {
+            "module": "workflows",
+            "runtime": "celery",
+            "storage": {"type": "sqlite", "base_path": "..."},
+            "celery": {"broker": "...", "result_backend": "..."}
+        }
+
+    Flat format (for setup):
+        {
+            "module": "workflows",
+            "runtime": "celery",
+            "storage_type": "sqlite",
+            "storage_path": "...",
+            "broker_url": "...",
+            "result_backend": "..."
+        }
+    """
+    storage = nested_config.get("storage", {})
+    celery = nested_config.get("celery", {})
+
+    return {
+        "module": nested_config.get("module"),
+        "runtime": nested_config.get("runtime", "celery"),
+        "storage_type": storage.get("type", "file"),
+        "storage_path": storage.get("base_path") or storage.get("path"),
+        "broker_url": celery.get("broker", "redis://localhost:6379/0"),
+        "result_backend": celery.get("result_backend", "redis://localhost:6379/1"),
+    }
+
+
 @click.command(name="setup")
 @click.option(
     "--non-interactive",
@@ -155,7 +190,7 @@ def _run_setup(
         )
 
         if choice == "use":
-            config_data = load_yaml_config(existing_config)
+            config_data = _flatten_yaml_config(load_yaml_config(existing_config))
             print_success("Using existing configuration")
 
         elif choice == "view":
@@ -168,7 +203,7 @@ def _run_setup(
             print_info("-" * 50)
 
             if confirm("\nUse this configuration?"):
-                config_data = load_yaml_config(existing_config)
+                config_data = _flatten_yaml_config(load_yaml_config(existing_config))
 
     # 4. Interactive configuration (if needed)
     if not config_data:

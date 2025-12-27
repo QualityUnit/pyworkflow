@@ -150,17 +150,22 @@ def generate_docker_compose_content(
       context: {pyworkflow_root}
       dockerfile: dashboard.backend.Dockerfile
     container_name: pyworkflow-dashboard-backend
+    working_dir: /app/project
     ports:
       - "8585:8585"
     environment:
+      - DASHBOARD_PYWORKFLOW_CONFIG_PATH=/app/project/pyworkflow.config.yaml
       - DASHBOARD_STORAGE_TYPE={storage_type}
-      - DASHBOARD_STORAGE_PATH=/app/pyworkflow_data
+      - DASHBOARD_STORAGE_PATH=/app/project/pyworkflow_data
       - DASHBOARD_HOST=0.0.0.0
       - DASHBOARD_PORT=8585
       - DASHBOARD_CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
+      - PYWORKFLOW_CELERY_BROKER=redis://redis:6379/0
+      - PYWORKFLOW_CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - PYTHONPATH=/app/project
     volumes:
-      - ./pyworkflow.config.yaml:/app/pyworkflow.config.yaml:ro
-      - {volume_mapping}:/app/pyworkflow_data
+      - .:/app/project:ro
+      - {volume_mapping}:/app/project/pyworkflow_data
     depends_on:
       redis:
         condition: service_healthy
@@ -455,11 +460,10 @@ RUN pip install --no-cache-dir \\
 # Copy dashboard backend code
 COPY dashboard/backend /app/dashboard
 
-WORKDIR /app/dashboard
-
 EXPOSE 8585
 
-CMD ["python", "main.py"]
+# Use absolute path since docker-compose may override working_dir
+CMD ["python", "/app/dashboard/main.py"]
 """
     target_path.write_text(dockerfile_content)
 

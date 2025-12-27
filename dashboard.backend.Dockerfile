@@ -22,8 +22,7 @@ RUN pip install --no-cache-dir \
 # Copy dashboard backend code
 COPY dashboard/backend /app/dashboard
 
-WORKDIR /app/dashboard
-
 EXPOSE 8585
 
-CMD ["python", "main.py"]
+# Use absolute path since docker-compose may override working_dir
+CMD ["python", "/app/dashboard/main.py"]

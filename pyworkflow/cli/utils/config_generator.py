@@ -69,7 +69,7 @@ def generate_yaml_config(
     # Generate YAML with header comment
     header = f"""# PyWorkflow Configuration
 # Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-# Documentation: https://github.com/anthropics/pyworkflow
+# Documentation: https://docs.pyworkflow.dev
 
 """
 

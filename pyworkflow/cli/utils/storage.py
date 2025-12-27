@@ -55,13 +55,6 @@ def create_storage(
 
     logger.debug(f"Creating storage backend: {backend}")
 
-    # Check for unsupported backends (CLI-specific validation)
-    if backend == "sqlite":
-        logger.warning("SQLite backend not yet implemented in CLI")
-        raise ValueError(
-            "SQLite backend is not yet supported in the CLI. Use 'file' or 'memory' backends."
-        )
-
     # Resolve storage path with priority: CLI flag > config file > default
     storage_path = path
     if not storage_path and config:
@@ -81,6 +74,23 @@ def create_storage(
             storage_config["port"] = storage_section["port"]
         if "db" in storage_section:
             storage_config["db"] = storage_section["db"]
+
+    # Extract postgres config if present
+    if backend == "postgres" and config:
+        storage_section = config.get("storage", {})
+        if "dsn" in storage_section:
+            storage_config["dsn"] = storage_section["dsn"]
+        else:
+            if "host" in storage_section:
+                storage_config["host"] = storage_section["host"]
+            if "port" in storage_section:
+                storage_config["port"] = storage_section["port"]
+            if "user" in storage_section:
+                storage_config["user"] = storage_section["user"]
+            if "password" in storage_section:
+                storage_config["password"] = storage_section["password"]
+            if "database" in storage_section:
+                storage_config["database"] = storage_section["database"]
 
     # Use unified config_to_storage
     storage = config_to_storage(storage_config)

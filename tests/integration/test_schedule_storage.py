@@ -2,6 +2,7 @@
 Integration tests for schedule storage operations.
 """
 
+import os
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -13,6 +14,17 @@ from pyworkflow.storage.schemas import (
     ScheduleSpec,
     ScheduleStatus,
 )
+
+# Check if PostgreSQL is available
+try:
+    import asyncpg
+    from pyworkflow.storage.postgres import PostgresStorageBackend
+    POSTGRES_AVAILABLE = True
+except ImportError:
+    POSTGRES_AVAILABLE = False
+
+# Get PostgreSQL connection info from environment
+POSTGRES_DSN = os.environ.get("TEST_POSTGRES_DSN", "postgresql://pyworkflow:pyworkflow@localhost:5432/pyworkflow_test")
 
 
 @pytest.fixture
@@ -27,12 +39,40 @@ def file_storage(tmp_path):
     return FileStorageBackend(base_path=str(tmp_path))
 
 
-@pytest.fixture(params=["memory", "file"])
-def storage(request, memory_storage, file_storage):
-    """Parametrized fixture for both storage backends."""
+@pytest.fixture
+async def postgres_storage():
+    """Create a PostgreSQL storage backend."""
+    if not POSTGRES_AVAILABLE:
+        pytest.skip("PostgreSQL (asyncpg) not available")
+
+    backend = PostgresStorageBackend(dsn=POSTGRES_DSN)
+    try:
+        await backend.connect()
+        yield backend
+    except Exception as e:
+        pytest.skip(f"PostgreSQL not accessible: {e}")
+    finally:
+        await backend.disconnect()
+
+
+def get_storage_params():
+    """Get storage backend parameters based on availability."""
+    params = ["memory", "file"]
+    if POSTGRES_AVAILABLE and os.environ.get("TEST_POSTGRES_ENABLED", "").lower() == "true":
+        params.append("postgres")
+    return params
+
+
+@pytest.fixture(params=get_storage_params())
+async def storage(request, memory_storage, file_storage, postgres_storage):
+    """Parametrized fixture for all available storage backends."""
     if request.param == "memory":
         return memory_storage
-    return file_storage
+    elif request.param == "file":
+        return file_storage
+    elif request.param == "postgres":
+        return postgres_storage
+    raise ValueError(f"Unknown storage type: {request.param}")
 
 
 class TestScheduleStorageCRUD:

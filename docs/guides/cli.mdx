@@ -8,6 +8,9 @@ description: 'Manage workflows and runs from the terminal with the PyWorkflow CL
 PyWorkflow includes a powerful CLI for managing workflows and monitoring runs directly from your terminal. The CLI provides commands to list, inspect, and execute workflows, as well as monitor their execution status and event logs.
 
 <CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket">
+    Create a new project with sample workflows in seconds.
+  </Card>
   <Card title="Workflow Management" icon="diagram-project">
     List, inspect, and run workflows from the command line.
   </Card>
@@ -680,36 +683,96 @@ pyworkflow schedules backfill sched_abc123 \
 
 ---
 
-### Setup Command
+### Quickstart Command
 
-Verify and configure the PyWorkflow environment.
+Create a new PyWorkflow project with sample workflows.
 
-#### `setup`
+#### `quickstart`
 
-Check broker connectivity and display configuration:
+Scaffold a complete project structure with working examples:
 
 ```bash
-pyworkflow setup --check
+pyworkflow quickstart
 ```
 
 **Options:**
 | Option | Description |
 |--------|-------------|
-| `--broker TYPE` | Broker type: `redis` or `rabbitmq` (default: redis) |
-| `--broker-url URL` | Full broker URL (overrides --broker defaults) |
-| `--check` | Only check if environment is ready |
+| `--non-interactive` | Run without prompts, use defaults |
+| `--skip-docker` | Skip Docker services setup |
+| `--template TYPE` | Project template: `basic` (default) |
+| `--storage TYPE` | Storage backend: `sqlite` or `file` |
 
 **Examples:**
 
 ```bash
-# Check Redis broker (default)
-pyworkflow setup --check
+# Interactive quickstart (recommended for first-time users)
+pyworkflow quickstart
 
-# Check RabbitMQ broker
-pyworkflow setup --broker rabbitmq --check
+# Non-interactive with defaults
+pyworkflow quickstart --non-interactive
 
-# Check custom broker URL
-pyworkflow setup --broker-url redis://myredis:6379/0 --check
+# Without Docker services
+pyworkflow quickstart --skip-docker
+
+# Use file storage instead of SQLite
+pyworkflow quickstart --storage file
+```
+
+**Created Files:**
+
+```
+myproject/
+├── workflows/
+│   ├── __init__.py          # Exports all workflows
+│   ├── orders.py            # process_order workflow
+│   └── notifications.py     # send_notification workflow
+├── pyworkflow.config.yaml   # Configuration
+└── docker-compose.yml       # Docker services (if enabled)
+```
+
+<Tip>
+  Use `pyworkflow quickstart` to bootstrap a new project, then modify the sample
+  workflows or add your own in the `workflows/` directory.
+</Tip>
+
+---
+
+### Setup Command
+
+Configure the PyWorkflow environment for an existing project.
+
+#### `setup`
+
+Interactive setup that generates configuration and Docker files:
+
+```bash
+pyworkflow setup
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--non-interactive` | Run without prompts (use defaults) |
+| `--skip-docker` | Skip Docker infrastructure setup |
+| `--module PATH` | Workflow module path (e.g., `myapp.workflows`) |
+| `--storage TYPE` | Storage backend: `file`, `memory`, or `sqlite` |
+| `--storage-path PATH` | Storage path for file/sqlite backends |
+
+**Examples:**
+
+```bash
+# Interactive setup (recommended)
+pyworkflow setup
+
+# Non-interactive with defaults
+pyworkflow setup --non-interactive
+
+# Skip Docker setup
+pyworkflow setup --skip-docker
+
+# Specify options directly
+pyworkflow setup --module myapp.workflows --storage sqlite
 ```
 
 ## Output Formats

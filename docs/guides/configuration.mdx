@@ -119,6 +119,164 @@ python run_workflow.py  # ✗ No config file in ./scripts/
 
 ---
 
+## Project Structure
+
+PyWorkflow supports two ways to organize your workflow code. The `module` field in your
+config file tells PyWorkflow where to find and import your workflows.
+
+### Option 1: Single File
+
+For simple projects, define all workflows in a single file:
+
+```
+myproject/
+├── pyworkflow.config.yaml
+└── workflows.py           # All workflows here
+```
+
+```yaml
+# pyworkflow.config.yaml
+module: workflows
+```
+
+```python
+# workflows.py
+from pyworkflow import workflow, step
+
+@step()
+async def validate_order(order_id: str) -> dict:
+    return {"order_id": order_id, "valid": True}
+
+@workflow()
+async def process_order(order_id: str) -> dict:
+    result = await validate_order(order_id)
+    return {"status": "completed", **result}
+
+@workflow()
+async def send_notification(user_id: str, message: str) -> dict:
+    return {"sent": True, "user_id": user_id}
+```
+
+### Option 2: Package Directory (Recommended)
+
+For larger projects, organize workflows into a package with multiple files:
+
+```
+myproject/
+├── pyworkflow.config.yaml
+└── workflows/
+    ├── __init__.py        # Exports all workflows
+    ├── orders.py          # Order-related workflows
+    └── notifications.py   # Notification workflows
+```
+
+```yaml
+# pyworkflow.config.yaml
+module: workflows
+```
+
+```python
+# workflows/__init__.py
+"""Export all workflows from the package."""
+from .orders import process_order, refund_order
+from .notifications import send_notification, send_bulk_notifications
+
+__all__ = [
+    "process_order",
+    "refund_order",
+    "send_notification",
+    "send_bulk_notifications",
+]
+```
+
+```python
+# workflows/orders.py
+from pyworkflow import workflow, step
+
+@step()
+async def validate_order(order_id: str) -> dict:
+    return {"order_id": order_id, "valid": True}
+
+@step()
+async def process_payment(order_id: str, amount: float) -> dict:
+    return {"order_id": order_id, "paid": True}
+
+@workflow()
+async def process_order(order_id: str, amount: float) -> dict:
+    validation = await validate_order(order_id)
+    payment = await process_payment(order_id, amount)
+    return {"status": "completed", "validation": validation, "payment": payment}
+
+@workflow()
+async def refund_order(order_id: str) -> dict:
+    return {"order_id": order_id, "refunded": True}
+```
+
+```python
+# workflows/notifications.py
+from pyworkflow import workflow, step, sleep
+
+@step()
+async def send_email(to: str, subject: str, body: str) -> dict:
+    return {"sent": True, "to": to}
+
+@workflow()
+async def send_notification(user_id: str, message: str) -> dict:
+    result = await send_email(f"{user_id}@example.com", "Notification", message)
+    return result
+
+@workflow()
+async def send_bulk_notifications(user_ids: list[str], message: str) -> dict:
+    results = []
+    for user_id in user_ids:
+        result = await send_email(f"{user_id}@example.com", "Notification", message)
+        results.append(result)
+        await sleep("1s")  # Rate limiting
+    return {"sent": len(results)}
+```
+
+### How Discovery Works
+
+When PyWorkflow imports your module:
+
+1. **Module Import**: Python imports the specified module (e.g., `workflows` or `workflows/__init__.py`)
+2. **Decorator Registration**: The `@workflow` and `@step` decorators automatically register
+   functions in the global registry
+3. **Explicit Exports**: For package directories, `__init__.py` imports trigger the decorators
+
+<Note>
+  The key is that importing your module must trigger the `@workflow` decorators to run.
+  With a package directory, make sure `__init__.py` imports all workflow functions.
+</Note>
+
+### Nested Packages
+
+For large applications, you can nest packages deeper:
+
+```
+myproject/
+├── pyworkflow.config.yaml
+└── myapp/
+    └── workflows/
+        ├── __init__.py
+        ├── orders/
+        │   ├── __init__.py
+        │   └── processing.py
+        └── notifications/
+            ├── __init__.py
+            └── email.py
+```
+
+```yaml
+# pyworkflow.config.yaml
+module: myapp.workflows
+```
+
+Each nested `__init__.py` should re-export workflows from its submodules to ensure
+they are discovered when the top-level module is imported.
+
+---
+
 ## Programmatic Configuration
 
 For more control, configure PyWorkflow in your Python code:

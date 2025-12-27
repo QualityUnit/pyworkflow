@@ -110,6 +110,7 @@ def main(
 
 # Import and register commands
 from pyworkflow.cli.commands.hooks import hooks
+from pyworkflow.cli.commands.quickstart import quickstart
 from pyworkflow.cli.commands.runs import runs
 from pyworkflow.cli.commands.scheduler import scheduler
 from pyworkflow.cli.commands.schedules import schedules
@@ -123,6 +124,7 @@ main.add_command(schedules)
 main.add_command(scheduler)
 main.add_command(worker)
 main.add_command(setup)
+main.add_command(quickstart)
 main.add_command(hooks)
 
 

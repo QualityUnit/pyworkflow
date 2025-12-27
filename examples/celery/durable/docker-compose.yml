@@ -1,0 +1,53 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: pyworkflow-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  dashboard-backend:
+    image: yashabro/pyworkflow-dashboard-backend:latest
+    container_name: pyworkflow-dashboard-backend
+    working_dir: /app/project
+    ports:
+      - "8585:8585"
+    environment:
+      - DASHBOARD_PYWORKFLOW_CONFIG_PATH=/app/project/pyworkflow.config.yaml
+      - DASHBOARD_STORAGE_TYPE=sqlite
+      - DASHBOARD_STORAGE_PATH=/app/project/pyworkflow_data
+      - DASHBOARD_HOST=0.0.0.0
+      - DASHBOARD_PORT=8585
+      - DASHBOARD_CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
+      - PYWORKFLOW_CELERY_BROKER=redis://redis:6379/0
+      - PYWORKFLOW_CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - PYTHONPATH=/app/project
+    volumes:
+      - .:/app/project:ro
+      - ./pyworkflow_data:/app/project/pyworkflow_data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  dashboard-frontend:
+    image: yashabro/pyworkflow-dashboard-frontend:latest
+    container_name: pyworkflow-dashboard-frontend
+    ports:
+      - "5173:80"
+    environment:
+      - VITE_API_URL=http://localhost:8585
+    depends_on:
+      - dashboard-backend
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+    driver: local

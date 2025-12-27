@@ -129,7 +129,7 @@ jobs:
 
       - name: Install from wheel
         run: |
-          pip install dist/*.whl
+          pip install dist/pyworkflow_engine-*.whl
           echo "✅ Package installed from wheel"
 
       - name: Verify installation
@@ -214,7 +214,7 @@ jobs:
 
       - name: Install package with dev dependencies
         run: |
-          pip install dist/*.whl[dev]
+          pip install "dist/pyworkflow_engine-0.1.0-py3-none-any.whl[dev]"
 
       - name: Run unit tests
         run: |

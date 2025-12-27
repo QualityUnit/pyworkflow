@@ -5,8 +5,8 @@ This module provides reusable prompt functions for interactive CLI workflows,
 all styled with PyWorkflow branding.
 """
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
 
 import click
 from InquirerPy import inquirer
@@ -75,14 +75,18 @@ def select(
     """
     try:
         # Convert string list to Choice objects
+        choice_objects: list[Choice] = []
         if choices and isinstance(choices[0], str):
-            choice_objects = [Choice(value=c, name=c) for c in choices]
+            for c in choices:
+                if isinstance(c, str):
+                    choice_objects.append(Choice(value=c, name=c))
         else:
             # Dict format: {"name": "...", "value": "..."}
-            choice_objects = [
-                Choice(value=c.get("value", c["name"]), name=c["name"])
-                for c in choices
-            ]
+            for c in choices:
+                if isinstance(c, dict):
+                    choice_objects.append(
+                        Choice(value=c.get("value", c["name"]), name=c["name"])
+                    )
 
         return inquirer.select(
             message=message,
@@ -133,7 +137,7 @@ def input_text(
         return inquirer.text(
             message=message,
             default=default,
-            validate=validate,
+            validate=validate,  # type: ignore[arg-type]
             style=PYWORKFLOW_STYLE,
         ).execute()
     except KeyboardInterrupt:
@@ -219,21 +223,25 @@ def multiselect(
     """
     try:
         # Convert string list to Choice objects
+        choice_objects: list[Choice] = []
         if choices and isinstance(choices[0], str):
-            choice_objects = [
-                Choice(value=c, name=c, enabled=(c in (default or [])))
-                for c in choices
-            ]
+            for c in choices:
+                if isinstance(c, str):
+                    choice_objects.append(
+                        Choice(value=c, name=c, enabled=(c in (default or [])))
+                    )
         else:
             # Dict format: {"name": "...", "value": "..."}
-            choice_objects = [
-                Choice(
-                    value=c.get("value", c["name"]),
-                    name=c["name"],
-                    enabled=(c.get("value", c["name"]) in (default or [])),
-                )
-                for c in choices
-            ]
+            for c in choices:
+                if isinstance(c, dict):
+                    value = c.get("value", c["name"])
+                    choice_objects.append(
+                        Choice(
+                            value=value,
+                            name=c["name"],
+                            enabled=(value in (default or [])),
+                        )
+                    )
 
         return inquirer.checkbox(
             message=message,
@@ -269,7 +277,7 @@ def password(message: str, validate: Callable[[str], bool | str] | None = None) 
     try:
         return inquirer.secret(
             message=message,
-            validate=validate,
+            validate=validate,  # type: ignore[arg-type]
             style=PYWORKFLOW_STYLE,
         ).execute()
     except KeyboardInterrupt:

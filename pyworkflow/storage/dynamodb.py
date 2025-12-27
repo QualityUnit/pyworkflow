@@ -1066,7 +1066,9 @@ class DynamoDBStorageBackend(StorageBackend):
                 "last_run_at": schedule.last_run_at.isoformat() if schedule.last_run_at else None,
                 "running_run_ids": json.dumps(schedule.running_run_ids),
                 "created_at": schedule.created_at.isoformat(),
-                "updated_at": schedule.updated_at.isoformat() if schedule.updated_at else now.isoformat(),
+                "updated_at": schedule.updated_at.isoformat()
+                if schedule.updated_at
+                else now.isoformat(),
                 # GSI keys
                 "GSI1PK": "SCHEDULES",
                 "GSI1SK": f"{schedule.status.value}#{schedule.created_at.isoformat()}",
@@ -1207,7 +1209,9 @@ class DynamoDBStorageBackend(StorageBackend):
             status=RunStatus(item["status"]),
             created_at=datetime.fromisoformat(item["created_at"]),
             updated_at=datetime.fromisoformat(item["updated_at"]),
-            started_at=datetime.fromisoformat(item["started_at"]) if item.get("started_at") else None,
+            started_at=datetime.fromisoformat(item["started_at"])
+            if item.get("started_at")
+            else None,
             completed_at=datetime.fromisoformat(item["completed_at"])
             if item.get("completed_at")
             else None,
@@ -1247,7 +1251,9 @@ class DynamoDBStorageBackend(StorageBackend):
             step_name=item["step_name"],
             status=StepStatus(item["status"]),
             created_at=datetime.fromisoformat(item["created_at"]),
-            started_at=datetime.fromisoformat(item["started_at"]) if item.get("started_at") else None,
+            started_at=datetime.fromisoformat(item["started_at"])
+            if item.get("started_at")
+            else None,
             completed_at=datetime.fromisoformat(item["completed_at"])
             if item.get("completed_at")
             else None,
@@ -1268,7 +1274,9 @@ class DynamoDBStorageBackend(StorageBackend):
             received_at=datetime.fromisoformat(item["received_at"])
             if item.get("received_at")
             else None,
-            expires_at=datetime.fromisoformat(item["expires_at"]) if item.get("expires_at") else None,
+            expires_at=datetime.fromisoformat(item["expires_at"])
+            if item.get("expires_at")
+            else None,
             status=HookStatus(item["status"]),
             payload=item.get("payload"),
             metadata=json.loads(item.get("metadata", "{}")),
@@ -1294,7 +1302,9 @@ class DynamoDBStorageBackend(StorageBackend):
             kwargs=item.get("input_kwargs", "{}"),
             overlap_policy=OverlapPolicy(item.get("overlap_policy", "skip")),
             created_at=datetime.fromisoformat(item["created_at"]),
-            updated_at=datetime.fromisoformat(item["updated_at"]) if item.get("updated_at") else None,
+            updated_at=datetime.fromisoformat(item["updated_at"])
+            if item.get("updated_at")
+            else None,
             last_run_at=datetime.fromisoformat(item["last_run_at"])
             if item.get("last_run_at")
             else None,

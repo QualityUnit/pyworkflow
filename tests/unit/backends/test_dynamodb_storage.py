@@ -285,16 +285,12 @@ class TestDynamoDBSerialization:
 
     def test_deserialize_list(self, backend):
         """Test deserializing list values."""
-        result = backend._deserialize_value(
-            {"L": [{"S": "a"}, {"N": "1"}, {"BOOL": True}]}
-        )
+        result = backend._deserialize_value({"L": [{"S": "a"}, {"N": "1"}, {"BOOL": True}]})
         assert result == ["a", 1, True]
 
     def test_deserialize_dict(self, backend):
         """Test deserializing dict values."""
-        result = backend._deserialize_value(
-            {"M": {"key": {"S": "value"}, "num": {"N": "42"}}}
-        )
+        result = backend._deserialize_value({"M": {"key": {"S": "value"}, "num": {"N": "42"}}})
         assert result == {"key": "value", "num": 42}
 
 
@@ -469,9 +465,7 @@ class TestDynamoDBKeyPatterns:
         )
 
         mock_client = AsyncMock()
-        mock_client.update_item = AsyncMock(
-            return_value={"Attributes": {"seq": {"N": "1"}}}
-        )
+        mock_client.update_item = AsyncMock(return_value={"Attributes": {"seq": {"N": "1"}}})
         mock_client.put_item = AsyncMock()
 
         with patch.object(backend, "_get_client") as mock_get_client:
@@ -644,9 +638,7 @@ class TestEventOperations:
     async def test_record_event(self, mock_backend):
         """Test recording an event."""
         backend, mock_client = mock_backend
-        mock_client.update_item = AsyncMock(
-            return_value={"Attributes": {"seq": {"N": "1"}}}
-        )
+        mock_client.update_item = AsyncMock(return_value={"Attributes": {"seq": {"N": "1"}}})
         mock_client.put_item = AsyncMock()
 
         now = datetime.now(UTC)
@@ -996,9 +988,7 @@ class TestCancellationOperations:
     async def test_check_cancellation_flag_set(self, mock_backend):
         """Test checking cancellation flag when it exists."""
         backend, mock_client = mock_backend
-        mock_client.get_item = AsyncMock(
-            return_value={"Item": {"PK": {"S": "CANCEL#run_123"}}}
-        )
+        mock_client.get_item = AsyncMock(return_value={"Item": {"PK": {"S": "CANCEL#run_123"}}})
 
         result = await backend.check_cancellation_flag("run_123")
 

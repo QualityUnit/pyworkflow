@@ -1009,7 +1009,9 @@ class TestScheduleOperations:
         """Test listing schedules filtered by status."""
         now = datetime.now(UTC)
 
-        for i, status in enumerate([ScheduleStatus.ACTIVE, ScheduleStatus.ACTIVE, ScheduleStatus.PAUSED]):
+        for i, status in enumerate(
+            [ScheduleStatus.ACTIVE, ScheduleStatus.ACTIVE, ScheduleStatus.PAUSED]
+        ):
             schedule = Schedule(
                 schedule_id=f"status_sched_{i}",
                 workflow_name="test_workflow",
@@ -1031,12 +1033,14 @@ class TestScheduleOperations:
         future = now + timedelta(minutes=5)
 
         # Create schedules with different next_run_times
-        for i, (next_run, status) in enumerate([
-            (past, ScheduleStatus.ACTIVE),
-            (past, ScheduleStatus.ACTIVE),
-            (future, ScheduleStatus.ACTIVE),
-            (past, ScheduleStatus.PAUSED),  # Paused should not be returned
-        ]):
+        for i, (next_run, status) in enumerate(
+            [
+                (past, ScheduleStatus.ACTIVE),
+                (past, ScheduleStatus.ACTIVE),
+                (future, ScheduleStatus.ACTIVE),
+                (past, ScheduleStatus.PAUSED),  # Paused should not be returned
+            ]
+        ):
             schedule = Schedule(
                 schedule_id=f"due_sched_{i}",
                 workflow_name="test_workflow",

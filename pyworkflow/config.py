@@ -76,6 +76,11 @@ class PyWorkflowConfig:
         event_soft_limit: Log warning when event count reaches this (default: 10000)
         event_hard_limit: Fail workflow when event count reaches this (default: 50000)
         event_warning_interval: Log warning every N events after soft limit (default: 100)
+        enable_tracing: Enable OpenTelemetry distributed tracing
+        tracing_service_name: Service name for traces
+        tracing_endpoint: OTLP/Jaeger endpoint URL
+        tracing_exporter: Exporter type ("otlp", "jaeger", "console")
+        tracing_sample_rate: Sampling rate (0.0 to 1.0)
     """
 
     # Defaults (can be overridden per-workflow)
@@ -99,6 +104,13 @@ class PyWorkflowConfig:
     event_soft_limit: int = 10_000  # Log warning at this count
     event_hard_limit: int = 50_000  # Fail workflow at this count
     event_warning_interval: int = 100  # Log warning every N events after soft limit
+
+    # Tracing configuration (optional - requires opentelemetry packages)
+    enable_tracing: bool = False
+    tracing_service_name: str = "pyworkflow"
+    tracing_endpoint: str | None = None
+    tracing_exporter: str = "otlp"  # "otlp", "jaeger", "console"
+    tracing_sample_rate: float = 1.0
 
 
 def _config_from_yaml() -> PyWorkflowConfig:
@@ -162,6 +174,13 @@ def configure(
         event_hard_limit: Fail workflow when event count reaches this (default: 50000)
         event_warning_interval: Log warning every N events after soft limit (default: 100)
 
+    Tracing Settings (optional - requires opentelemetry packages):
+        enable_tracing: Enable OpenTelemetry distributed tracing (default: False)
+        tracing_service_name: Service name for traces (default: "pyworkflow")
+        tracing_endpoint: OTLP/Jaeger endpoint URL (e.g., "http://localhost:4317")
+        tracing_exporter: Exporter type ("otlp", "jaeger", "console")
+        tracing_sample_rate: Sampling rate 0.0-1.0 (default: 1.0)
+
     WARNING: Modifying event limits is not recommended. These defaults are carefully
     chosen to prevent runaway workflows from consuming excessive resources.
 
@@ -177,6 +196,13 @@ def configure(
 
         >>> # Configure with workflow discovery
         >>> pyworkflow.configure(module="myapp.workflows")
+
+        >>> # Configure with tracing enabled
+        >>> pyworkflow.configure(
+        ...     enable_tracing=True,
+        ...     tracing_endpoint="http://localhost:4317",
+        ...     tracing_service_name="my-app",
+        ... )
     """
     global _config
     if _config is None:
@@ -193,6 +219,16 @@ def configure(
             stacklevel=2,
         )
 
+    # Track if tracing config changed
+    tracing_keys = {
+        "enable_tracing",
+        "tracing_service_name",
+        "tracing_endpoint",
+        "tracing_exporter",
+        "tracing_sample_rate",
+    }
+    tracing_changed = bool(tracing_keys & set(kwargs.keys()))
+
     for key, value in kwargs.items():
         if hasattr(_config, key):
             setattr(_config, key, value)
@@ -201,6 +237,19 @@ def configure(
             raise ValueError(
                 f"Unknown config option: {key}. Valid options: {', '.join(valid_keys)}"
             )
+
+    # Initialize tracing if enabled
+    if tracing_changed and _config.enable_tracing:
+        from pyworkflow.observability.tracing import TracingConfig, configure_tracing
+
+        tracing_config = TracingConfig(
+            enabled=True,
+            service_name=_config.tracing_service_name,
+            endpoint=_config.tracing_endpoint,
+            exporter=_config.tracing_exporter,
+            sample_rate=_config.tracing_sample_rate,
+        )
+        configure_tracing(tracing_config)
 
     # Auto-discover workflows if module is specified
     if discover and module:

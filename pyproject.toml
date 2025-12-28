@@ -54,6 +54,11 @@ dependencies = [
 aws = [
     "aws-durable-execution-sdk-python>=0.1.0",
 ]
+tracing = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp>=1.20.0",
+]
 dev = [
     # Testing
     "pytest>=7.4.0",
@@ -206,6 +211,7 @@ module = [
     "InquirerPy.*",
     "prompt_toolkit.*",
     "yaml.*",
+    "opentelemetry.*",
 ]
 ignore_missing_imports = true
 

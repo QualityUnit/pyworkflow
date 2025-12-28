@@ -191,9 +191,16 @@ def step(
             # Check for cancellation before executing step
             ctx.check_cancellation()
 
+            # Import tracing (late import to avoid circular dependencies)
+            from pyworkflow.observability.tracing import is_tracing_enabled, trace_step
+
             try:
-                # Execute step function
-                result = await func(*args, **kwargs)
+                # Execute step function with optional tracing
+                if is_tracing_enabled():
+                    with trace_step(step_id, step_name, attempt=current_attempt, max_retries=max_retries):
+                        result = await func(*args, **kwargs)
+                else:
+                    result = await func(*args, **kwargs)
 
                 # Record completion event
                 completion_event = create_step_completed_event(

@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     # Debug mode
     debug: bool = False
 
+    # Metrics configuration
+    metrics_cache_ttl_seconds: int = 15  # How long to cache metrics
+    metrics_lookback_hours: int = 24  # How far back to look for metrics
+    metrics_enabled: bool = True  # Enable /metrics endpoint
+
     class Config:
         env_prefix = "DASHBOARD_"
         env_file = ".env"

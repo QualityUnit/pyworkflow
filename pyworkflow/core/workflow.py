@@ -189,6 +189,9 @@ async def execute_workflow_with_context(
     # Set as current context using new API
     token = set_context(ctx)
 
+    # Import tracing (late import to avoid circular dependencies)
+    from pyworkflow.observability.tracing import is_tracing_enabled, trace_workflow
+
     try:
         # Note: Event replay is handled by LocalContext in its constructor
         # when event_log is provided
@@ -201,8 +204,12 @@ async def execute_workflow_with_context(
             is_replay=bool(event_log),
         )
 
-        # Execute workflow function
-        result = await workflow_func(*args, **kwargs)
+        # Execute workflow function with optional tracing
+        if is_tracing_enabled():
+            with trace_workflow(run_id, workflow_name, durable=is_durable, is_replay=bool(event_log)):
+                result = await workflow_func(*args, **kwargs)
+        else:
+            result = await workflow_func(*args, **kwargs)
 
         # Record completion event (durable mode only)
         if is_durable:

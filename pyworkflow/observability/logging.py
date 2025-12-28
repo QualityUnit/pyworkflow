@@ -3,13 +3,39 @@ Loguru logging configuration for PyWorkflow.
 
 Provides structured logging with context-aware formatting for workflows, steps,
 and events. Integrates with loguru for powerful logging capabilities.
+
+Features:
+- Environment variable configuration for production deployments
+- Standard JSON schema compatible with ELK/Loki/Datadog
+- Context managers for scoped logging
+- Automatic context binding for workflows and steps
 """
 
+import json
+import os
 import sys
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Generator
 
 from loguru import logger
+
+
+@dataclass
+class LogContext:
+    """Structured context for workflow logging.
+
+    Provides a consistent way to track execution context across
+    workflows and steps for debugging and observability.
+    """
+
+    run_id: str | None = None
+    workflow_name: str | None = None
+    step_id: str | None = None
+    step_name: str | None = None
+    attempt: int | None = None
 
 
 def configure_logging(
@@ -50,14 +76,19 @@ def configure_logging(
     # Remove default logger
     logger.remove()
 
-    # Console format
     if json_logs:
-        # JSON format for structured logging
-        console_format = _get_json_format()
+        # JSON format using custom serializer for ELK/Loki/Datadog compatibility
+        logger.add(
+            sys.stderr,
+            format="{message}",
+            level=level,
+            colorize=False,
+            serialize=False,
+            filter=_create_json_filter(show_context),
+        )
     else:
         # Human-readable format
         if show_context:
-            # Include extra context when available (run_id, step_id, etc.)
             console_format = (
                 "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
                 "<level>{level: <8}</level> | "
@@ -72,32 +103,31 @@ def configure_logging(
                 "<level>{message}</level>"
             )
 
-    # Add console handler with filter to inject context
-    def format_with_context(record: dict[str, Any]) -> bool:
-        """Add context fields to the format string dynamically."""
-        extra_str = ""
-        if show_context and record["extra"]:
-            # Build context string from extra fields
-            context_parts = []
-            if "run_id" in record["extra"]:
-                context_parts.append(f"run_id={record['extra']['run_id']}")
-            if "step_id" in record["extra"]:
-                context_parts.append(f"step_id={record['extra']['step_id']}")
-            if "workflow_name" in record["extra"]:
-                context_parts.append(f"workflow={record['extra']['workflow_name']}")
-            if context_parts:
-                extra_str = " | " + " ".join(context_parts)
-        record["extra"]["_context"] = extra_str
-        return True
+        # Add console handler with filter to inject context
+        def format_with_context(record: dict[str, Any]) -> bool:
+            """Add context fields to the format string dynamically."""
+            extra_str = ""
+            if show_context and record["extra"]:
+                # Build context string from extra fields
+                context_parts = []
+                if "run_id" in record["extra"]:
+                    context_parts.append(f"run_id={record['extra']['run_id']}")
+                if "step_id" in record["extra"]:
+                    context_parts.append(f"step_id={record['extra']['step_id']}")
+                if "workflow_name" in record["extra"]:
+                    context_parts.append(f"workflow={record['extra']['workflow_name']}")
+                if context_parts:
+                    extra_str = " | " + " ".join(context_parts)
+            record["extra"]["_context"] = extra_str
+            return True
 
-    logger.add(
-        sys.stderr,
-        format=console_format + "{extra[_context]}",
-        level=level,
-        colorize=not json_logs,
-        serialize=json_logs,
-        filter=format_with_context,  # type: ignore[arg-type]
-    )
+        logger.add(
+            sys.stderr,
+            format=console_format + "{extra[_context]}",
+            level=level,
+            colorize=True,
+            filter=format_with_context,  # type: ignore[arg-type]
+        )
 
     # Add file handler if requested
     if log_file:
@@ -108,12 +138,13 @@ def configure_logging(
             # JSON format for file
             logger.add(
                 log_file,
-                format=_get_json_format(),
+                format="{message}",
                 level=level,
                 rotation="100 MB",
                 retention="30 days",
                 compression="gz",
-                serialize=True,
+                serialize=False,
+                filter=_create_json_filter(show_context),
             )
         else:
             # Human-readable format for file
@@ -135,21 +166,125 @@ def configure_logging(
     logger.info(f"PyWorkflow logging configured at level {level}")
 
 
-def _get_json_format() -> str:
-    """
-    Get JSON log format string.
+def _create_json_filter(show_context: bool) -> Any:
+    """Create a filter function that formats logs as JSON.
+
+    Args:
+        show_context: Whether to include context in logs.
 
     Returns:
-        Format string for JSON structured logging
+        Filter function for loguru.
     """
-    return (
-        '{{"timestamp":"{time:YYYY-MM-DD HH:mm:ss.SSS}",'
-        '"level":"{level}",'
-        '"logger":"{name}",'
-        '"function":"{function}",'
-        '"line":{line},'
-        '"message":"{message}",'
-        '"extra":{extra}}}'
+
+    def json_filter(record: dict[str, Any]) -> bool:
+        """Format log record as JSON and replace message."""
+        log_entry = _format_for_json(record, show_context)
+        record["message"] = log_entry
+        return True
+
+    return json_filter
+
+
+def _format_for_json(record: dict[str, Any], show_context: bool = True) -> str:
+    """Format log record as JSON compatible with log aggregators.
+
+    Produces a standard JSON schema that works with ELK, Loki, Datadog,
+    and other log aggregation systems.
+
+    Args:
+        record: Loguru log record.
+        show_context: Whether to include context fields.
+
+    Returns:
+        JSON string representation of the log.
+    """
+    # Extract context fields
+    context_keys = {"run_id", "workflow_name", "step_id", "step_name", "attempt"}
+
+    context = {}
+    extra = {}
+
+    for key, value in record["extra"].items():
+        if key.startswith("_"):
+            continue  # Skip internal fields
+        if key in context_keys:
+            context[key] = value
+        else:
+            extra[key] = _safe_serialize(value)
+
+    # Build JSON object
+    log_obj: dict[str, Any] = {
+        "timestamp": record["time"].isoformat(),
+        "level": record["level"].name,
+        "message": record["message"],
+        "logger": record["name"],
+        "function": record["function"],
+        "line": record["line"],
+    }
+
+    if show_context and context:
+        log_obj["context"] = context
+
+    if extra:
+        log_obj["extra"] = extra
+
+    # Add exception info if present
+    if record["exception"] is not None:
+        log_obj["exception"] = {
+            "type": record["exception"].type.__name__ if record["exception"].type else None,
+            "value": str(record["exception"].value) if record["exception"].value else None,
+            "traceback": record["exception"].traceback is not None,
+        }
+
+    return json.dumps(log_obj, default=str)
+
+
+def _safe_serialize(value: Any) -> Any:
+    """Safely serialize a value for JSON output.
+
+    Args:
+        value: Value to serialize.
+
+    Returns:
+        JSON-serializable value.
+    """
+    if isinstance(value, (str, int, float, bool, type(None))):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_safe_serialize(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _safe_serialize(v) for k, v in value.items()}
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def configure_logging_from_env() -> None:
+    """Configure logging from environment variables.
+
+    Environment variables:
+        PYWORKFLOW_LOG_LEVEL: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        PYWORKFLOW_LOG_FORMAT: Log format ("json" or "console")
+        PYWORKFLOW_LOG_FILE: Optional file path for log output
+        PYWORKFLOW_LOG_CONTEXT: Whether to show context ("true" or "false")
+
+    Examples:
+        # In shell before running application
+        export PYWORKFLOW_LOG_LEVEL=INFO
+        export PYWORKFLOW_LOG_FORMAT=json
+        export PYWORKFLOW_LOG_FILE=/var/log/pyworkflow.log
+    """
+    level = os.getenv("PYWORKFLOW_LOG_LEVEL", "INFO").upper()
+    format_type = os.getenv("PYWORKFLOW_LOG_FORMAT", "console").lower()
+    log_file = os.getenv("PYWORKFLOW_LOG_FILE")
+    show_context_str = os.getenv("PYWORKFLOW_LOG_CONTEXT", "true").lower()
+    show_context = show_context_str in ("true", "1", "yes")
+
+    configure_logging(
+        level=level,
+        log_file=log_file,
+        json_logs=(format_type == "json"),
+        show_context=show_context,
     )
 
 
@@ -223,12 +358,71 @@ def bind_step_context(run_id: str, step_id: str, step_name: str) -> Any:
     return logger.bind(run_id=run_id, step_id=step_id, step_name=step_name)
 
 
+@contextmanager
+def workflow_logging_context(
+    run_id: str, workflow_name: str
+) -> Generator[None, None, None]:
+    """Context manager to bind workflow context to all logs within scope.
+
+    This ensures all logs within the context include workflow metadata,
+    making it easier to trace execution in log aggregators.
+
+    Args:
+        run_id: Workflow run identifier.
+        workflow_name: Workflow name.
+
+    Yields:
+        None
+
+    Example:
+        with workflow_logging_context("run_123", "process_order"):
+            logger.info("Starting workflow")  # Includes run_id and workflow_name
+            # ... workflow execution ...
+            logger.info("Workflow complete")  # Also includes context
+    """
+    with logger.contextualize(run_id=run_id, workflow_name=workflow_name):
+        yield
+
+
+@contextmanager
+def step_logging_context(
+    run_id: str, step_id: str, step_name: str, attempt: int = 1
+) -> Generator[None, None, None]:
+    """Context manager to bind step context to all logs within scope.
+
+    This ensures all logs within the context include step metadata,
+    making it easier to trace step execution and retries.
+
+    Args:
+        run_id: Workflow run identifier.
+        step_id: Step identifier.
+        step_name: Step name.
+        attempt: Current retry attempt number.
+
+    Yields:
+        None
+
+    Example:
+        with step_logging_context("run_123", "step_abc", "validate_order", attempt=1):
+            logger.info("Executing step")  # Includes all step context
+            # ... step execution ...
+    """
+    with logger.contextualize(
+        run_id=run_id, step_id=step_id, step_name=step_name, attempt=attempt
+    ):
+        yield
+
+
 # Default configuration on import
-# Users can override by calling configure_logging()
+# Users can override by calling configure_logging() or configure_logging_from_env()
 try:
     # Only configure if logger doesn't have handlers
     if len(logger._core.handlers) == 0:  # type: ignore[attr-defined]
-        configure_logging(level="INFO", show_context=False)
+        # Check for environment variable to auto-configure
+        if os.getenv("PYWORKFLOW_LOG_LEVEL") or os.getenv("PYWORKFLOW_LOG_FORMAT"):
+            configure_logging_from_env()
+        else:
+            configure_logging(level="INFO", show_context=False)
 except Exception:
     # If configuration fails, just use default loguru
     pass

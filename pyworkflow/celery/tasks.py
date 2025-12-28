@@ -110,9 +110,12 @@ def execute_step_task(
     context_class_name: str | None = None,
 ) -> Any:
     """
-    Execute a workflow step in a Celery worker.
+    Execute a workflow step on a Celery worker.
 
-    This task runs a single step and handles retries automatically.
+    This task:
+    1. Executes the step function
+    2. Records STEP_COMPLETED/STEP_FAILED event in storage
+    3. Triggers workflow resumption via resume_workflow_task
 
     Args:
         step_name: Name of the step function
@@ -135,7 +138,7 @@ def execute_step_task(
     from pyworkflow.core.registry import _registry
 
     logger.info(
-        f"Executing step: {step_name}",
+        f"Executing dispatched step: {step_name}",
         run_id=run_id,
         step_id=step_id,
         attempt=self.request.retries + 1,
@@ -144,6 +147,18 @@ def execute_step_task(
     # Get step metadata
     step_meta = _registry.get_step(step_name)
     if not step_meta:
+        # Record failure and resume workflow
+        asyncio.run(
+            _record_step_failure_and_resume(
+                storage_config=storage_config,
+                run_id=run_id,
+                step_id=step_id,
+                step_name=step_name,
+                error=f"Step '{step_name}' not found in registry",
+                error_type="FatalError",
+                is_retryable=False,
+            )
+        )
         raise FatalError(f"Step '{step_name}' not found in registry")
 
     # Deserialize arguments
@@ -192,32 +207,101 @@ def execute_step_task(
             step_id=step_id,
         )
 
+        # Record STEP_COMPLETED event and trigger workflow resumption
+        asyncio.run(
+            _record_step_completion_and_resume(
+                storage_config=storage_config,
+                run_id=run_id,
+                step_id=step_id,
+                step_name=step_name,
+                result=result,
+            )
+        )
+
         return result
 
-    except FatalError:
+    except FatalError as e:
         logger.error(f"Step failed (fatal): {step_name}", run_id=run_id, step_id=step_id)
+        # Record failure and resume workflow (workflow will fail on replay)
+        asyncio.run(
+            _record_step_failure_and_resume(
+                storage_config=storage_config,
+                run_id=run_id,
+                step_id=step_id,
+                step_name=step_name,
+                error=str(e),
+                error_type=type(e).__name__,
+                is_retryable=False,
+            )
+        )
         raise
 
     except RetryableError as e:
-        logger.warning(
-            f"Step failed (retriable): {step_name}",
-            run_id=run_id,
-            step_id=step_id,
-            retry_after=e.retry_after,
-        )
-        # Let Celery handle the retry
-        raise self.retry(exc=e, countdown=e.get_retry_delay_seconds() or 60)
+        # Check if we have retries left
+        if self.request.retries < max_retries:
+            logger.warning(
+                f"Step failed (retriable): {step_name}, retrying...",
+                run_id=run_id,
+                step_id=step_id,
+                retry_after=e.retry_after,
+                attempt=self.request.retries + 1,
+                max_retries=max_retries,
+            )
+            # Let Celery handle the retry - don't resume workflow yet
+            raise self.retry(exc=e, countdown=e.get_retry_delay_seconds() or 60)
+        else:
+            # Max retries exhausted - record failure and resume workflow
+            logger.error(
+                f"Step failed after {max_retries + 1} attempts: {step_name}",
+                run_id=run_id,
+                step_id=step_id,
+            )
+            asyncio.run(
+                _record_step_failure_and_resume(
+                    storage_config=storage_config,
+                    run_id=run_id,
+                    step_id=step_id,
+                    step_name=step_name,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    is_retryable=False,  # Mark as not retryable since we exhausted retries
+                )
+            )
+            raise
 
     except Exception as e:
-        logger.error(
-            f"Step failed (unexpected): {step_name}",
-            run_id=run_id,
-            step_id=step_id,
-            error=str(e),
-            exc_info=True,
-        )
-        # Treat unexpected errors as retriable
-        raise self.retry(exc=RetryableError(str(e)), countdown=60)
+        # Check if we have retries left
+        if self.request.retries < max_retries:
+            logger.warning(
+                f"Step failed (unexpected): {step_name}, retrying...",
+                run_id=run_id,
+                step_id=step_id,
+                error=str(e),
+                attempt=self.request.retries + 1,
+            )
+            # Treat unexpected errors as retriable
+            raise self.retry(exc=RetryableError(str(e)), countdown=60)
+        else:
+            # Max retries exhausted
+            logger.error(
+                f"Step failed after {max_retries + 1} attempts: {step_name}",
+                run_id=run_id,
+                step_id=step_id,
+                error=str(e),
+                exc_info=True,
+            )
+            asyncio.run(
+                _record_step_failure_and_resume(
+                    storage_config=storage_config,
+                    run_id=run_id,
+                    step_id=step_id,
+                    step_name=step_name,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    is_retryable=False,
+                )
+            )
+            raise
 
     finally:
         # Clean up step context
@@ -229,6 +313,95 @@ def execute_step_task(
             from pyworkflow.context.step_context import _reset_step_context
 
             _reset_step_context(step_context_token)
+
+
+async def _record_step_completion_and_resume(
+    storage_config: dict[str, Any] | None,
+    run_id: str,
+    step_id: str,
+    step_name: str,
+    result: Any,
+) -> None:
+    """
+    Record STEP_COMPLETED event and trigger workflow resumption.
+
+    Called by execute_step_task after successful step execution.
+    """
+    from pyworkflow.engine.events import create_step_completed_event
+    from pyworkflow.serialization.encoder import serialize
+
+    # Get storage backend
+    storage = _get_storage_backend(storage_config)
+
+    # Ensure storage is connected
+    if hasattr(storage, "connect"):
+        await storage.connect()
+
+    # Record STEP_COMPLETED event
+    completion_event = create_step_completed_event(
+        run_id=run_id,
+        step_id=step_id,
+        result=serialize(result),
+        step_name=step_name,
+    )
+    await storage.record_event(completion_event)
+
+    # Schedule workflow resumption immediately
+    schedule_workflow_resumption(run_id, datetime.now(UTC), storage_config)
+
+    logger.info(
+        "Step completed and workflow resumption scheduled",
+        run_id=run_id,
+        step_id=step_id,
+        step_name=step_name,
+    )
+
+
+async def _record_step_failure_and_resume(
+    storage_config: dict[str, Any] | None,
+    run_id: str,
+    step_id: str,
+    step_name: str,
+    error: str,
+    error_type: str,
+    is_retryable: bool,
+) -> None:
+    """
+    Record STEP_FAILED event and trigger workflow resumption.
+
+    Called by execute_step_task after step failure (when retries are exhausted).
+    The workflow will fail when it replays and sees the failure event.
+    """
+    from pyworkflow.engine.events import create_step_failed_event
+
+    # Get storage backend
+    storage = _get_storage_backend(storage_config)
+
+    # Ensure storage is connected
+    if hasattr(storage, "connect"):
+        await storage.connect()
+
+    # Record STEP_FAILED event
+    failure_event = create_step_failed_event(
+        run_id=run_id,
+        step_id=step_id,
+        error=error,
+        error_type=error_type,
+        is_retryable=is_retryable,
+        attempt=1,  # Final attempt
+    )
+    await storage.record_event(failure_event)
+
+    # Schedule workflow resumption - workflow will fail on replay
+    schedule_workflow_resumption(run_id, datetime.now(UTC), storage_config)
+
+    logger.info(
+        "Step failed and workflow resumption scheduled",
+        run_id=run_id,
+        step_id=step_id,
+        step_name=step_name,
+        error=error,
+    )
 
 
 def _resolve_context_class(class_name: str) -> type["StepContext"] | None:
@@ -432,6 +605,8 @@ async def _execute_child_workflow_on_worker(
             storage=storage,
             durable=True,
             event_log=None,  # Fresh execution
+            runtime="celery",
+            storage_config=storage_config,
         )
 
         # Update status to COMPLETED
@@ -781,6 +956,8 @@ async def _recover_workflow_on_worker(
             args=args,
             kwargs=kwargs,
             event_log=events,
+            runtime="celery",
+            storage_config=storage_config,
         )
 
         # Update run status to completed
@@ -1044,6 +1221,8 @@ async def _start_workflow_on_worker(
             storage=storage,
             args=args,
             kwargs=kwargs,
+            runtime="celery",
+            storage_config=storage_config,
         )
 
         # Update run status to completed
@@ -1448,6 +1627,8 @@ async def _resume_workflow_on_worker(
             kwargs=kwargs,
             event_log=events,
             cancellation_requested=cancellation_requested,
+            runtime="celery",
+            storage_config=storage_config,
         )
 
         # Update run status to completed

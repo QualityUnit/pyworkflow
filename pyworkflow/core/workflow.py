@@ -158,6 +158,8 @@ async def execute_workflow_with_context(
     event_log: list | None = None,
     durable: bool = True,
     cancellation_requested: bool = False,
+    runtime: str | None = None,
+    storage_config: dict | None = None,
 ) -> Any:
     """
     Execute workflow function with proper context setup.
@@ -179,6 +181,8 @@ async def execute_workflow_with_context(
         event_log: Optional existing event log for replay
         durable: Whether this is a durable workflow
         cancellation_requested: Whether cancellation was requested before execution
+        runtime: Runtime environment slug (e.g., "celery") for distributed step dispatch
+        storage_config: Storage configuration dict for distributed step workers
 
     Returns:
         Workflow result
@@ -199,6 +203,10 @@ async def execute_workflow_with_context(
         event_log=event_log or [],
         durable=is_durable,
     )
+
+    # Set runtime environment for distributed step dispatch
+    ctx._runtime = runtime
+    ctx._storage_config = storage_config
 
     # Set cancellation state if requested before execution
     if cancellation_requested:

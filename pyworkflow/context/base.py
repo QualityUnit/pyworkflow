@@ -281,6 +281,32 @@ class WorkflowContext(ABC):
         """Get the storage backend."""
         return None
 
+    @property
+    def runtime(self) -> str | None:
+        """
+        Get the runtime environment slug.
+
+        Returns the runtime identifier (e.g., "celery", "temporal") or None
+        for local/inline execution. Used to determine step dispatch behavior.
+
+        Returns:
+            Runtime slug string or None for local execution
+        """
+        return None  # Default: local/inline execution
+
+    @property
+    def storage_config(self) -> dict[str, Any] | None:
+        """Get storage configuration for distributed workers."""
+        return None
+
+    def has_step_failed(self, step_id: str) -> bool:
+        """Check if a step has a recorded failure."""
+        return False  # Default: no failures
+
+    def get_step_failure(self, step_id: str) -> dict[str, Any] | None:
+        """Get failure info for a step."""
+        return None  # Default: no failure info
+
     def should_execute_step(self, step_id: str) -> bool:
         """Check if step should be executed (not already completed)."""
         return True  # Default: always execute

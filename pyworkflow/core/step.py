@@ -128,12 +128,42 @@ def step(
 
             # Check if step has already completed (replay)
             if not ctx.should_execute_step(step_id):
+                # Check if step failed (for distributed step dispatch)
+                if ctx.has_step_failed(step_id):
+                    error_info = ctx.get_step_failure(step_id)
+                    logger.error(
+                        f"Step {step_name} failed on remote worker",
+                        run_id=ctx.run_id,
+                        step_id=step_id,
+                        error=error_info.get("error") if error_info else "Unknown error",
+                    )
+                    raise FatalError(
+                        f"Step {step_name} failed: "
+                        f"{error_info.get('error') if error_info else 'Unknown error'}"
+                    )
+
                 logger.debug(
                     f"Step {step_name} already completed, using cached result",
                     run_id=ctx.run_id,
                     step_id=step_id,
                 )
                 return ctx.get_step_result(step_id)
+
+            # ========== Distributed Step Dispatch ==========
+            # When running in a distributed runtime (e.g., Celery), dispatch steps
+            # to step workers instead of executing inline.
+            if ctx.runtime == "celery":
+                return await _dispatch_step_to_celery(
+                    ctx=ctx,
+                    func=func,
+                    args=args,
+                    kwargs=kwargs,
+                    step_name=step_name,
+                    step_id=step_id,
+                    max_retries=max_retries,
+                    retry_delay=retry_delay,
+                    timeout=timeout,
+                )
 
             # Check if we're resuming from a retry
             retry_state = ctx.get_retry_state(step_id)
@@ -492,3 +522,114 @@ def _generate_step_id(step_name: str, args: tuple, kwargs: dict) -> str:
     hash_hex = hashlib.sha256(content.encode()).hexdigest()[:16]
 
     return f"step_{step_name}_{hash_hex}"
+
+
+async def _dispatch_step_to_celery(
+    ctx: Any,  # WorkflowContext
+    func: Callable,
+    args: tuple,
+    kwargs: dict,
+    step_name: str,
+    step_id: str,
+    max_retries: int,
+    retry_delay: str | int | list[int],
+    timeout: int | None,
+) -> Any:
+    """
+    Dispatch step execution to Celery step worker.
+
+    Instead of executing the step inline, this function:
+    1. Records STEP_STARTED event
+    2. Dispatches the step to execute_step_task on the steps queue
+    3. Raises SuspensionSignal to pause the workflow
+
+    The step worker will:
+    1. Execute the step function
+    2. Record STEP_COMPLETED/STEP_FAILED event
+    3. Trigger workflow resumption
+
+    Args:
+        ctx: Workflow context
+        func: Step function to execute
+        args: Positional arguments
+        kwargs: Keyword arguments
+        step_name: Name of the step
+        step_id: Deterministic step ID
+        max_retries: Maximum retry attempts
+        retry_delay: Retry delay strategy
+        timeout: Optional timeout in seconds
+
+    Returns:
+        This function never returns normally - it always raises SuspensionSignal
+
+    Raises:
+        SuspensionSignal: To pause workflow while step executes on worker
+    """
+    from pyworkflow.celery.tasks import execute_step_task
+    from pyworkflow.core.exceptions import SuspensionSignal
+
+    logger.info(
+        f"Dispatching step to Celery worker: {step_name}",
+        run_id=ctx.run_id,
+        step_id=step_id,
+    )
+
+    # Validate event limits before recording step event
+    await ctx.validate_event_limits()
+
+    # Record STEP_STARTED event
+    start_event = create_step_started_event(
+        run_id=ctx.run_id,
+        step_id=step_id,
+        step_name=step_name,
+        args=serialize_args(*args),
+        kwargs=serialize_kwargs(**kwargs),
+        attempt=1,
+    )
+    await ctx.storage.record_event(start_event)
+
+    # Serialize arguments for Celery transport
+    args_json = serialize_args(*args)
+    kwargs_json = serialize_kwargs(**kwargs)
+
+    # Get step context data if available
+    context_data = None
+    context_class_name = None
+    try:
+        from pyworkflow.context.step_context import get_step_context, has_step_context
+
+        if has_step_context():
+            step_ctx = get_step_context()
+            context_data = step_ctx.to_dict()
+            context_class_name = f"{step_ctx.__class__.__module__}.{step_ctx.__class__.__name__}"
+    except Exception:
+        pass  # Step context not available
+
+    # Dispatch to Celery step queue
+    task_result = execute_step_task.delay(
+        step_name=step_name,
+        args_json=args_json,
+        kwargs_json=kwargs_json,
+        run_id=ctx.run_id,
+        step_id=step_id,
+        max_retries=max_retries,
+        storage_config=ctx.storage_config,
+        context_data=context_data,
+        context_class_name=context_class_name,
+    )
+
+    logger.info(
+        f"Step dispatched to Celery: {step_name}",
+        run_id=ctx.run_id,
+        step_id=step_id,
+        task_id=task_result.id,
+    )
+
+    # Raise suspension signal - workflow will pause until step completes
+    # The step worker will record STEP_COMPLETED and trigger resume
+    raise SuspensionSignal(
+        reason=f"step_dispatch:{step_id}",
+        step_id=step_id,
+        step_name=step_name,
+        task_id=task_result.id,
+    )

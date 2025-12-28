@@ -13,7 +13,10 @@ import asyncio
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pyworkflow.context.step_context import StepContext
 
 from celery import Task
 from celery.exceptions import WorkerLostError
@@ -228,7 +231,7 @@ def execute_step_task(
             _reset_step_context(step_context_token)
 
 
-def _resolve_context_class(class_name: str) -> type | None:
+def _resolve_context_class(class_name: str) -> type["StepContext"] | None:
     """
     Resolve a context class from its fully qualified name.
 

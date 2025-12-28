@@ -77,7 +77,7 @@ async def validate_order(order_id: str) -> dict:
     step execution. It's read-only to prevent race conditions.
     """
     ctx = get_step_context()
-    print(f"[Step:validate] Running on Celery worker")
+    print("[Step:validate] Running on Celery worker")
     print(f"[Step:validate] Workspace: {ctx.workspace_id}")
     print(f"[Step:validate] User: {ctx.user_id}")
     print(f"[Step:validate] Priority: {ctx.priority}")
@@ -190,7 +190,7 @@ async def parallel_steps_with_context(
         correlation_id=f"parallel-{order_id}",
     )
     await set_step_context(ctx)
-    print(f"[Workflow] Running parallel steps with context")
+    print("[Workflow] Running parallel steps with context")
 
     # All steps execute in parallel - each gets the same context
     results = await asyncio.gather(
@@ -283,7 +283,7 @@ async def main() -> None:
     args = parser.parse_args()
 
     if args.parallel:
-        print(f"Starting parallel workflow with context...")
+        print("Starting parallel workflow with context...")
         run_id = await pyworkflow.start(
             parallel_steps_with_context,
             order_id=args.order_id,
@@ -291,7 +291,7 @@ async def main() -> None:
             workspace_id=args.workspace_id,
         )
     else:
-        print(f"Starting order workflow with context...")
+        print("Starting order workflow with context...")
         run_id = await pyworkflow.start(
             order_workflow_with_context,
             order_id=args.order_id,

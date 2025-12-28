@@ -230,7 +230,7 @@ class TestHasStepContext:
         assert has_step_context() is True
 
 
-class TestStepContextClass:
+class TestStepContextClassRegistration:
     """Test context class registration."""
 
     def test_get_context_class_returns_none_by_default(self):

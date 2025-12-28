@@ -44,9 +44,9 @@ from pyworkflow.context.mock import MockContext
 from pyworkflow.context.step_context import (
     StepContext,
     get_step_context,
+    get_step_context_class,
     has_step_context,
     set_step_context,
-    get_step_context_class,
 )
 
 __all__ = [

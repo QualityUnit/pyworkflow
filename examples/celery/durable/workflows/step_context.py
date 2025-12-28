@@ -171,9 +171,7 @@ async def order_workflow_with_context(
 
 
 @workflow(tags=["celery", "step-context"], context_class=OrderContext)
-async def parallel_steps_with_context(
-    order_id: str, user_id: str, workspace_id: str
-) -> dict:
+async def parallel_steps_with_context(order_id: str, user_id: str, workspace_id: str) -> dict:
     """
     Demonstrates context with parallel step execution.
 
@@ -277,9 +275,7 @@ async def main() -> None:
     parser.add_argument("--amount", type=float, default=149.99, help="Order amount")
     parser.add_argument("--user-id", default="user-456", help="User ID")
     parser.add_argument("--workspace-id", default="ws-789", help="Workspace ID")
-    parser.add_argument(
-        "--parallel", action="store_true", help="Run parallel steps example"
-    )
+    parser.add_argument("--parallel", action="store_true", help="Run parallel steps example")
     args = parser.parse_args()
 
     if args.parallel:

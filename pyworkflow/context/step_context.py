@@ -223,9 +223,7 @@ async def set_step_context(ctx: StepContext) -> None:
             await workflow_ctx.storage.record_event(event)
 
             # Update the WorkflowRun.context field
-            await workflow_ctx.storage.update_run_context(
-                workflow_ctx.run_id, ctx.to_dict()
-            )
+            await workflow_ctx.storage.update_run_context(workflow_ctx.run_id, ctx.to_dict())
 
 
 def has_step_context() -> bool:

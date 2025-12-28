@@ -146,7 +146,10 @@ class TestStepContextClass:
     def test_roundtrip_serialization(self):
         """Test that to_dict/from_dict roundtrip preserves data."""
         original = OrderContext(
-            workspace_id="ws-123", user_id="user-456", order_id="order-789", tags=["priority", "vip"]
+            workspace_id="ws-123",
+            user_id="user-456",
+            order_id="order-789",
+            tags=["priority", "vip"],
         )
 
         data = original.to_dict()
@@ -339,6 +342,7 @@ class TestStepContextInheritance:
 
     def test_custom_context_inherits_methods(self):
         """Test that custom context inherits all StepContext methods."""
+
         class CustomContext(StepContext):
             field1: str = ""
             field2: int = 0
@@ -379,6 +383,7 @@ class TestStepContextInheritance:
 
     def test_context_with_optional_fields(self):
         """Test context with optional fields."""
+
         class OptionalContext(StepContext):
             required_field: str
             optional_field: str | None = None

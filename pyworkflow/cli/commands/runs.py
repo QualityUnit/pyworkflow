@@ -227,7 +227,7 @@ async def run_status(ctx: click.Context, run_id: str) -> None:
                 "input_kwargs": json.loads(run.input_kwargs) if run.input_kwargs else None,
                 "result": json.loads(run.result) if run.result else None,
                 "error": run.error,
-                "metadata": run.metadata,
+                "context": run.context,
             }
             format_json(data)
 
@@ -266,9 +266,9 @@ async def run_status(ctx: click.Context, run_id: str) -> None:
             if run.error:
                 data["Error"] = run.error
 
-            # Add metadata if present
-            if run.metadata:
-                data["Metadata"] = json.dumps(run.metadata, indent=2)
+            # Add context if present
+            if run.context:
+                data["Context"] = json.dumps(run.context, indent=2)
 
             format_key_value(data, title=f"Workflow Run: {run_id}")
 

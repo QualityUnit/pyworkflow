@@ -13,7 +13,10 @@ import asyncio
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pyworkflow.context.step_context import StepContext
 
 from celery import Task
 from celery.exceptions import WorkerLostError
@@ -103,6 +106,8 @@ def execute_step_task(
     step_id: str,
     max_retries: int = 3,
     storage_config: dict[str, Any] | None = None,
+    context_data: dict[str, Any] | None = None,
+    context_class_name: str | None = None,
 ) -> Any:
     """
     Execute a workflow step in a Celery worker.
@@ -117,6 +122,8 @@ def execute_step_task(
         step_id: Step execution ID
         max_retries: Maximum retry attempts
         storage_config: Storage backend configuration
+        context_data: Optional step context data (from workflow)
+        context_class_name: Optional fully qualified context class name
 
     Returns:
         Step result (serialized)
@@ -142,6 +149,31 @@ def execute_step_task(
     # Deserialize arguments
     args = deserialize_args(args_json)
     kwargs = deserialize_kwargs(kwargs_json)
+
+    # Set up step context if provided (read-only mode)
+    step_context_token = None
+    readonly_token = None
+
+    if context_data and context_class_name:
+        try:
+            from pyworkflow.context.step_context import (
+                _set_step_context_internal,
+                _set_step_context_readonly,
+            )
+
+            # Import context class dynamically
+            context_class = _resolve_context_class(context_class_name)
+            if context_class is not None:
+                step_ctx = context_class.from_dict(context_data)
+                step_context_token = _set_step_context_internal(step_ctx)
+                # Set readonly mode to prevent mutation in steps
+                readonly_token = _set_step_context_readonly(True)
+        except Exception as e:
+            logger.warning(
+                f"Failed to load step context: {e}",
+                run_id=run_id,
+                step_id=step_id,
+            )
 
     # Execute step function
     try:
@@ -186,6 +218,41 @@ def execute_step_task(
         )
         # Treat unexpected errors as retriable
         raise self.retry(exc=RetryableError(str(e)), countdown=60)
+
+    finally:
+        # Clean up step context
+        if readonly_token is not None:
+            from pyworkflow.context.step_context import _reset_step_context_readonly
+
+            _reset_step_context_readonly(readonly_token)
+        if step_context_token is not None:
+            from pyworkflow.context.step_context import _reset_step_context
+
+            _reset_step_context(step_context_token)
+
+
+def _resolve_context_class(class_name: str) -> type["StepContext"] | None:
+    """
+    Resolve a context class from its fully qualified name.
+
+    Args:
+        class_name: Fully qualified class name (e.g., "myapp.contexts.OrderContext")
+
+    Returns:
+        The class type, or None if resolution fails
+    """
+    try:
+        import importlib
+
+        parts = class_name.rsplit(".", 1)
+        if len(parts) == 2:
+            module_name, cls_name = parts
+            module = importlib.import_module(module_name)
+            return getattr(module, cls_name, None)
+        # Simple class name - try to get from globals
+        return None
+    except Exception:
+        return None
 
 
 @celery_app.task(
@@ -949,7 +1016,7 @@ async def _start_workflow_on_worker(
         input_kwargs=serialize_kwargs(**kwargs),
         idempotency_key=idempotency_key,
         max_duration=workflow_meta.max_duration,
-        metadata={},  # Run-level metadata (not from decorator)
+        context={},  # Step context (not from decorator)
         recovery_attempts=0,
         max_recovery_attempts=max_recovery_attempts,
         recover_on_worker_loss=recover_on_worker_loss,
@@ -1231,7 +1298,7 @@ async def _execute_scheduled_workflow(
             kwargs_json=kwargs_json,
             run_id=run_id,
             storage_config=storage_config,
-            metadata={"schedule_id": schedule_id, "scheduled_time": scheduled_time.isoformat()},
+            # Note: context data is passed through for scheduled workflows to include schedule info
         )
 
         # Record trigger event - use schedule_id as run_id since workflow run may not exist yet

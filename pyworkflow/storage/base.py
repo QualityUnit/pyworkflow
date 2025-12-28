@@ -110,6 +110,41 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
+    async def update_run_context(
+        self,
+        run_id: str,
+        context: dict,
+    ) -> None:
+        """
+        Update the step context for a workflow run.
+
+        Called when set_step_context() is invoked in workflow code.
+        The context is stored and can be loaded by steps running on
+        remote workers.
+
+        Args:
+            run_id: Workflow run identifier
+            context: Context data as a dictionary (serialized StepContext)
+        """
+        pass
+
+    @abstractmethod
+    async def get_run_context(self, run_id: str) -> dict:
+        """
+        Get the current step context for a workflow run.
+
+        Called when a step starts execution on a remote worker to
+        load the context that was set by the workflow.
+
+        Args:
+            run_id: Workflow run identifier
+
+        Returns:
+            Context data as a dictionary, or empty dict if not set
+        """
+        pass
+
+    @abstractmethod
     async def list_runs(
         self,
         query: str | None = None,

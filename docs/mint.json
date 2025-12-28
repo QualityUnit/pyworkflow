@@ -55,6 +55,7 @@
       "pages": [
         "concepts/workflows",
         "concepts/steps",
+        "concepts/step-context",
         "concepts/events",
         "concepts/sleep",
         "concepts/hooks",

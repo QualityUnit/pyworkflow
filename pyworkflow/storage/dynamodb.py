@@ -234,7 +234,7 @@ class DynamoDBStorageBackend(StorageBackend):
                 "error": run.error,
                 "idempotency_key": run.idempotency_key,
                 "max_duration": run.max_duration,
-                "metadata": json.dumps(run.metadata),
+                "context": json.dumps(run.context),
                 "recovery_attempts": run.recovery_attempts,
                 "max_recovery_attempts": run.max_recovery_attempts,
                 "recover_on_worker_loss": run.recover_on_worker_loss,
@@ -361,6 +361,34 @@ class DynamoDBStorageBackend(StorageBackend):
                     ":now": {"S": datetime.now(UTC).isoformat()},
                 },
             )
+
+    async def update_run_context(
+        self,
+        run_id: str,
+        context: dict,
+    ) -> None:
+        """Update the step context for a workflow run."""
+        async with self._get_client() as client:
+            await client.update_item(
+                TableName=self.table_name,
+                Key={
+                    "PK": {"S": f"RUN#{run_id}"},
+                    "SK": {"S": "#METADATA"},
+                },
+                UpdateExpression="SET #ctx = :ctx, updated_at = :now",
+                ExpressionAttributeNames={
+                    "#ctx": "context",
+                },
+                ExpressionAttributeValues={
+                    ":ctx": {"S": json.dumps(context)},
+                    ":now": {"S": datetime.now(UTC).isoformat()},
+                },
+            )
+
+    async def get_run_context(self, run_id: str) -> dict:
+        """Get the current step context for a workflow run."""
+        run = await self.get_run(run_id)
+        return run.context if run else {}
 
     async def list_runs(
         self,
@@ -1221,7 +1249,8 @@ class DynamoDBStorageBackend(StorageBackend):
             error=item.get("error"),
             idempotency_key=item.get("idempotency_key"),
             max_duration=item.get("max_duration"),
-            metadata=json.loads(item.get("metadata", "{}")),
+            # Support both 'context' (new) and 'metadata' (legacy) keys
+            context=json.loads(item.get("context", item.get("metadata", "{}"))),
             recovery_attempts=item.get("recovery_attempts", 0),
             max_recovery_attempts=item.get("max_recovery_attempts", 3),
             recover_on_worker_loss=item.get("recover_on_worker_loss", True),

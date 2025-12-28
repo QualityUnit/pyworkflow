@@ -290,7 +290,7 @@ class PostgresStorageBackend(StorageBackend):
                 run.error,
                 run.idempotency_key,
                 run.max_duration,
-                json.dumps(run.metadata),
+                json.dumps(run.context),
                 run.recovery_attempts,
                 run.max_recovery_attempts,
                 run.recover_on_worker_loss,
@@ -384,6 +384,31 @@ class PostgresStorageBackend(StorageBackend):
                 datetime.now(UTC),
                 run_id,
             )
+
+    async def update_run_context(
+        self,
+        run_id: str,
+        context: dict,
+    ) -> None:
+        """Update the step context for a workflow run."""
+        pool = self._ensure_connected()
+
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE workflow_runs
+                SET metadata = $1, updated_at = $2
+                WHERE run_id = $3
+                """,
+                json.dumps(context),
+                datetime.now(UTC),
+                run_id,
+            )
+
+    async def get_run_context(self, run_id: str) -> dict:
+        """Get the current step context for a workflow run."""
+        run = await self.get_run(run_id)
+        return run.context if run else {}
 
     async def list_runs(
         self,
@@ -1087,7 +1112,7 @@ class PostgresStorageBackend(StorageBackend):
             error=row["error"],
             idempotency_key=row["idempotency_key"],
             max_duration=row["max_duration"],
-            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            context=json.loads(row["metadata"]) if row["metadata"] else {},
             recovery_attempts=row["recovery_attempts"],
             max_recovery_attempts=row["max_recovery_attempts"],
             recover_on_worker_loss=row["recover_on_worker_loss"],

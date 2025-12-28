@@ -86,7 +86,7 @@ class WorkflowRun:
     # Configuration
     idempotency_key: str | None = None
     max_duration: str | None = None  # e.g., "1h", "30m"
-    metadata: dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)  # Step context data
 
     # Recovery tracking for fault tolerance
     recovery_attempts: int = 0  # Number of recovery attempts after worker failures
@@ -117,7 +117,7 @@ class WorkflowRun:
             "error": self.error,
             "idempotency_key": self.idempotency_key,
             "max_duration": self.max_duration,
-            "metadata": self.metadata,
+            "context": self.context,
             "recovery_attempts": self.recovery_attempts,
             "max_recovery_attempts": self.max_recovery_attempts,
             "recover_on_worker_loss": self.recover_on_worker_loss,
@@ -148,7 +148,8 @@ class WorkflowRun:
             error=data.get("error"),
             idempotency_key=data.get("idempotency_key"),
             max_duration=data.get("max_duration"),
-            metadata=data.get("metadata", {}),
+            # Support both 'context' and legacy 'metadata' key for backward compatibility
+            context=data.get("context", data.get("metadata", {})),
             recovery_attempts=data.get("recovery_attempts", 0),
             max_recovery_attempts=data.get("max_recovery_attempts", 3),
             recover_on_worker_loss=data.get("recover_on_worker_loss", True),

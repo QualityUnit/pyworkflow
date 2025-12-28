@@ -167,7 +167,7 @@ class LocalRuntime(Runtime):
                     input_kwargs=serialize_kwargs(**kwargs),
                     idempotency_key=idempotency_key,
                     max_duration=max_duration,
-                    metadata=metadata or {},
+                    context=metadata or {},
                 )
                 await storage.create_run(workflow_run)
 

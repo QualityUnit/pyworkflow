@@ -33,6 +33,7 @@ def workflow(
     tags: list[str] | None = None,
     recover_on_worker_loss: bool | None = None,
     max_recovery_attempts: int | None = None,
+    context_class: type | None = None,
 ) -> Callable:
     """
     Decorator to mark async functions as workflows.
@@ -49,6 +50,9 @@ def workflow(
         recover_on_worker_loss: Whether to auto-recover on worker failure
             (None = True for durable, False for transient)
         max_recovery_attempts: Max recovery attempts on worker failure (default: 3)
+        context_class: Optional StepContext subclass for step context access.
+            When provided, enables get_step_context() and set_step_context()
+            for passing context data to steps running on remote workers.
 
     Returns:
         Decorated workflow function
@@ -85,6 +89,18 @@ def workflow(
         async def tagged_workflow():
             result = await my_step()
             return result
+
+    Example (with step context):
+        class OrderContext(StepContext):
+            workspace_id: str = ""
+            user_id: str = ""
+
+        @workflow(context_class=OrderContext)
+        async def workflow_with_context():
+            ctx = OrderContext(workspace_id="ws-123")
+            set_step_context(ctx)  # Persisted and available in steps
+            result = await my_step()  # Step can call get_step_context()
+            return result
     """
 
     # Validate tags
@@ -110,6 +126,7 @@ def workflow(
             original_func=func,
             max_duration=max_duration,
             tags=validated_tags,
+            context_class=context_class,
         )
 
         # Store metadata on wrapper
@@ -124,6 +141,7 @@ def workflow(
         wrapper.__workflow_max_recovery_attempts__ = (  # type: ignore[attr-defined]
             max_recovery_attempts  # None = use config default
         )
+        wrapper.__workflow_context_class__ = context_class  # type: ignore[attr-defined]
 
         return wrapper
 
@@ -188,6 +206,26 @@ async def execute_workflow_with_context(
 
     # Set as current context using new API
     token = set_context(ctx)
+
+    # Set up step context if workflow has a context_class
+    step_context_token = None
+    step_context_class_token = None
+    context_class = getattr(workflow_func, "__workflow_context_class__", None)
+    if context_class is not None:
+        from pyworkflow.context.step_context import (
+            _set_step_context_class,
+            _set_step_context_internal,
+        )
+
+        # Store context class for deserialization
+        step_context_class_token = _set_step_context_class(context_class)
+
+        # Load existing context from storage (for resumption)
+        if is_durable and storage is not None:
+            context_data = await storage.get_run_context(run_id)
+            if context_data:
+                step_ctx = context_class.from_dict(context_data)
+                step_context_token = _set_step_context_internal(step_ctx)
 
     try:
         # Note: Event replay is handled by LocalContext in its constructor
@@ -290,5 +328,15 @@ async def execute_workflow_with_context(
         raise
 
     finally:
+        # Clear step context if it was set
+        if step_context_token is not None:
+            from pyworkflow.context.step_context import _reset_step_context
+
+            _reset_step_context(step_context_token)
+        if step_context_class_token is not None:
+            from pyworkflow.context.step_context import _reset_step_context_class
+
+            _reset_step_context_class(step_context_class_token)
+
         # Clear context using new API
         reset_context(token)

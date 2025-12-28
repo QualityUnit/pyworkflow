@@ -93,6 +93,9 @@ class EventReplayer:
         elif event.type == EventType.CANCELLATION_REQUESTED:
             await self._apply_cancellation_requested(ctx, event)
 
+        elif event.type == EventType.CONTEXT_UPDATED:
+            await self._apply_context_updated(ctx, event)
+
         # Other event types don't affect replay state
         # (workflow_started, step_started, step_failed, etc. are informational)
 
@@ -254,6 +257,42 @@ class EventReplayer:
             reason=reason,
             requested_by=requested_by,
         )
+
+    async def _apply_context_updated(self, ctx: LocalContext, event: Event) -> None:
+        """
+        Apply context_updated event - restore step context.
+
+        During replay, this restores the step context to its state at the time
+        the event was recorded. This ensures deterministic replay.
+        """
+        from pyworkflow.context.step_context import (
+            _set_step_context_internal,
+            get_step_context_class,
+        )
+
+        context_data = event.data.get("context", {})
+
+        if context_data:
+            # Get the registered context class
+            context_class = get_step_context_class()
+            if context_class is not None:
+                try:
+                    step_ctx = context_class.from_dict(context_data)
+                    _set_step_context_internal(step_ctx)
+                    logger.debug(
+                        "Restored step context from replay",
+                        run_id=ctx.run_id,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to restore step context: {e}",
+                        run_id=ctx.run_id,
+                    )
+            else:
+                logger.debug(
+                    "No context class registered, skipping context restoration",
+                    run_id=ctx.run_id,
+                )
 
 
 # Singleton instance

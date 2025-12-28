@@ -97,8 +97,8 @@ class LocalContext(WorkflowContext):
         self._child_results: dict[str, dict[str, Any]] = {}
         self._pending_children: dict[str, str] = {}  # child_id -> child_run_id
 
-        # Celery runtime state (for distributed step dispatch)
-        self._in_celery_runtime: bool = False
+        # Runtime environment (e.g., "celery", "temporal", None for local)
+        self._runtime: str | None = None
         self._storage_config: dict[str, Any] | None = None
 
         # Step failure tracking (for handling failures during replay)
@@ -232,19 +232,22 @@ class LocalContext(WorkflowContext):
         self._is_replaying = value
 
     @property
-    def in_celery_runtime(self) -> bool:
+    def runtime(self) -> str | None:
         """
-        Check if running in Celery worker context.
+        Get the runtime environment slug.
 
-        When True, steps will be dispatched to the Celery step queue
-        instead of executing inline.
+        Returns the runtime identifier (e.g., "celery", "temporal") or None
+        for local/inline execution. Used to determine step dispatch behavior.
+
+        Returns:
+            Runtime slug string or None for local execution
         """
-        return self._in_celery_runtime
+        return self._runtime
 
     @property
     def storage_config(self) -> dict[str, Any] | None:
         """
-        Get storage configuration for Celery task dispatch.
+        Get storage configuration for distributed workers.
 
         This is passed to step workers so they can connect to the same storage.
         """

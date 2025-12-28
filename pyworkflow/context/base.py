@@ -282,9 +282,17 @@ class WorkflowContext(ABC):
         return None
 
     @property
-    def in_celery_runtime(self) -> bool:
-        """Check if running in Celery runtime (enables distributed step dispatch)."""
-        return False  # Default: not in Celery
+    def runtime(self) -> str | None:
+        """
+        Get the runtime environment slug.
+
+        Returns the runtime identifier (e.g., "celery", "temporal") or None
+        for local/inline execution. Used to determine step dispatch behavior.
+
+        Returns:
+            Runtime slug string or None for local execution
+        """
+        return None  # Default: local/inline execution
 
     @property
     def storage_config(self) -> dict[str, Any] | None:

@@ -109,6 +109,24 @@ class InMemoryStorageBackend(StorageBackend):
                 run.recovery_attempts = recovery_attempts
                 run.updated_at = datetime.now(UTC)
 
+    async def update_run_context(
+        self,
+        run_id: str,
+        context: dict,
+    ) -> None:
+        """Update the step context for a workflow run."""
+        with self._lock:
+            run = self._runs.get(run_id)
+            if run:
+                run.context = context
+                run.updated_at = datetime.now(UTC)
+
+    async def get_run_context(self, run_id: str) -> dict:
+        """Get the current step context for a workflow run."""
+        with self._lock:
+            run = self._runs.get(run_id)
+            return run.context if run else {}
+
     async def list_runs(
         self,
         query: str | None = None,

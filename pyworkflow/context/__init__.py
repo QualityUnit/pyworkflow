@@ -41,6 +41,13 @@ from pyworkflow.context.base import (
 )
 from pyworkflow.context.local import LocalContext
 from pyworkflow.context.mock import MockContext
+from pyworkflow.context.step_context import (
+    StepContext,
+    get_step_context,
+    has_step_context,
+    set_step_context,
+    get_step_context_class,
+)
 
 __all__ = [
     # Base context and helpers
@@ -49,6 +56,12 @@ __all__ = [
     "has_context",
     "set_context",
     "reset_context",
+    # Step context for distributed execution
+    "StepContext",
+    "get_step_context",
+    "has_step_context",
+    "set_step_context",
+    "get_step_context_class",
     # Context implementations
     "LocalContext",
     "MockContext",

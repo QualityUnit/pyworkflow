@@ -44,11 +44,15 @@ from pyworkflow.config import (
 from pyworkflow.context import (
     LocalContext,
     MockContext,
+    StepContext,
     WorkflowContext,
     get_context,
+    get_step_context,
     has_context,
+    has_step_context,
     reset_context,
     set_context,
+    set_step_context,
 )
 
 # Exceptions
@@ -224,6 +228,11 @@ __all__ = [
     "has_context",
     "set_context",
     "reset_context",
+    # Step context for distributed execution
+    "StepContext",
+    "get_step_context",
+    "has_step_context",
+    "set_step_context",
     # Registry
     "list_workflows",
     "get_workflow",

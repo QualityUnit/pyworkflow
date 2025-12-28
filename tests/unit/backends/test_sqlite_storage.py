@@ -159,7 +159,7 @@ class TestRowConversion:
         assert run.workflow_name == "test_workflow"
         assert run.status == RunStatus.RUNNING
         assert run.idempotency_key == "idem_123"
-        assert run.metadata == {"foo": "bar"}
+        assert run.context == {"foo": "bar"}
         assert run.recover_on_worker_loss is True
 
     def test_row_to_event(self):

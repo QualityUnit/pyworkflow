@@ -45,6 +45,9 @@ class EventType(Enum):
     # Cancellation events
     CANCELLATION_REQUESTED = "cancellation.requested"
 
+    # Context events
+    CONTEXT_UPDATED = "context.updated"
+
     # Child workflow events
     CHILD_WORKFLOW_STARTED = "child_workflow.started"
     CHILD_WORKFLOW_COMPLETED = "child_workflow.completed"
@@ -476,6 +479,33 @@ def create_step_cancelled_event(
             "step_name": step_name,
             "reason": reason,
             "cancelled_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_context_updated_event(
+    run_id: str,
+    context_data: dict[str, Any],
+) -> Event:
+    """
+    Create a context updated event.
+
+    This event is recorded when set_step_context() is called in workflow code.
+    It captures the full context state for deterministic replay.
+
+    Args:
+        run_id: The workflow run ID
+        context_data: The serialized context data (from StepContext.to_dict())
+
+    Returns:
+        Event: The context updated event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.CONTEXT_UPDATED,
+        data={
+            "context": context_data,
+            "updated_at": datetime.now(UTC).isoformat(),
         },
     )
 

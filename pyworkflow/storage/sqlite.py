@@ -264,7 +264,7 @@ class SQLiteStorageBackend(StorageBackend):
                 run.error,
                 run.idempotency_key,
                 run.max_duration,
-                json.dumps(run.metadata),
+                json.dumps(run.context),
                 run.recovery_attempts,
                 run.max_recovery_attempts,
                 1 if run.recover_on_worker_loss else 0,
@@ -356,6 +356,29 @@ class SQLiteStorageBackend(StorageBackend):
             (recovery_attempts, datetime.now(UTC).isoformat(), run_id),
         )
         await db.commit()
+
+    async def update_run_context(
+        self,
+        run_id: str,
+        context: dict,
+    ) -> None:
+        """Update the step context for a workflow run."""
+        db = self._ensure_connected()
+
+        await db.execute(
+            """
+            UPDATE workflow_runs
+            SET metadata = ?, updated_at = ?
+            WHERE run_id = ?
+            """,
+            (json.dumps(context), datetime.now(UTC).isoformat(), run_id),
+        )
+        await db.commit()
+
+    async def get_run_context(self, run_id: str) -> dict:
+        """Get the current step context for a workflow run."""
+        run = await self.get_run(run_id)
+        return run.context if run else {}
 
     async def list_runs(
         self,
@@ -1047,7 +1070,7 @@ class SQLiteStorageBackend(StorageBackend):
             error=row[10],
             idempotency_key=row[11],
             max_duration=row[12],
-            metadata=json.loads(row[13]) if row[13] else {},
+            context=json.loads(row[13]) if row[13] else {},
             recovery_attempts=row[14],
             max_recovery_attempts=row[15],
             recover_on_worker_loss=bool(row[16]),

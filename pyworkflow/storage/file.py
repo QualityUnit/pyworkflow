@@ -190,6 +190,34 @@ class FileStorageBackend(StorageBackend):
 
         await asyncio.to_thread(_update)
 
+    async def update_run_context(
+        self,
+        run_id: str,
+        context: dict,
+    ) -> None:
+        """Update the step context for a workflow run."""
+        run_file = self.runs_dir / f"{run_id}.json"
+
+        if not run_file.exists():
+            raise ValueError(f"Workflow run {run_id} not found")
+
+        lock_file = self.locks_dir / f"{run_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _update() -> None:
+            with lock:
+                data = json.loads(run_file.read_text())
+                data["context"] = context
+                data["updated_at"] = datetime.now(UTC).isoformat()
+                run_file.write_text(json.dumps(data, indent=2))
+
+        await asyncio.to_thread(_update)
+
+    async def get_run_context(self, run_id: str) -> dict:
+        """Get the current step context for a workflow run."""
+        run = await self.get_run(run_id)
+        return run.context if run else {}
+
     async def list_runs(
         self,
         query: str | None = None,

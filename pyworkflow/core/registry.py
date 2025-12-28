@@ -22,6 +22,7 @@ class WorkflowMetadata:
     max_duration: str | None = None
     tags: list[str] | None = None
     description: str | None = None  # Docstring from the workflow function
+    context_class: type | None = None  # StepContext subclass for step context access
 
     def __post_init__(self) -> None:
         if self.tags is None:
@@ -70,6 +71,7 @@ class WorkflowRegistry:
         original_func: Callable[..., Any],
         max_duration: str | None = None,
         tags: list[str] | None = None,
+        context_class: type | None = None,
     ) -> None:
         """
         Register a workflow.
@@ -80,6 +82,7 @@ class WorkflowRegistry:
             original_func: Original unwrapped function
             max_duration: Optional maximum duration
             tags: Optional list of tags (max 3)
+            context_class: Optional StepContext subclass for step context access
         """
         if name in self._workflows:
             existing = self._workflows[name]
@@ -96,6 +99,7 @@ class WorkflowRegistry:
             original_func=original_func,
             max_duration=max_duration,
             tags=tags or [],
+            context_class=context_class,
         )
 
         self._workflows[name] = workflow_meta
@@ -250,9 +254,10 @@ def register_workflow(
     original_func: Callable[..., Any],
     max_duration: str | None = None,
     tags: list[str] | None = None,
+    context_class: type | None = None,
 ) -> None:
     """Register a workflow in the global registry."""
-    _registry.register_workflow(name, func, original_func, max_duration, tags)
+    _registry.register_workflow(name, func, original_func, max_duration, tags, context_class)
 
 
 def get_workflow(name: str) -> WorkflowMetadata | None:

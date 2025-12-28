@@ -605,7 +605,7 @@ async def _execute_child_workflow_on_worker(
             storage=storage,
             durable=True,
             event_log=None,  # Fresh execution
-            in_celery_runtime=True,
+            runtime="celery",
             storage_config=storage_config,
         )
 
@@ -956,7 +956,7 @@ async def _recover_workflow_on_worker(
             args=args,
             kwargs=kwargs,
             event_log=events,
-            in_celery_runtime=True,
+            runtime="celery",
             storage_config=storage_config,
         )
 
@@ -1221,7 +1221,7 @@ async def _start_workflow_on_worker(
             storage=storage,
             args=args,
             kwargs=kwargs,
-            in_celery_runtime=True,
+            runtime="celery",
             storage_config=storage_config,
         )
 
@@ -1627,7 +1627,7 @@ async def _resume_workflow_on_worker(
             kwargs=kwargs,
             event_log=events,
             cancellation_requested=cancellation_requested,
-            in_celery_runtime=True,
+            runtime="celery",
             storage_config=storage_config,
         )
 

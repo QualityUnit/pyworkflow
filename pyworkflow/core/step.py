@@ -149,10 +149,10 @@ def step(
                 )
                 return ctx.get_step_result(step_id)
 
-            # ========== Distributed Step Dispatch (Celery Runtime) ==========
-            # When running in Celery, dispatch steps to step workers instead of
-            # executing inline. This enables true distributed execution.
-            if ctx.in_celery_runtime:
+            # ========== Distributed Step Dispatch ==========
+            # When running in a distributed runtime (e.g., Celery), dispatch steps
+            # to step workers instead of executing inline.
+            if ctx.runtime == "celery":
                 return await _dispatch_step_to_celery(
                     ctx=ctx,
                     func=func,

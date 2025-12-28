@@ -601,9 +601,7 @@ async def _dispatch_step_to_celery(
         if has_step_context():
             step_ctx = get_step_context()
             context_data = step_ctx.to_dict()
-            context_class_name = (
-                f"{step_ctx.__class__.__module__}.{step_ctx.__class__.__name__}"
-            )
+            context_class_name = f"{step_ctx.__class__.__module__}.{step_ctx.__class__.__name__}"
     except Exception:
         pass  # Step context not available
 

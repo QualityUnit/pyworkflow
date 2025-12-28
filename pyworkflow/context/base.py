@@ -281,6 +281,24 @@ class WorkflowContext(ABC):
         """Get the storage backend."""
         return None
 
+    @property
+    def in_celery_runtime(self) -> bool:
+        """Check if running in Celery runtime (enables distributed step dispatch)."""
+        return False  # Default: not in Celery
+
+    @property
+    def storage_config(self) -> dict[str, Any] | None:
+        """Get storage configuration for distributed workers."""
+        return None
+
+    def has_step_failed(self, step_id: str) -> bool:
+        """Check if a step has a recorded failure."""
+        return False  # Default: no failures
+
+    def get_step_failure(self, step_id: str) -> dict[str, Any] | None:
+        """Get failure info for a step."""
+        return None  # Default: no failure info
+
     def should_execute_step(self, step_id: str) -> bool:
         """Check if step should be executed (not already completed)."""
         return True  # Default: always execute

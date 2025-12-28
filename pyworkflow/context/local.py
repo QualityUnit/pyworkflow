@@ -97,6 +97,13 @@ class LocalContext(WorkflowContext):
         self._child_results: dict[str, dict[str, Any]] = {}
         self._pending_children: dict[str, str] = {}  # child_id -> child_run_id
 
+        # Celery runtime state (for distributed step dispatch)
+        self._in_celery_runtime: bool = False
+        self._storage_config: dict[str, Any] | None = None
+
+        # Step failure tracking (for handling failures during replay)
+        self._step_failures: dict[str, dict[str, Any]] = {}
+
         # Replay state if resuming
         if event_log:
             self._is_replaying = True
@@ -133,6 +140,22 @@ class LocalContext(WorkflowContext):
                     "retry_delay": event.data.get("retry_strategy", "exponential"),
                     "last_error": event.data.get("error", ""),
                 }
+
+            elif event.type == EventType.STEP_FAILED:
+                # Track step failures for distributed step dispatch
+                # If a step failed (not retrying), record it for replay detection
+                step_id = event.data.get("step_id")
+                is_retryable = event.data.get("is_retryable", True)
+                # Only track as a final failure if not retryable or if this is
+                # the last failure before a STEP_COMPLETED event
+                # For now, track all failures - the step decorator will check
+                # if there's also a STEP_COMPLETED event
+                if step_id and not is_retryable:
+                    self._step_failures[step_id] = {
+                        "error": event.data.get("error", "Unknown error"),
+                        "error_type": event.data.get("error_type", "Exception"),
+                        "is_retryable": is_retryable,
+                    }
 
             elif event.type == EventType.CANCELLATION_REQUESTED:
                 self._cancellation_requested = True
@@ -208,6 +231,25 @@ class LocalContext(WorkflowContext):
         """Set replay mode."""
         self._is_replaying = value
 
+    @property
+    def in_celery_runtime(self) -> bool:
+        """
+        Check if running in Celery worker context.
+
+        When True, steps will be dispatched to the Celery step queue
+        instead of executing inline.
+        """
+        return self._in_celery_runtime
+
+    @property
+    def storage_config(self) -> dict[str, Any] | None:
+        """
+        Get storage configuration for Celery task dispatch.
+
+        This is passed to step workers so they can connect to the same storage.
+        """
+        return self._storage_config
+
     # =========================================================================
     # Step result caching (for @step decorator compatibility)
     # =========================================================================
@@ -254,6 +296,41 @@ class LocalContext(WorkflowContext):
     def clear_retry_state(self, step_id: str) -> None:
         """Clear retry state for a step."""
         self._retry_states.pop(step_id, None)
+
+    # =========================================================================
+    # Step failure tracking (for distributed step dispatch)
+    # =========================================================================
+
+    def has_step_failed(self, step_id: str) -> bool:
+        """
+        Check if a step has a recorded failure.
+
+        Used during replay to detect steps that failed on a remote worker.
+        """
+        return step_id in self._step_failures
+
+    def get_step_failure(self, step_id: str) -> dict[str, Any] | None:
+        """
+        Get step failure info.
+
+        Returns:
+            Dict with 'error', 'error_type', 'is_retryable' or None
+        """
+        return self._step_failures.get(step_id)
+
+    def record_step_failure(
+        self,
+        step_id: str,
+        error: str,
+        error_type: str,
+        is_retryable: bool,
+    ) -> None:
+        """Record a step failure for replay detection."""
+        self._step_failures[step_id] = {
+            "error": error,
+            "error_type": error_type,
+            "is_retryable": is_retryable,
+        }
 
     # =========================================================================
     # Sleep state management (for @step decorator and EventReplayer compatibility)

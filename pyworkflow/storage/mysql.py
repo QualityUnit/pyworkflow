@@ -295,9 +295,7 @@ class MySQLStorageBackend(StorageBackend):
         pool = self._ensure_connected()
 
         async with pool.acquire() as conn, conn.cursor(aiomysql.DictCursor) as cur:
-            await cur.execute(
-                "SELECT * FROM workflow_runs WHERE idempotency_key = %s", (key,)
-            )
+            await cur.execute("SELECT * FROM workflow_runs WHERE idempotency_key = %s", (key,))
             row = await cur.fetchone()
 
         if not row:
@@ -773,9 +771,7 @@ class MySQLStorageBackend(StorageBackend):
         pool = self._ensure_connected()
 
         async with pool.acquire() as conn, conn.cursor() as cur:
-            await cur.execute(
-                "SELECT 1 FROM cancellation_flags WHERE run_id = %s", (run_id,)
-            )
+            await cur.execute("SELECT 1 FROM cancellation_flags WHERE run_id = %s", (run_id,))
             row = await cur.fetchone()
 
         return row is not None
@@ -933,9 +929,7 @@ class MySQLStorageBackend(StorageBackend):
         pool = self._ensure_connected()
 
         async with pool.acquire() as conn, conn.cursor(aiomysql.DictCursor) as cur:
-            await cur.execute(
-                "SELECT * FROM schedules WHERE schedule_id = %s", (schedule_id,)
-            )
+            await cur.execute("SELECT * FROM schedules WHERE schedule_id = %s", (schedule_id,))
             row = await cur.fetchone()
 
         if not row:

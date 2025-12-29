@@ -90,7 +90,8 @@ def _flatten_yaml_config(nested_config: dict) -> dict:
 @click.option(
     "--storage",
     type=click.Choice(
-        ["file", "memory", "sqlite", "postgres", "mysql", "dynamodb", "cassandra"], case_sensitive=False
+        ["file", "memory", "sqlite", "postgres", "mysql", "dynamodb", "cassandra"],
+        case_sensitive=False,
     ),
     help="Storage backend type",
 )
@@ -801,8 +802,8 @@ def _setup_docker_infrastructure(
 
     # Add MySQL health check if using mysql storage
     if storage_type == "mysql":
-        mysql_port = int(config_data.get("mysql_port", "3306"))
-        health_checks["MySQL"] = {"type": "tcp", "host": "localhost", "port": mysql_port}
+        mysql_port_num = int(config_data.get("mysql_port", "3306"))
+        health_checks["MySQL"] = {"type": "tcp", "host": "localhost", "port": mysql_port_num}
 
     # Only check dashboard health if it was started
     if dashboard_available:

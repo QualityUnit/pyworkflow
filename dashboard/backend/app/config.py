@@ -9,10 +9,6 @@ class Settings(BaseSettings):
     # PyWorkflow configuration
     pyworkflow_config_path: str | None = None  # Path to pyworkflow.config.yaml
 
-    # Storage configuration (fallback if pyworkflow config not set)
-    storage_type: str = "file"
-    storage_path: str = "./pyworkflow_data"
-
     # Server configuration
     host: str = "0.0.0.0"
     port: int = 8585

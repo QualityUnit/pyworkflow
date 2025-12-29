@@ -5,8 +5,9 @@ Provides global configuration for runtime, storage, and default settings.
 
 Configuration is loaded in this priority order:
 1. Values set via pyworkflow.configure() (highest priority)
-2. Values from pyworkflow.config.yaml in current directory
-3. Default values
+2. Environment variables (PYWORKFLOW_*)
+3. Values from pyworkflow.config.yaml in current directory
+4. Default values
 
 Usage:
     >>> import pyworkflow
@@ -15,8 +16,26 @@ Usage:
     ...     default_durable=False,
     ...     storage=InMemoryStorageBackend(),
     ... )
+
+Environment Variables:
+    PYWORKFLOW_STORAGE_TYPE: Storage backend type (file, memory, sqlite, postgres, mysql)
+    PYWORKFLOW_STORAGE_PATH: Path for file/sqlite backends
+    PYWORKFLOW_POSTGRES_HOST: PostgreSQL host
+    PYWORKFLOW_POSTGRES_PORT: PostgreSQL port
+    PYWORKFLOW_POSTGRES_USER: PostgreSQL user
+    PYWORKFLOW_POSTGRES_PASSWORD: PostgreSQL password
+    PYWORKFLOW_POSTGRES_DATABASE: PostgreSQL database
+    PYWORKFLOW_MYSQL_HOST: MySQL host
+    PYWORKFLOW_MYSQL_PORT: MySQL port
+    PYWORKFLOW_MYSQL_USER: MySQL user
+    PYWORKFLOW_MYSQL_PASSWORD: MySQL password
+    PYWORKFLOW_MYSQL_DATABASE: MySQL database
+    PYWORKFLOW_CELERY_BROKER: Celery broker URL
+    PYWORKFLOW_CELERY_RESULT_BACKEND: Celery result backend URL
+    PYWORKFLOW_RUNTIME: Default runtime (local, celery)
 """
 
+import os
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +43,54 @@ from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from pyworkflow.storage.base import StorageBackend
+
+
+def _load_env_storage_config() -> dict[str, Any] | None:
+    """
+    Load storage configuration from environment variables.
+
+    Returns:
+        Storage configuration dict if PYWORKFLOW_STORAGE_TYPE is set, None otherwise
+    """
+    storage_type = os.getenv("PYWORKFLOW_STORAGE_TYPE") or os.getenv("PYWORKFLOW_STORAGE_BACKEND")
+    if not storage_type:
+        return None
+
+    storage_type = storage_type.lower()
+
+    if storage_type == "postgres":
+        return {
+            "type": "postgres",
+            "host": os.getenv("PYWORKFLOW_POSTGRES_HOST", "localhost"),
+            "port": int(os.getenv("PYWORKFLOW_POSTGRES_PORT", "5432")),
+            "user": os.getenv("PYWORKFLOW_POSTGRES_USER", "pyworkflow"),
+            "password": os.getenv("PYWORKFLOW_POSTGRES_PASSWORD", ""),
+            "database": os.getenv("PYWORKFLOW_POSTGRES_DATABASE", "pyworkflow"),
+        }
+    elif storage_type == "mysql":
+        return {
+            "type": "mysql",
+            "host": os.getenv("PYWORKFLOW_MYSQL_HOST", "localhost"),
+            "port": int(os.getenv("PYWORKFLOW_MYSQL_PORT", "3306")),
+            "user": os.getenv("PYWORKFLOW_MYSQL_USER", "pyworkflow"),
+            "password": os.getenv("PYWORKFLOW_MYSQL_PASSWORD", ""),
+            "database": os.getenv("PYWORKFLOW_MYSQL_DATABASE", "pyworkflow"),
+        }
+    elif storage_type == "sqlite":
+        return {
+            "type": "sqlite",
+            "base_path": os.getenv("PYWORKFLOW_STORAGE_PATH", "./pyworkflow_data/pyworkflow.db"),
+        }
+    elif storage_type == "memory":
+        return {"type": "memory"}
+    elif storage_type == "file":
+        return {
+            "type": "file",
+            "base_path": os.getenv("PYWORKFLOW_STORAGE_PATH", "./pyworkflow_data"),
+        }
+    else:
+        # Unknown type, return as-is and let config_to_storage handle it
+        return {"type": storage_type}
 
 
 def _load_yaml_config() -> dict[str, Any]:
@@ -101,23 +168,33 @@ class PyWorkflowConfig:
     event_warning_interval: int = 100  # Log warning every N events after soft limit
 
 
-def _config_from_yaml() -> PyWorkflowConfig:
-    """Create a PyWorkflowConfig from YAML file settings."""
+def _config_from_env_and_yaml() -> PyWorkflowConfig:
+    """
+    Create a PyWorkflowConfig from environment variables and YAML file.
+
+    Priority:
+    1. Environment variables (PYWORKFLOW_*)
+    2. YAML config file (pyworkflow.config.yaml)
+    3. Defaults
+    """
     yaml_config = _load_yaml_config()
+    env_storage_config = _load_env_storage_config()
 
-    if not yaml_config:
-        return PyWorkflowConfig()
-
-    # Map YAML keys to config attributes
-    runtime = yaml_config.get("runtime", "local")
+    # Runtime: env var > yaml > default
+    runtime = os.getenv("PYWORKFLOW_RUNTIME") or yaml_config.get("runtime", "local")
     durable = runtime == "celery"  # Celery runtime defaults to durable
 
-    # Create storage from config
-    storage = _create_storage_from_config(yaml_config.get("storage", {}))
+    # Storage: env var > yaml > None
+    if env_storage_config:
+        storage = _create_storage_from_config(env_storage_config)
+    elif yaml_config.get("storage"):
+        storage = _create_storage_from_config(yaml_config.get("storage", {}))
+    else:
+        storage = None
 
-    # Get celery broker
+    # Celery broker: env var > yaml > None
     celery_config = yaml_config.get("celery", {})
-    celery_broker = celery_config.get("broker")
+    celery_broker = os.getenv("PYWORKFLOW_CELERY_BROKER") or celery_config.get("broker")
 
     return PyWorkflowConfig(
         default_runtime=runtime,
@@ -288,16 +365,16 @@ def get_config() -> PyWorkflowConfig:
     """
     Get the current configuration.
 
-    If not yet configured, loads from pyworkflow.config.yaml if present,
-    otherwise creates default configuration.
+    If not yet configured, loads from environment variables and
+    pyworkflow.config.yaml (env vars take priority).
 
     Returns:
         Current PyWorkflowConfig instance
     """
     global _config, _config_loaded_from_yaml
     if _config is None:
-        # Try to load from YAML config file first
-        _config = _config_from_yaml()
+        # Load from env vars and YAML config file
+        _config = _config_from_env_and_yaml()
         _config_loaded_from_yaml = True
     return _config
 

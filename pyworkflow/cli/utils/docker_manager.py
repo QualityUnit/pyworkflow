@@ -195,6 +195,131 @@ volumes:
     return template
 
 
+def generate_cassandra_docker_compose_content(
+    cassandra_host: str = "cassandra",
+    cassandra_port: int = 9042,
+    cassandra_keyspace: str = "pyworkflow",
+    cassandra_user: str | None = None,
+    cassandra_password: str | None = None,
+) -> str:
+    """
+    Generate docker-compose.yml content for Cassandra-based PyWorkflow services.
+
+    Args:
+        cassandra_host: Cassandra host (container name for docker networking)
+        cassandra_port: Cassandra CQL native transport port
+        cassandra_keyspace: Cassandra keyspace name
+        cassandra_user: Optional Cassandra user (for authentication)
+        cassandra_password: Optional Cassandra password (for authentication)
+
+    Returns:
+        docker-compose.yml content as string
+
+    Example:
+        >>> compose_content = generate_cassandra_docker_compose_content()
+    """
+    # Build environment variables for dashboard
+    dashboard_env = f"""      - DASHBOARD_STORAGE_TYPE=cassandra
+      - DASHBOARD_CASSANDRA_HOST={cassandra_host}
+      - DASHBOARD_CASSANDRA_PORT=9042
+      - DASHBOARD_CASSANDRA_KEYSPACE={cassandra_keyspace}"""
+
+    if cassandra_user and cassandra_password:
+        dashboard_env += f"""
+      - DASHBOARD_CASSANDRA_USER={cassandra_user}
+      - DASHBOARD_CASSANDRA_PASSWORD={cassandra_password}"""
+
+    # Cassandra environment for authentication
+    cassandra_env = ""
+    if cassandra_user and cassandra_password:
+        cassandra_env = f"""
+      - CASSANDRA_AUTHENTICATOR=PasswordAuthenticator
+      - CASSANDRA_AUTHORIZER=CassandraAuthorizer
+      - CASSANDRA_USER={cassandra_user}
+      - CASSANDRA_PASSWORD={cassandra_password}"""
+
+    template = f"""services:
+  cassandra:
+    image: cassandra:4.1
+    container_name: pyworkflow-cassandra
+    ports:
+      - "{cassandra_port}:9042"
+    environment:
+      - CASSANDRA_CLUSTER_NAME=pyworkflow-cluster
+      - CASSANDRA_DC=dc1
+      - CASSANDRA_RACK=rack1
+      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
+      - MAX_HEAP_SIZE=512M
+      - HEAP_NEWSIZE=128M{cassandra_env}
+    volumes:
+      - cassandra_data:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'describe cluster' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: pyworkflow-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  dashboard-backend:
+    image: yashabro/pyworkflow-dashboard-backend:latest
+    container_name: pyworkflow-dashboard-backend
+    working_dir: /app/project
+    ports:
+      - "8585:8585"
+    environment:
+      - DASHBOARD_PYWORKFLOW_CONFIG_PATH=/app/project/pyworkflow.config.yaml
+{dashboard_env}
+      - DASHBOARD_HOST=0.0.0.0
+      - DASHBOARD_PORT=8585
+      - DASHBOARD_CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
+      - PYWORKFLOW_CELERY_BROKER=redis://redis:6379/0
+      - PYWORKFLOW_CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - PYTHONPATH=/app/project
+    volumes:
+      - .:/app/project:ro
+    depends_on:
+      cassandra:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  dashboard-frontend:
+    image: yashabro/pyworkflow-dashboard-frontend:latest
+    container_name: pyworkflow-dashboard-frontend
+    ports:
+      - "5173:80"
+    environment:
+      - VITE_API_URL=http://localhost:8585
+    depends_on:
+      - dashboard-backend
+    restart: unless-stopped
+
+volumes:
+  cassandra_data:
+    driver: local
+  redis_data:
+    driver: local
+"""
+
+    return template
+
+
 def generate_postgres_docker_compose_content(
     postgres_host: str = "postgres",
     postgres_port: int = 5432,

@@ -35,6 +35,12 @@ try:
 except ImportError:
     DynamoDBStorageBackend = None  # type: ignore
 
+# Cassandra backend - optional import (requires cassandra-driver)
+try:
+    from pyworkflow.storage.cassandra import CassandraStorageBackend
+except ImportError:
+    CassandraStorageBackend = None  # type: ignore
+
 __all__ = [
     "StorageBackend",
     "FileStorageBackend",
@@ -42,6 +48,7 @@ __all__ = [
     "SQLiteStorageBackend",
     "PostgresStorageBackend",
     "DynamoDBStorageBackend",
+    "CassandraStorageBackend",
     "WorkflowRun",
     "StepExecution",
     "Hook",

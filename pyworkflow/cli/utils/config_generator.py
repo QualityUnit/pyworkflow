@@ -24,6 +24,11 @@ def generate_yaml_config(
     postgres_user: str | None = None,
     postgres_password: str | None = None,
     postgres_database: str | None = None,
+    mysql_host: str | None = None,
+    mysql_port: str | None = None,
+    mysql_user: str | None = None,
+    mysql_password: str | None = None,
+    mysql_database: str | None = None,
     dynamodb_table_name: str | None = None,
     dynamodb_region: str | None = None,
     dynamodb_endpoint_url: str | None = None,
@@ -95,6 +100,17 @@ def generate_yaml_config(
             storage_config["password"] = postgres_password
         if postgres_database:
             storage_config["database"] = postgres_database
+    elif storage_type == "mysql":
+        if mysql_host:
+            storage_config["host"] = mysql_host
+        if mysql_port:
+            storage_config["port"] = int(mysql_port)
+        if mysql_user:
+            storage_config["user"] = mysql_user
+        if mysql_password:
+            storage_config["password"] = mysql_password
+        if mysql_database:
+            storage_config["database"] = mysql_database
     elif storage_type == "dynamodb":
         if dynamodb_table_name:
             storage_config["table_name"] = dynamodb_table_name
@@ -280,6 +296,14 @@ def display_config_summary(config: dict[str, Any]) -> list[str]:
         user = storage.get("user", "pyworkflow")
         lines.append(f"  PostgreSQL: {user}@{host}:{port}/{database}")
 
+    # MySQL-specific config
+    if storage_type == "mysql":
+        host = storage.get("host", "localhost")
+        port = storage.get("port", 3306)
+        database = storage.get("database", "pyworkflow")
+        user = storage.get("user", "pyworkflow")
+        lines.append(f"  MySQL: {user}@{host}:{port}/{database}")
+
     # DynamoDB-specific config
     if storage_type == "dynamodb":
         if "table_name" in storage:
@@ -352,12 +376,13 @@ def validate_config(config: dict[str, Any]) -> tuple[bool, list[str]]:
             "sqlite",
             "redis",
             "postgres",
+            "mysql",
             "dynamodb",
             "cassandra",
         ]:
             errors.append(
                 f"Invalid storage type: {storage_type}. "
-                "Must be 'file', 'memory', 'sqlite', 'redis', 'postgres', 'dynamodb' "
+                "Must be 'file', 'memory', 'sqlite', 'redis', 'postgres', 'mysql', 'dynamodb' "
                 "or 'cassandra'"
             )
 

@@ -23,6 +23,7 @@ from pyworkflow.cli.utils.docker_manager import (
     check_service_health,
     generate_cassandra_docker_compose_content,
     generate_docker_compose_content,
+    generate_mysql_docker_compose_content,
     generate_postgres_docker_compose_content,
     run_docker_command,
     write_docker_compose,
@@ -89,7 +90,8 @@ def _flatten_yaml_config(nested_config: dict) -> dict:
 @click.option(
     "--storage",
     type=click.Choice(
-        ["file", "memory", "sqlite", "postgres", "dynamodb", "cassandra"], case_sensitive=False
+        ["file", "memory", "sqlite", "postgres", "mysql", "dynamodb", "cassandra"],
+        case_sensitive=False,
     ),
     help="Storage backend type",
 )
@@ -261,6 +263,11 @@ def _run_setup(
         postgres_user=config_data.get("postgres_user"),
         postgres_password=config_data.get("postgres_password"),
         postgres_database=config_data.get("postgres_database"),
+        mysql_host=config_data.get("mysql_host"),
+        mysql_port=config_data.get("mysql_port"),
+        mysql_user=config_data.get("mysql_user"),
+        mysql_password=config_data.get("mysql_password"),
+        mysql_database=config_data.get("mysql_database"),
         dynamodb_table_name=config_data.get("dynamodb_table_name"),
         dynamodb_region=config_data.get("dynamodb_region"),
         dynamodb_endpoint_url=config_data.get("dynamodb_endpoint_url"),
@@ -343,6 +350,21 @@ def _check_cassandra_available() -> bool:
         return False
 
 
+def _check_mysql_available() -> bool:
+    """
+    Check if aiomysql is installed for MySQL support.
+
+    Returns:
+        True if aiomysql is available, False otherwise
+    """
+    try:
+        import aiomysql  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def _run_interactive_configuration(
     non_interactive: bool,
     module_override: str | None,
@@ -376,10 +398,11 @@ def _run_interactive_configuration(
     config_data["result_backend"] = "redis://localhost:6379/1"
     print_info("✓ Broker: Redis (will be started via Docker)")
 
-    # Check if SQLite, PostgreSQL and Cassandra are available
+    # Check if SQLite, PostgreSQL, Cassandra and MySQL are available
     sqlite_available = _check_sqlite_available()
     postgres_available = _check_postgres_available()
     cassandra_available = _check_cassandra_available()
+    mysql_available = _check_mysql_available()
 
     # Storage backend
     if storage_override:
@@ -419,6 +442,17 @@ def _run_interactive_configuration(
             print_info("")
             print_info("Or choose a different storage backend: --storage sqlite")
             raise click.Abort()
+        # Validate if mysql was requested but not available
+        mysql_available = _check_mysql_available()
+        if storage_type == "mysql" and not mysql_available:
+            print_error("\nMySQL storage backend is not available!")
+            print_info("\naiomysql package is not installed.")
+            print_info("To fix this, install aiomysql:")
+            print_info("")
+            print_info("  pip install aiomysql")
+            print_info("")
+            print_info("Or choose a different storage backend: --storage sqlite")
+            raise click.Abort()
     elif non_interactive:
         if sqlite_available:
             storage_type = "sqlite"
@@ -452,6 +486,10 @@ def _run_interactive_configuration(
             choices.append(
                 {"name": "Cassandra - Distributed NoSQL database (scalable)", "value": "cassandra"}
             )
+        if mysql_available:
+            choices.append(
+                {"name": "MySQL - Popular open-source relational database", "value": "mysql"}
+            )
         choices.extend(
             [
                 {
@@ -475,6 +513,10 @@ def _run_interactive_configuration(
 
         if not cassandra_available:
             print_info("Note: Cassandra backend available after: pip install cassandra-driver")
+            print_info("")
+
+        if not mysql_available:
+            print_info("Note: MySQL backend available after: pip install aiomysql")
             print_info("")
 
         storage_type = select(
@@ -536,6 +578,38 @@ def _run_interactive_configuration(
                 default="pyworkflow",
             )
             config_data["postgres_password"] = input_text(
+                "Database password:",
+                default="pyworkflow",
+            )
+
+    # MySQL connection (for mysql backend)
+    elif storage_type == "mysql":
+        if non_interactive:
+            # Use default connection settings for non-interactive mode
+            config_data["mysql_host"] = "localhost"
+            config_data["mysql_port"] = "3306"
+            config_data["mysql_user"] = "pyworkflow"
+            config_data["mysql_password"] = "pyworkflow"
+            config_data["mysql_database"] = "pyworkflow"
+        else:
+            print_info("\nConfigure MySQL connection:")
+            config_data["mysql_host"] = input_text(
+                "MySQL host:",
+                default="localhost",
+            )
+            config_data["mysql_port"] = input_text(
+                "MySQL port:",
+                default="3306",
+            )
+            config_data["mysql_database"] = input_text(
+                "Database name:",
+                default="pyworkflow",
+            )
+            config_data["mysql_user"] = input_text(
+                "Database user:",
+                default="pyworkflow",
+            )
+            config_data["mysql_password"] = input_text(
                 "Database password:",
                 default="pyworkflow",
             )
@@ -634,6 +708,14 @@ def _setup_docker_infrastructure(
             cassandra_user=config_data.get("cassandra_user"),
             cassandra_password=config_data.get("cassandra_password"),
         )
+    elif storage_type == "mysql":
+        compose_content = generate_mysql_docker_compose_content(
+            mysql_host="mysql",
+            mysql_port=int(config_data.get("mysql_port", "3306")),
+            mysql_user=config_data.get("mysql_user", "pyworkflow"),
+            mysql_password=config_data.get("mysql_password", "pyworkflow"),
+            mysql_database=config_data.get("mysql_database", "pyworkflow"),
+        )
     else:
         compose_content = generate_docker_compose_content(
             storage_type=storage_type,
@@ -665,12 +747,14 @@ def _setup_docker_infrastructure(
     print_info("\n  Starting services...")
     print_info("")
 
-    # Include postgres/cassandra in services to start if using those storage types
+    # Include postgres/cassandra/mysql in services to start if using those storage types
     services_to_start = ["redis"]
     if storage_type == "postgres":
         services_to_start.insert(0, "postgres")
     elif storage_type == "cassandra":
         services_to_start.insert(0, "cassandra")
+    elif storage_type == "mysql":
+        services_to_start.insert(0, "mysql")
     if dashboard_available:
         services_to_start.extend(["dashboard-backend", "dashboard-frontend"])
 
@@ -690,6 +774,9 @@ def _setup_docker_infrastructure(
         elif storage_type == "cassandra":
             cassandra_port = config_data.get("cassandra_port", "9042")
             ports_in_use = f"{cassandra_port}, {ports_in_use}"
+        elif storage_type == "mysql":
+            mysql_port = config_data.get("mysql_port", "3306")
+            ports_in_use = f"{mysql_port}, {ports_in_use}"
         print_info(f"    • Check if ports {ports_in_use} are already in use")
         print_info("    • View logs: docker compose logs")
         print_info("    • Try: docker compose down && docker compose up -d")
@@ -712,6 +799,11 @@ def _setup_docker_infrastructure(
     if storage_type == "cassandra":
         cass_port = int(config_data.get("cassandra_port", "9042"))
         health_checks["Cassandra"] = {"type": "tcp", "host": "localhost", "port": cass_port}
+
+    # Add MySQL health check if using mysql storage
+    if storage_type == "mysql":
+        mysql_port_num = int(config_data.get("mysql_port", "3306"))
+        health_checks["MySQL"] = {"type": "tcp", "host": "localhost", "port": mysql_port_num}
 
     # Only check dashboard health if it was started
     if dashboard_available:
@@ -776,6 +868,9 @@ def _show_next_steps(
         elif config_data.get("storage_type") == "cassandra":
             cassandra_port = config_data.get("cassandra_port", "9042")
             print_info(f"  • Cassandra:          localhost:{cassandra_port}")
+        elif config_data.get("storage_type") == "mysql":
+            mysql_port = config_data.get("mysql_port", "3306")
+            print_info(f"  • MySQL:              localhost:{mysql_port}")
         print_info("  • Redis:              redis://localhost:6379")
         if dashboard_available:
             print_info("  • Dashboard:          http://localhost:5173")

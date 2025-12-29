@@ -41,6 +41,12 @@ try:
 except ImportError:
     CassandraStorageBackend = None  # type: ignore
 
+# MySQL backend - optional import (requires aiomysql)
+try:
+    from pyworkflow.storage.mysql import MySQLStorageBackend
+except ImportError:
+    MySQLStorageBackend = None  # type: ignore
+
 __all__ = [
     "StorageBackend",
     "FileStorageBackend",
@@ -49,6 +55,7 @@ __all__ = [
     "PostgresStorageBackend",
     "DynamoDBStorageBackend",
     "CassandraStorageBackend",
+    "MySQLStorageBackend",
     "WorkflowRun",
     "StepExecution",
     "Hook",

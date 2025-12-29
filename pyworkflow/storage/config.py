@@ -73,6 +73,20 @@ def storage_to_config(storage: StorageBackend | None) -> dict[str, Any] | None:
             "region": getattr(storage, "region", "us-east-1"),
             "endpoint_url": getattr(storage, "endpoint_url", None),
         }
+    elif class_name == "CassandraStorageBackend":
+        return {
+            "type": "cassandra",
+            "contact_points": getattr(storage, "contact_points", ["localhost"]),
+            "port": getattr(storage, "port", 9042),
+            "keyspace": getattr(storage, "keyspace", "pyworkflow"),
+            "username": getattr(storage, "username", None),
+            "password": getattr(storage, "password", None),
+            "read_consistency": getattr(storage, "read_consistency", "LOCAL_QUORUM"),
+            "write_consistency": getattr(storage, "write_consistency", "LOCAL_QUORUM"),
+            "replication_strategy": getattr(storage, "replication_strategy", "SimpleStrategy"),
+            "replication_factor": getattr(storage, "replication_factor", 3),
+            "datacenter": getattr(storage, "datacenter", None),
+        }
     else:
         # Unknown backend - return minimal config
         return {"type": "unknown"}
@@ -179,6 +193,28 @@ def config_to_storage(config: dict[str, Any] | None = None) -> StorageBackend:
             table_name=config.get("table_name", "pyworkflow"),
             region=config.get("region", "us-east-1"),
             endpoint_url=config.get("endpoint_url"),
+        )
+
+    elif storage_type == "cassandra":
+        try:
+            from pyworkflow.storage.cassandra import CassandraStorageBackend
+        except ImportError:
+            raise ValueError(
+                "Cassandra storage backend is not available. "
+                "Please install the required dependencies with: pip install 'pyworkflow[cassandra]'"
+            )
+
+        return CassandraStorageBackend(
+            contact_points=config.get("contact_points", ["localhost"]),
+            port=config.get("port", 9042),
+            keyspace=config.get("keyspace", "pyworkflow"),
+            username=config.get("username"),
+            password=config.get("password"),
+            read_consistency=config.get("read_consistency", "LOCAL_QUORUM"),
+            write_consistency=config.get("write_consistency", "LOCAL_QUORUM"),
+            replication_strategy=config.get("replication_strategy", "SimpleStrategy"),
+            replication_factor=config.get("replication_factor", 3),
+            datacenter=config.get("datacenter"),
         )
 
     else:

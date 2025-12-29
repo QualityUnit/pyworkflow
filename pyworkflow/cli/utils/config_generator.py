@@ -27,6 +27,11 @@ def generate_yaml_config(
     dynamodb_table_name: str | None = None,
     dynamodb_region: str | None = None,
     dynamodb_endpoint_url: str | None = None,
+    cassandra_contact_points: list[str] | None = None,
+    cassandra_port: str | None = None,
+    cassandra_keyspace: str | None = None,
+    cassandra_user: str | None = None,
+    cassandra_password: str | None = None,
 ) -> str:
     """
     Generate YAML configuration content.
@@ -34,7 +39,8 @@ def generate_yaml_config(
     Args:
         module: Optional workflow module path (e.g., "myapp.workflows")
         runtime: Runtime type (e.g., "celery", "local")
-        storage_type: Storage backend type (e.g., "sqlite", "file", "memory", "postgres")
+        storage_type: Storage backend type (e.g., "sqlite", "file", "memory", "postgres",
+            "cassandra")
         storage_path: Optional storage path for file/sqlite backends
         broker_url: Celery broker URL
         result_backend: Celery result backend URL
@@ -46,6 +52,11 @@ def generate_yaml_config(
         dynamodb_table_name: Optional DynamoDB table name
         dynamodb_region: Optional AWS region for DynamoDB
         dynamodb_endpoint_url: Optional local DynamoDB endpoint URL
+        cassandra_contact_points: List of Cassandra contact points (for cassandra backend)
+        cassandra_port: Cassandra CQL native transport port (for cassandra backend)
+        cassandra_keyspace: Cassandra keyspace name (for cassandra backend)
+        cassandra_user: Optional Cassandra user (for cassandra backend)
+        cassandra_password: Optional Cassandra password (for cassandra backend)
 
     Returns:
         YAML configuration as string
@@ -91,6 +102,17 @@ def generate_yaml_config(
             storage_config["region"] = dynamodb_region
         if dynamodb_endpoint_url:
             storage_config["endpoint_url"] = dynamodb_endpoint_url
+    elif storage_type == "cassandra":
+        if cassandra_contact_points:
+            storage_config["contact_points"] = cassandra_contact_points
+        if cassandra_port:
+            storage_config["port"] = int(cassandra_port)
+        if cassandra_keyspace:
+            storage_config["keyspace"] = cassandra_keyspace
+        if cassandra_user:
+            storage_config["username"] = cassandra_user
+        if cassandra_password:
+            storage_config["password"] = cassandra_password
     config["storage"] = storage_config
 
     # Celery configuration (only for celery runtime)
@@ -267,6 +289,18 @@ def display_config_summary(config: dict[str, Any]) -> list[str]:
         if "endpoint_url" in storage:
             lines.append(f"  Endpoint URL: {storage['endpoint_url']}")
 
+    # Cassandra-specific config
+    if storage_type == "cassandra":
+        contact_points = storage.get("contact_points", ["localhost"])
+        port = storage.get("port", 9042)
+        keyspace = storage.get("keyspace", "pyworkflow")
+        hosts = (
+            ", ".join(contact_points) if isinstance(contact_points, list) else contact_points
+        )
+        lines.append(f"  Cassandra: {hosts}:{port}/{keyspace}")
+        if "username" in storage:
+            lines.append(f"  Cassandra User: {storage['username']}")
+
     # Celery (if applicable)
     if runtime == "celery" and "celery" in config:
         celery = config["celery"]
@@ -314,10 +348,19 @@ def validate_config(config: dict[str, Any]) -> tuple[bool, list[str]]:
         storage_type = storage.get("type")
         if not storage_type:
             errors.append("Missing storage 'type'")
-        elif storage_type not in ["file", "memory", "sqlite", "redis", "postgres", "dynamodb"]:
+        elif storage_type not in [
+            "file",
+            "memory",
+            "sqlite",
+            "redis",
+            "postgres",
+            "dynamodb",
+            "cassandra",
+        ]:
             errors.append(
                 f"Invalid storage type: {storage_type}. "
-                "Must be 'file', 'memory', 'sqlite', 'redis', 'postgres' or 'dynamodb'"
+                "Must be 'file', 'memory', 'sqlite', 'redis', 'postgres', 'dynamodb' "
+                "or 'cassandra'"
             )
 
     # Check Celery config if using celery runtime

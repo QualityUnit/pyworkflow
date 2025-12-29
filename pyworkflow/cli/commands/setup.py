@@ -21,6 +21,7 @@ from pyworkflow.cli.utils.config_generator import (
 from pyworkflow.cli.utils.docker_manager import (
     check_docker_available,
     check_service_health,
+    generate_cassandra_docker_compose_content,
     generate_docker_compose_content,
     generate_postgres_docker_compose_content,
     run_docker_command,
@@ -87,7 +88,9 @@ def _flatten_yaml_config(nested_config: dict) -> dict:
 )
 @click.option(
     "--storage",
-    type=click.Choice(["file", "memory", "sqlite", "postgres", "dynamodb"], case_sensitive=False),
+    type=click.Choice(
+        ["file", "memory", "sqlite", "postgres", "dynamodb", "cassandra"], case_sensitive=False
+    ),
     help="Storage backend type",
 )
 @click.option(
@@ -239,6 +242,13 @@ def _run_setup(
 
     # 6. Write configuration file
     print_info("\nGenerating configuration...")
+
+    # Parse Cassandra contact points from comma-separated string to list
+    cassandra_contact_points = None
+    if config_data.get("cassandra_contact_points"):
+        contact_points_str = config_data["cassandra_contact_points"]
+        cassandra_contact_points = [cp.strip() for cp in contact_points_str.split(",")]
+
     yaml_content = generate_yaml_config(
         module=config_data.get("module"),
         runtime=config_data["runtime"],
@@ -254,6 +264,11 @@ def _run_setup(
         dynamodb_table_name=config_data.get("dynamodb_table_name"),
         dynamodb_region=config_data.get("dynamodb_region"),
         dynamodb_endpoint_url=config_data.get("dynamodb_endpoint_url"),
+        cassandra_contact_points=cassandra_contact_points,
+        cassandra_port=config_data.get("cassandra_port"),
+        cassandra_keyspace=config_data.get("cassandra_keyspace"),
+        cassandra_user=config_data.get("cassandra_user"),
+        cassandra_password=config_data.get("cassandra_password"),
     )
 
     config_file_path = write_yaml_config(yaml_content, config_path, backup=True)
@@ -313,6 +328,21 @@ def _check_postgres_available() -> bool:
         return False
 
 
+def _check_cassandra_available() -> bool:
+    """
+    Check if cassandra-driver is installed for Cassandra support.
+
+    Returns:
+        True if cassandra-driver is available, False otherwise
+    """
+    try:
+        from cassandra.cluster import Cluster  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def _run_interactive_configuration(
     non_interactive: bool,
     module_override: str | None,
@@ -346,9 +376,10 @@ def _run_interactive_configuration(
     config_data["result_backend"] = "redis://localhost:6379/1"
     print_info("✓ Broker: Redis (will be started via Docker)")
 
-    # Check if SQLite and PostgreSQL are available
+    # Check if SQLite, PostgreSQL and Cassandra are available
     sqlite_available = _check_sqlite_available()
     postgres_available = _check_postgres_available()
+    cassandra_available = _check_cassandra_available()
 
     # Storage backend
     if storage_override:
@@ -375,6 +406,16 @@ def _run_interactive_configuration(
             print_info("To fix this, install asyncpg:")
             print_info("")
             print_info("  pip install asyncpg")
+            print_info("")
+            print_info("Or choose a different storage backend: --storage sqlite")
+            raise click.Abort()
+        # Validate if cassandra was requested but not available
+        if storage_type == "cassandra" and not cassandra_available:
+            print_error("\nCassandra storage backend is not available!")
+            print_info("\ncassandra-driver package is not installed.")
+            print_info("To fix this, install cassandra-driver:")
+            print_info("")
+            print_info("  pip install cassandra-driver")
             print_info("")
             print_info("Or choose a different storage backend: --storage sqlite")
             raise click.Abort()
@@ -407,6 +448,10 @@ def _run_interactive_configuration(
             choices.append(
                 {"name": "PostgreSQL - Scalable production database", "value": "postgres"}
             )
+        if cassandra_available:
+            choices.append(
+                {"name": "Cassandra - Distributed NoSQL database (scalable)", "value": "cassandra"}
+            )
         choices.extend(
             [
                 {
@@ -426,6 +471,10 @@ def _run_interactive_configuration(
 
         if not postgres_available:
             print_info("Note: PostgreSQL backend available after: pip install asyncpg")
+            print_info("")
+
+        if not cassandra_available:
+            print_info("Note: Cassandra backend available after: pip install cassandra-driver")
             print_info("")
 
         storage_type = select(
@@ -517,6 +566,40 @@ def _run_interactive_configuration(
                 )
                 config_data["dynamodb_endpoint_url"] = endpoint
 
+    # Cassandra configuration
+    elif storage_type == "cassandra":
+        if non_interactive:
+            config_data["cassandra_contact_points"] = "localhost"
+            config_data["cassandra_port"] = "9042"
+            config_data["cassandra_keyspace"] = "pyworkflow"
+        else:
+            print_info("\nConfigure Cassandra connection:")
+            contact_points = input_text(
+                "Cassandra contact points (comma-separated):",
+                default="localhost",
+            )
+            config_data["cassandra_contact_points"] = contact_points
+
+            config_data["cassandra_port"] = input_text(
+                "Cassandra port:",
+                default="9042",
+            )
+            config_data["cassandra_keyspace"] = input_text(
+                "Keyspace name:",
+                default="pyworkflow",
+            )
+
+            # Optional authentication
+            if confirm("Use Cassandra authentication?", default=False):
+                config_data["cassandra_user"] = input_text(
+                    "Cassandra user:",
+                    default="cassandra",
+                )
+                config_data["cassandra_password"] = input_text(
+                    "Cassandra password:",
+                    default="cassandra",
+                )
+
     return config_data
 
 
@@ -542,6 +625,14 @@ def _setup_docker_infrastructure(
             postgres_user=config_data.get("postgres_user", "pyworkflow"),
             postgres_password=config_data.get("postgres_password", "pyworkflow"),
             postgres_database=config_data.get("postgres_database", "pyworkflow"),
+        )
+    elif storage_type == "cassandra":
+        compose_content = generate_cassandra_docker_compose_content(
+            cassandra_host="cassandra",
+            cassandra_port=int(config_data.get("cassandra_port", "9042")),
+            cassandra_keyspace=config_data.get("cassandra_keyspace", "pyworkflow"),
+            cassandra_user=config_data.get("cassandra_user"),
+            cassandra_password=config_data.get("cassandra_password"),
         )
     else:
         compose_content = generate_docker_compose_content(
@@ -574,10 +665,12 @@ def _setup_docker_infrastructure(
     print_info("\n  Starting services...")
     print_info("")
 
-    # Include postgres in services to start if using postgres storage
+    # Include postgres/cassandra in services to start if using those storage types
     services_to_start = ["redis"]
     if storage_type == "postgres":
         services_to_start.insert(0, "postgres")
+    elif storage_type == "cassandra":
+        services_to_start.insert(0, "cassandra")
     if dashboard_available:
         services_to_start.extend(["dashboard-backend", "dashboard-frontend"])
 
@@ -594,6 +687,9 @@ def _setup_docker_infrastructure(
         if storage_type == "postgres":
             postgres_port = config_data.get("postgres_port", "5432")
             ports_in_use = f"{postgres_port}, {ports_in_use}"
+        elif storage_type == "cassandra":
+            cassandra_port = config_data.get("cassandra_port", "9042")
+            ports_in_use = f"{cassandra_port}, {ports_in_use}"
         print_info(f"    • Check if ports {ports_in_use} are already in use")
         print_info("    • View logs: docker compose logs")
         print_info("    • Try: docker compose down && docker compose up -d")
@@ -611,6 +707,11 @@ def _setup_docker_infrastructure(
     if storage_type == "postgres":
         pg_port = int(config_data.get("postgres_port", "5432"))
         health_checks["PostgreSQL"] = {"type": "tcp", "host": "localhost", "port": pg_port}
+
+    # Add Cassandra health check if using cassandra storage
+    if storage_type == "cassandra":
+        cass_port = int(config_data.get("cassandra_port", "9042"))
+        health_checks["Cassandra"] = {"type": "tcp", "host": "localhost", "port": cass_port}
 
     # Only check dashboard health if it was started
     if dashboard_available:
@@ -672,6 +773,9 @@ def _show_next_steps(
         if config_data.get("storage_type") == "postgres":
             postgres_port = config_data.get("postgres_port", "5432")
             print_info(f"  • PostgreSQL:         localhost:{postgres_port}")
+        elif config_data.get("storage_type") == "cassandra":
+            cassandra_port = config_data.get("cassandra_port", "9042")
+            print_info(f"  • Cassandra:          localhost:{cassandra_port}")
         print_info("  • Redis:              redis://localhost:6379")
         if dashboard_available:
             print_info("  • Dashboard:          http://localhost:5173")

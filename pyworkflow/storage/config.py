@@ -87,6 +87,18 @@ def storage_to_config(storage: StorageBackend | None) -> dict[str, Any] | None:
             "replication_factor": getattr(storage, "replication_factor", 3),
             "datacenter": getattr(storage, "datacenter", None),
         }
+    elif class_name == "MySQLStorageBackend":
+        config = {"type": "mysql"}
+        dsn = getattr(storage, "dsn", None)
+        if dsn:
+            config["dsn"] = dsn
+        else:
+            config["host"] = getattr(storage, "host", "localhost")
+            config["port"] = getattr(storage, "port", 3306)
+            config["user"] = getattr(storage, "user", "pyworkflow")
+            config["password"] = getattr(storage, "password", "")
+            config["database"] = getattr(storage, "database", "pyworkflow")
+        return config
     else:
         # Unknown backend - return minimal config
         return {"type": "unknown"}
@@ -216,6 +228,27 @@ def config_to_storage(config: dict[str, Any] | None = None) -> StorageBackend:
             replication_factor=config.get("replication_factor", 3),
             datacenter=config.get("datacenter"),
         )
+
+    elif storage_type == "mysql":
+        try:
+            from pyworkflow.storage.mysql import MySQLStorageBackend
+        except ImportError:
+            raise ValueError(
+                "MySQL storage backend is not available. "
+                "Please install the required dependencies with: pip install 'pyworkflow[mysql]'"
+            )
+
+        # Support both DSN and individual parameters
+        if "dsn" in config:
+            return MySQLStorageBackend(dsn=config["dsn"])
+        else:
+            return MySQLStorageBackend(
+                host=config.get("host", "localhost"),
+                port=config.get("port", 3306),
+                user=config.get("user", "pyworkflow"),
+                password=config.get("password", ""),
+                database=config.get("database", "pyworkflow"),
+            )
 
     else:
         raise ValueError(f"Unknown storage type: {storage_type}")

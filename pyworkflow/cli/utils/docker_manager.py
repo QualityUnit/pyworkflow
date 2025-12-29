@@ -426,6 +426,113 @@ volumes:
     return template
 
 
+def generate_mysql_docker_compose_content(
+    mysql_host: str = "mysql",
+    mysql_port: int = 3306,
+    mysql_user: str = "pyworkflow",
+    mysql_password: str = "pyworkflow",
+    mysql_database: str = "pyworkflow",
+) -> str:
+    """
+    Generate docker-compose.yml content for MySQL-based PyWorkflow services.
+
+    Args:
+        mysql_host: MySQL host (container name for docker networking)
+        mysql_port: MySQL port
+        mysql_user: MySQL user
+        mysql_password: MySQL password
+        mysql_database: MySQL database name
+
+    Returns:
+        docker-compose.yml content as string
+
+    Example:
+        >>> compose_content = generate_mysql_docker_compose_content()
+    """
+    template = f"""services:
+  mysql:
+    image: mysql:8.0
+    container_name: pyworkflow-mysql
+    ports:
+      - "{mysql_port}:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD={mysql_password}
+      - MYSQL_USER={mysql_user}
+      - MYSQL_PASSWORD={mysql_password}
+      - MYSQL_DATABASE={mysql_database}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "{mysql_user}", "-p{mysql_password}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: pyworkflow-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  dashboard-backend:
+    image: yashabro/pyworkflow-dashboard-backend:latest
+    container_name: pyworkflow-dashboard-backend
+    working_dir: /app/project
+    ports:
+      - "8585:8585"
+    environment:
+      - DASHBOARD_PYWORKFLOW_CONFIG_PATH=/app/project/pyworkflow.config.yaml
+      - DASHBOARD_STORAGE_TYPE=mysql
+      - DASHBOARD_MYSQL_HOST={mysql_host}
+      - DASHBOARD_MYSQL_PORT=3306
+      - DASHBOARD_MYSQL_USER={mysql_user}
+      - DASHBOARD_MYSQL_PASSWORD={mysql_password}
+      - DASHBOARD_MYSQL_DATABASE={mysql_database}
+      - DASHBOARD_HOST=0.0.0.0
+      - DASHBOARD_PORT=8585
+      - DASHBOARD_CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
+      - PYWORKFLOW_CELERY_BROKER=redis://redis:6379/0
+      - PYWORKFLOW_CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - PYTHONPATH=/app/project
+    volumes:
+      - .:/app/project:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  dashboard-frontend:
+    image: yashabro/pyworkflow-dashboard-frontend:latest
+    container_name: pyworkflow-dashboard-frontend
+    ports:
+      - "5173:80"
+    environment:
+      - VITE_API_URL=http://localhost:8585
+    depends_on:
+      - dashboard-backend
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+"""
+
+    return template
+
+
 def write_docker_compose(content: str, path: Path) -> None:
     """
     Write docker-compose.yml to file.

@@ -27,7 +27,7 @@ from pyworkflow.cli.utils.storage import create_storage
 )
 @click.option(
     "--storage",
-    type=click.Choice(["file", "memory", "sqlite", "dynamodb"], case_sensitive=False),
+    type=click.Choice(["file", "memory", "sqlite", "postgres", "mysql", "dynamodb", "cassandra"], case_sensitive=False),
     envvar="PYWORKFLOW_STORAGE_BACKEND",
     help="Storage backend type (default: file)",
 )

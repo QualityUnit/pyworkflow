@@ -294,9 +294,7 @@ def display_config_summary(config: dict[str, Any]) -> list[str]:
         contact_points = storage.get("contact_points", ["localhost"])
         port = storage.get("port", 9042)
         keyspace = storage.get("keyspace", "pyworkflow")
-        hosts = (
-            ", ".join(contact_points) if isinstance(contact_points, list) else contact_points
-        )
+        hosts = ", ".join(contact_points) if isinstance(contact_points, list) else contact_points
         lines.append(f"  Cassandra: {hosts}:{port}/{keyspace}")
         if "username" in storage:
             lines.append(f"  Cassandra User: {storage['username']}")

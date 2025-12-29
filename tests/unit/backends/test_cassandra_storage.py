@@ -163,7 +163,9 @@ class TestCassandraStorageBackendConnection:
             assert backend._initialized is True
 
     @pytest.mark.asyncio
-    async def test_disconnect_closes_session_and_cluster(self, mock_backend, mock_session, mock_cluster):
+    async def test_disconnect_closes_session_and_cluster(
+        self, mock_backend, mock_session, mock_cluster
+    ):
         """Test that disconnect closes session and cluster."""
         await mock_backend.disconnect()
 

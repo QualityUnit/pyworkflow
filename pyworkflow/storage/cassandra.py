@@ -164,13 +164,11 @@ class CassandraStorageBackend(StorageBackend):
             )
         else:
             replication = (
-                f"{{'class': 'SimpleStrategy', "
-                f"'replication_factor': {self.replication_factor}}}"
+                f"{{'class': 'SimpleStrategy', 'replication_factor': {self.replication_factor}}}"
             )
 
         session.execute(
-            f"CREATE KEYSPACE IF NOT EXISTS {self.keyspace} "
-            f"WITH replication = {replication}"
+            f"CREATE KEYSPACE IF NOT EXISTS {self.keyspace} WITH replication = {replication}"
         )
         session.set_keyspace(self.keyspace)
 
@@ -772,11 +770,18 @@ class CassandraStorageBackend(StorageBackend):
             for row in rows:
                 if len(runs) >= limit + 1:
                     break
-                run = await self.get_run(row.run_id) if hasattr(row, "run_id") else self._row_to_workflow_run(row)
+                run = (
+                    await self.get_run(row.run_id)
+                    if hasattr(row, "run_id")
+                    else self._row_to_workflow_run(row)
+                )
                 if run:
                     # Apply query filter if provided (case-insensitive substring)
                     if query:
-                        if query.lower() not in run.workflow_name.lower() and query.lower() not in run.input_kwargs.lower():
+                        if (
+                            query.lower() not in run.workflow_name.lower()
+                            and query.lower() not in run.input_kwargs.lower()
+                        ):
                             continue
                     # Apply time filters
                     if start_time and run.created_at < start_time:
@@ -1336,9 +1341,7 @@ class CassandraStorageBackend(StorageBackend):
 
         # Derive spec_type from ScheduleSpec
         spec_type = (
-            "cron"
-            if schedule.spec.cron
-            else ("interval" if schedule.spec.interval else "calendar")
+            "cron" if schedule.spec.cron else ("interval" if schedule.spec.interval else "calendar")
         )
 
         batch = BatchStatement(consistency_level=self.write_consistency)
@@ -1431,9 +1434,7 @@ class CassandraStorageBackend(StorageBackend):
 
         # Derive spec_type from ScheduleSpec
         spec_type = (
-            "cron"
-            if schedule.spec.cron
-            else ("interval" if schedule.spec.interval else "calendar")
+            "cron" if schedule.spec.cron else ("interval" if schedule.spec.interval else "calendar")
         )
 
         batch = BatchStatement(consistency_level=self.write_consistency)
@@ -1513,7 +1514,12 @@ class CassandraStorageBackend(StorageBackend):
                         INSERT INTO due_schedules (hour_bucket, next_run_time, schedule_id, status)
                         VALUES (%s, %s, %s, %s)
                     """),
-                    (new_hour_bucket, schedule.next_run_time, schedule.schedule_id, schedule.status.value),
+                    (
+                        new_hour_bucket,
+                        schedule.next_run_time,
+                        schedule.schedule_id,
+                        schedule.status.value,
+                    ),
                 )
 
         session.execute(batch)
@@ -1614,9 +1620,7 @@ class CassandraStorageBackend(StorageBackend):
                 seen.add(s.schedule_id)
                 unique_schedules.append(s)
 
-        unique_schedules.sort(
-            key=lambda s: s.next_run_time or datetime.min.replace(tzinfo=UTC)
-        )
+        unique_schedules.sort(key=lambda s: s.next_run_time or datetime.min.replace(tzinfo=UTC))
         return unique_schedules
 
     async def add_running_run(self, schedule_id: str, run_id: str) -> None:
@@ -1662,7 +1666,9 @@ class CassandraStorageBackend(StorageBackend):
             context=json.loads(row.context) if row.context else {},
             recovery_attempts=row.recovery_attempts or 0,
             max_recovery_attempts=row.max_recovery_attempts or 3,
-            recover_on_worker_loss=row.recover_on_worker_loss if row.recover_on_worker_loss is not None else True,
+            recover_on_worker_loss=row.recover_on_worker_loss
+            if row.recover_on_worker_loss is not None
+            else True,
             parent_run_id=row.parent_run_id,
             nesting_depth=row.nesting_depth or 0,
             continued_from_run_id=row.continued_from_run_id,

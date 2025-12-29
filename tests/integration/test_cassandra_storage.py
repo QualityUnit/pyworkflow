@@ -819,7 +819,9 @@ class TestChildWorkflowOperations:
             )
             await cassandra_storage.create_run(child)
 
-        completed = await cassandra_storage.get_children("filter_parent", status=RunStatus.COMPLETED)
+        completed = await cassandra_storage.get_children(
+            "filter_parent", status=RunStatus.COMPLETED
+        )
 
         assert len(completed) == 2
 

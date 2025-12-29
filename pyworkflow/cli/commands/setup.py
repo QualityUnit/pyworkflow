@@ -145,7 +145,7 @@ def setup(
         sys.exit(1)
     except Exception as e:
         print_error(f"\nSetup failed: {str(e)}")
-        if ctx.obj.get("verbose"):
+        if ctx.obj and ctx.obj.get("verbose"):
             raise
         sys.exit(1)
 

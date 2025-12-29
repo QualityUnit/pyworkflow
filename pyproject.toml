@@ -2,6 +2,9 @@
 requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.poetry]
+packages = [{include = "pyworkflow"}]
+
 [project]
 name = "pyworkflow-engine"
 version = "0.1.7"
@@ -49,7 +52,6 @@ dependencies = [
 # Storage backends
 redis = [
     "redis>=5.0.0",
-    "celery[redis]>=5.3.0,<6.0.0",  # Redis broker + storage
 ]
 
 sqlite = [
@@ -79,7 +81,6 @@ mysql = [
 # All storage backends
 all = [
     "redis>=5.0.0",
-    "celery[redis]>=5.3.0,<6.0.0",
     "aiosqlite>=0.19.0",
     "asyncpg>=0.29.0",
     "aiomysql>=0.2.0",
@@ -113,7 +114,6 @@ dev = [
 
     # Include all storage backends for development
     "redis>=5.0.0",
-    "celery[redis]>=5.3.0,<6.0.0",
     "aiosqlite>=0.19.0",
     "asyncpg>=0.29.0",
 ]
@@ -127,8 +127,8 @@ Issues = "https://github.com/QualityUnit/pyworkflow/issues"
 [project.scripts]
 pyworkflow = "pyworkflow.cli:main"
 
-[tool.setuptools]
-packages = {find = {}}
+[tool.setuptools.packages.find]
+include = ["pyworkflow*"]
 
 [tool.setuptools.package-data]
 pyworkflow = ["py.typed"]

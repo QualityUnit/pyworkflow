@@ -218,6 +218,13 @@ def load_yaml_config(path: Path | None = None) -> dict[str, Any]:
         with open(path) as f:
             config = yaml.safe_load(f)
 
+        # Handle empty config file (yaml.safe_load returns None for empty files)
+        if config is None:
+            raise ValueError(
+                "Config file is empty or contains only comments. "
+                "Please add valid configuration or delete the file to create a new one."
+            )
+
         # Ensure it's a dict
         if not isinstance(config, dict):
             raise ValueError("Config file must contain a YAML dictionary")

@@ -129,7 +129,7 @@ async def my_workflow(user_id: str):
 ```
 
 <Note>
-  `set_step_context()` is an async function because it persists the context to storage and records a `CONTEXT_UPDATED` event.
+  `set_step_context()` is an async function because it persists the context to storage.
 </Note>
 
 ### Reading Context (Workflow and Steps)
@@ -201,14 +201,12 @@ async def process_order(order_id: str):
 
 ## Context Persistence and Replay
 
-Step Context is event-sourced for durability:
+Step Context is persisted for durability:
 
-1. **Persistence**: When you call `set_step_context()`, the context is:
-   - Stored in the `WorkflowRun.context` field
-   - Recorded as a `CONTEXT_UPDATED` event
+1. **Persistence**: When you call `set_step_context()`, the context is stored in the `WorkflowRun.context` field.
 
 2. **Replay**: When a workflow resumes after suspension:
-   - Context is restored from the event log
+   - Context is restored from `WorkflowRun.context`
    - Steps receive the same context they had during original execution
 
 ```python

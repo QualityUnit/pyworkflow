@@ -280,7 +280,7 @@ def execute_step_task(
                 attempt=self.request.retries + 1,
             )
             # Treat unexpected errors as retriable
-            raise self.retry(exc=RetryableError(str(e)), countdown=60)
+            raise self.retry(exc=e, countdown=60)
         else:
             # Max retries exhausted
             logger.error(

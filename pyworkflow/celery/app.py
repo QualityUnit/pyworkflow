@@ -168,8 +168,9 @@ def create_celery_app(
         worker_task_log_format="[%(asctime)s: %(levelname)s/%(processName)s] [%(task_name)s(%(task_id)s)] %(message)s",
     )
 
-    # Configure logging
-    configure_logging(level="INFO")
+    # Configure logging - use PYWORKFLOW_LOG_LEVEL env var or default to INFO
+    log_level = os.getenv("PYWORKFLOW_LOG_LEVEL", "INFO").upper()
+    configure_logging(level=log_level)
 
     # Auto-discover workflows from environment variable or configured modules
     discover_workflows()

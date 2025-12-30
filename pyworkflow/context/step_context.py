@@ -176,8 +176,7 @@ async def set_step_context(ctx: StepContext) -> None:
     Set the current step context and persist to storage.
 
     This function can only be called from workflow code, not from within steps.
-    When called, the context is persisted to storage and a CONTEXT_UPDATED event
-    is recorded for deterministic replay.
+    When called, the context is persisted to storage for resumption.
 
     Args:
         ctx: The StepContext instance to set
@@ -213,15 +212,6 @@ async def set_step_context(ctx: StepContext) -> None:
     if has_context():
         workflow_ctx = get_context()
         if workflow_ctx.is_durable and workflow_ctx.storage is not None:
-            from pyworkflow.engine.events import create_context_updated_event
-
-            # Record CONTEXT_UPDATED event for replay
-            event = create_context_updated_event(
-                run_id=workflow_ctx.run_id,
-                context_data=ctx.to_dict(),
-            )
-            await workflow_ctx.storage.record_event(event)
-
             # Update the WorkflowRun.context field
             await workflow_ctx.storage.update_run_context(workflow_ctx.run_id, ctx.to_dict())
 

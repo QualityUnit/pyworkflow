@@ -20,7 +20,6 @@ from pyworkflow import (
     StepContext,
     configure,
     get_step_context,
-    get_workflow_events,
     get_workflow_run,
     has_step_context,
     reset_config,
@@ -189,11 +188,6 @@ async def main():
 
     # Check stored context
     print(f"Stored context: {run.context}")
-
-    # Inspect events for CONTEXT_UPDATED
-    events = await get_workflow_events(run_id)
-    context_events = [e for e in events if e.type.value == "context.updated"]
-    print(f"Context update events: {len(context_events)}")
 
     # Example 2: Context with sleep (persistence test)
     print("\n--- Example 2: Context Persistence Across Sleep ---")

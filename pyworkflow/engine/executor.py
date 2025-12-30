@@ -47,6 +47,7 @@ async def start(
     durable: bool | None = None,
     storage: StorageBackend | None = None,
     idempotency_key: str | None = None,
+    workflow_code: str | None = None,
     **kwargs: Any,
 ) -> str:
     """
@@ -62,6 +63,10 @@ async def start(
         durable: Whether workflow is durable (None = use workflow/config default)
         storage: Storage backend instance (None = use configured storage)
         idempotency_key: Optional key for idempotent execution
+        workflow_code: Optional Python source code for dynamically generated workflows.
+            When provided, this code will be sent to Celery workers and executed
+            to register the workflow before execution. Used for workflows that are
+            generated at runtime (e.g., from no-code platforms or AI agents).
         **kwargs: Keyword arguments for workflow
 
     Returns:
@@ -88,6 +93,12 @@ async def start(
         run_id = await start(
             my_workflow, 42,
             idempotency_key="unique-operation-id"
+        )
+
+        # Dynamic workflow (code generated at runtime)
+        run_id = await start(
+            my_workflow, 42,
+            workflow_code=generated_workflow_source,
         )
     """
     from pyworkflow.config import get_config
@@ -168,6 +179,7 @@ async def start(
         idempotency_key=idempotency_key,
         max_duration=workflow_meta.max_duration,
         metadata={},  # Run-level metadata
+        workflow_code=workflow_code,
     )
 
 

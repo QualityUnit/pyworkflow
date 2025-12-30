@@ -37,6 +37,7 @@ class Runtime(ABC):
         idempotency_key: str | None = None,
         max_duration: str | None = None,
         metadata: dict | None = None,
+        workflow_code: str | None = None,
     ) -> str:
         """
         Start a new workflow execution.
@@ -52,6 +53,8 @@ class Runtime(ABC):
             idempotency_key: Optional key for idempotent execution
             max_duration: Optional maximum duration for the workflow
             metadata: Optional metadata dictionary
+            workflow_code: Optional Python source code for dynamic workflows.
+                When provided, this code is sent to workers for registration.
 
         Returns:
             The run_id of the started workflow

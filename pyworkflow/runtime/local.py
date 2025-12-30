@@ -134,6 +134,7 @@ class LocalRuntime(Runtime):
         idempotency_key: str | None = None,
         max_duration: str | None = None,
         metadata: dict | None = None,
+        workflow_code: str | None = None,
     ) -> str:
         """Start a workflow execution in the current process."""
         from pyworkflow.core.workflow import execute_workflow_with_context
@@ -168,6 +169,7 @@ class LocalRuntime(Runtime):
                     idempotency_key=idempotency_key,
                     max_duration=max_duration,
                     context=metadata or {},
+                    workflow_code=workflow_code,
                 )
                 await storage.create_run(workflow_run)
 

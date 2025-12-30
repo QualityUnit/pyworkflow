@@ -36,6 +36,7 @@ from pyworkflow.config import (
     configure,
     configure_from_yaml,
     get_config,
+    get_dynamic_workflow_imports,
     get_storage,
     reset_config,
 )

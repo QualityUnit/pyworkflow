@@ -235,6 +235,7 @@ class DynamoDBStorageBackend(StorageBackend):
                 "idempotency_key": run.idempotency_key,
                 "max_duration": run.max_duration,
                 "context": json.dumps(run.context),
+                "workflow_code": run.workflow_code,
                 "recovery_attempts": run.recovery_attempts,
                 "max_recovery_attempts": run.max_recovery_attempts,
                 "recover_on_worker_loss": run.recover_on_worker_loss,
@@ -1251,6 +1252,7 @@ class DynamoDBStorageBackend(StorageBackend):
             max_duration=item.get("max_duration"),
             # Support both 'context' (new) and 'metadata' (legacy) keys
             context=json.loads(item.get("context", item.get("metadata", "{}"))),
+            workflow_code=item.get("workflow_code"),
             recovery_attempts=item.get("recovery_attempts", 0),
             max_recovery_attempts=item.get("max_recovery_attempts", 3),
             recover_on_worker_loss=item.get("recover_on_worker_loss", True),

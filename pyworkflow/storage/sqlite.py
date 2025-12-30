@@ -97,6 +97,7 @@ class SQLiteStorageBackend(StorageBackend):
                 idempotency_key TEXT,
                 max_duration TEXT,
                 metadata TEXT DEFAULT '{}',
+                workflow_code TEXT,
                 recovery_attempts INTEGER DEFAULT 0,
                 max_recovery_attempts INTEGER DEFAULT 3,
                 recover_on_worker_loss INTEGER DEFAULT 1,
@@ -245,10 +246,10 @@ class SQLiteStorageBackend(StorageBackend):
             INSERT INTO workflow_runs (
                 run_id, workflow_name, status, created_at, updated_at, started_at,
                 completed_at, input_args, input_kwargs, result, error, idempotency_key,
-                max_duration, metadata, recovery_attempts, max_recovery_attempts,
+                max_duration, metadata, workflow_code, recovery_attempts, max_recovery_attempts,
                 recover_on_worker_loss, parent_run_id, nesting_depth,
                 continued_from_run_id, continued_to_run_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run.run_id,
@@ -265,6 +266,7 @@ class SQLiteStorageBackend(StorageBackend):
                 run.idempotency_key,
                 run.max_duration,
                 json.dumps(run.context),
+                run.workflow_code,
                 run.recovery_attempts,
                 run.max_recovery_attempts,
                 1 if run.recover_on_worker_loss else 0,
@@ -1071,13 +1073,14 @@ class SQLiteStorageBackend(StorageBackend):
             idempotency_key=row[11],
             max_duration=row[12],
             context=json.loads(row[13]) if row[13] else {},
-            recovery_attempts=row[14],
-            max_recovery_attempts=row[15],
-            recover_on_worker_loss=bool(row[16]),
-            parent_run_id=row[17],
-            nesting_depth=row[18],
-            continued_from_run_id=row[19],
-            continued_to_run_id=row[20],
+            workflow_code=row[14],
+            recovery_attempts=row[15],
+            max_recovery_attempts=row[16],
+            recover_on_worker_loss=bool(row[17]),
+            parent_run_id=row[18],
+            nesting_depth=row[19],
+            continued_from_run_id=row[20],
+            continued_to_run_id=row[21],
         )
 
     def _row_to_event(self, row: Any) -> Event:

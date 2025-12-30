@@ -201,6 +201,7 @@ class CassandraStorageBackend(StorageBackend):
                 idempotency_key TEXT,
                 max_duration TEXT,
                 context TEXT,
+                workflow_code TEXT,
                 recovery_attempts INT,
                 max_recovery_attempts INT,
                 recover_on_worker_loss BOOLEAN,
@@ -451,10 +452,10 @@ class CassandraStorageBackend(StorageBackend):
                 INSERT INTO workflow_runs (
                     run_id, workflow_name, status, created_at, updated_at,
                     started_at, completed_at, input_args, input_kwargs,
-                    result, error, idempotency_key, max_duration, context,
+                    result, error, idempotency_key, max_duration, context, workflow_code,
                     recovery_attempts, max_recovery_attempts, recover_on_worker_loss,
                     parent_run_id, nesting_depth, continued_from_run_id, continued_to_run_id
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """),
             (
                 run.run_id,
@@ -471,6 +472,7 @@ class CassandraStorageBackend(StorageBackend):
                 run.idempotency_key,
                 run.max_duration,
                 json.dumps(run.context),
+                run.workflow_code,
                 run.recovery_attempts,
                 run.max_recovery_attempts,
                 run.recover_on_worker_loss,
@@ -1664,6 +1666,7 @@ class CassandraStorageBackend(StorageBackend):
             idempotency_key=row.idempotency_key,
             max_duration=row.max_duration,
             context=json.loads(row.context) if row.context else {},
+            workflow_code=row.workflow_code,
             recovery_attempts=row.recovery_attempts or 0,
             max_recovery_attempts=row.max_recovery_attempts or 3,
             recover_on_worker_loss=row.recover_on_worker_loss

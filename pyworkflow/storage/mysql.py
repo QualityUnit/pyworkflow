@@ -124,6 +124,7 @@ class MySQLStorageBackend(StorageBackend):
                         idempotency_key VARCHAR(255),
                         max_duration VARCHAR(255),
                         metadata LONGTEXT DEFAULT '{}',
+                        workflow_code LONGTEXT,
                         recovery_attempts INT DEFAULT 0,
                         max_recovery_attempts INT DEFAULT 3,
                         recover_on_worker_loss BOOLEAN DEFAULT TRUE,
@@ -247,10 +248,10 @@ class MySQLStorageBackend(StorageBackend):
                 INSERT INTO workflow_runs (
                     run_id, workflow_name, status, created_at, updated_at, started_at,
                     completed_at, input_args, input_kwargs, result, error, idempotency_key,
-                    max_duration, metadata, recovery_attempts, max_recovery_attempts,
+                    max_duration, metadata, workflow_code, recovery_attempts, max_recovery_attempts,
                     recover_on_worker_loss, parent_run_id, nesting_depth,
                     continued_from_run_id, continued_to_run_id
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     run.run_id,
@@ -267,6 +268,7 @@ class MySQLStorageBackend(StorageBackend):
                     run.idempotency_key,
                     run.max_duration,
                     json.dumps(run.context),
+                    run.workflow_code,
                     run.recovery_attempts,
                     run.max_recovery_attempts,
                     run.recover_on_worker_loss,
@@ -1086,6 +1088,7 @@ class MySQLStorageBackend(StorageBackend):
             idempotency_key=row["idempotency_key"],
             max_duration=row["max_duration"],
             context=json.loads(row["metadata"]) if row["metadata"] else {},
+            workflow_code=row.get("workflow_code"),
             recovery_attempts=row["recovery_attempts"],
             max_recovery_attempts=row["max_recovery_attempts"],
             recover_on_worker_loss=bool(row["recover_on_worker_loss"]),

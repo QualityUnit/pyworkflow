@@ -144,13 +144,14 @@ class TestRowConversion:
             "idem_123",  # 11: idempotency_key
             "1h",  # 12: max_duration
             '{"foo": "bar"}',  # 13: metadata
-            0,  # 14: recovery_attempts
-            3,  # 15: max_recovery_attempts
-            1,  # 16: recover_on_worker_loss (SQLite stores as int)
-            None,  # 17: parent_run_id
-            0,  # 18: nesting_depth
-            None,  # 19: continued_from_run_id
-            None,  # 20: continued_to_run_id
+            None,  # 14: workflow_code
+            0,  # 15: recovery_attempts
+            3,  # 16: max_recovery_attempts
+            1,  # 17: recover_on_worker_loss (SQLite stores as int)
+            None,  # 18: parent_run_id
+            0,  # 19: nesting_depth
+            None,  # 20: continued_from_run_id
+            None,  # 21: continued_to_run_id
         )
 
         run = backend._row_to_workflow_run(row)
@@ -361,6 +362,7 @@ class TestWorkflowRunOperations:
             None,  # idempotency_key
             None,  # max_duration
             "{}",  # metadata
+            None,  # workflow_code
             0,  # recovery_attempts
             3,  # max_recovery_attempts
             1,  # recover_on_worker_loss
@@ -422,6 +424,7 @@ class TestWorkflowRunOperations:
             "idem_key_123",
             None,
             "{}",
+            None,  # workflow_code
             0,
             3,
             1,
@@ -493,6 +496,7 @@ class TestWorkflowRunOperations:
             None,
             None,
             "{}",
+            None,  # workflow_code
             0,
             3,
             1,
@@ -1047,6 +1051,7 @@ class TestChildWorkflowOperations:
             None,
             None,
             "{}",
+            None,  # workflow_code
             0,
             3,
             1,
@@ -1089,6 +1094,7 @@ class TestChildWorkflowOperations:
             None,
             None,
             "{}",
+            None,  # workflow_code
             0,
             3,
             1,
@@ -1113,6 +1119,7 @@ class TestChildWorkflowOperations:
             None,
             None,
             "{}",
+            None,  # workflow_code
             0,
             3,
             1,
@@ -1161,6 +1168,7 @@ class TestChildWorkflowOperations:
             None,
             None,
             "{}",
+            None,  # workflow_code
             0,
             3,
             1,
@@ -1202,6 +1210,7 @@ class TestChildWorkflowOperations:
             None,
             None,
             "{}",
+            None,  # workflow_code
             0,
             3,
             1,

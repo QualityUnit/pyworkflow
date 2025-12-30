@@ -874,6 +874,7 @@ class TestRowConversion:
         mock_row.idempotency_key = "my_key"
         mock_row.max_duration = "1h"
         mock_row.context = '{"step_data": "test"}'
+        mock_row.workflow_code = None
         mock_row.recovery_attempts = 1
         mock_row.max_recovery_attempts = 5
         mock_row.recover_on_worker_loss = False

@@ -167,6 +167,11 @@ class PyWorkflowConfig:
     event_hard_limit: int = 50_000  # Fail workflow at this count
     event_warning_interval: int = 100  # Log warning every N events after soft limit
 
+    # Dynamic workflow support
+    # Dict of name -> object to make available in dynamic workflow execution namespace
+    # Example: {"MyContext": MyContext, "get_helper": get_helper_func}
+    dynamic_workflow_imports: dict[str, Any] | None = None
+
 
 def _config_from_env_and_yaml() -> PyWorkflowConfig:
     """
@@ -404,3 +409,26 @@ def get_storage() -> Optional["StorageBackend"]:
         >>> storage = pyworkflow.get_storage()
     """
     return get_config().storage
+
+
+def get_dynamic_workflow_imports() -> dict[str, Any]:
+    """
+    Get the configured imports for dynamic workflow execution.
+
+    These imports are made available in the namespace when executing
+    dynamically generated workflow code on workers.
+
+    Returns:
+        Dict of name -> object for dynamic workflow namespace
+
+    Example:
+        >>> import pyworkflow
+        >>> pyworkflow.configure(
+        ...     dynamic_workflow_imports={
+        ...         "MyContext": MyContext,
+        ...         "get_helper": get_helper_func,
+        ...     }
+        ... )
+        >>> imports = pyworkflow.get_dynamic_workflow_imports()
+    """
+    return get_config().dynamic_workflow_imports or {}

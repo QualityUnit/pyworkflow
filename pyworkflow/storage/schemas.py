@@ -88,6 +88,9 @@ class WorkflowRun:
     max_duration: str | None = None  # e.g., "1h", "30m"
     context: dict[str, Any] = field(default_factory=dict)  # Step context data
 
+    # Dynamic workflow support
+    workflow_code: str | None = None  # Python source code for dynamic workflows
+
     # Recovery tracking for fault tolerance
     recovery_attempts: int = 0  # Number of recovery attempts after worker failures
     max_recovery_attempts: int = 3  # Maximum recovery attempts allowed
@@ -118,6 +121,7 @@ class WorkflowRun:
             "idempotency_key": self.idempotency_key,
             "max_duration": self.max_duration,
             "context": self.context,
+            "workflow_code": self.workflow_code,
             "recovery_attempts": self.recovery_attempts,
             "max_recovery_attempts": self.max_recovery_attempts,
             "recover_on_worker_loss": self.recover_on_worker_loss,
@@ -150,6 +154,7 @@ class WorkflowRun:
             max_duration=data.get("max_duration"),
             # Support both 'context' and legacy 'metadata' key for backward compatibility
             context=data.get("context", data.get("metadata", {})),
+            workflow_code=data.get("workflow_code"),
             recovery_attempts=data.get("recovery_attempts", 0),
             max_recovery_attempts=data.get("max_recovery_attempts", 3),
             recover_on_worker_loss=data.get("recover_on_worker_loss", True),

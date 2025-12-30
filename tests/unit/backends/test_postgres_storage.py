@@ -191,6 +191,7 @@ class TestRowConversion:
             "nesting_depth": 0,
             "continued_from_run_id": None,
             "continued_to_run_id": None,
+            "workflow_code": None,
         }
 
         run = backend._row_to_workflow_run(row)

@@ -255,9 +255,11 @@ def configure(
         >>> # Configure with workflow discovery
         >>> pyworkflow.configure(module="myapp.workflows")
     """
-    global _config
+    global _config, _config_loaded_from_yaml
     if _config is None:
-        _config = PyWorkflowConfig()
+        # Load from env vars and YAML first, then apply overrides
+        _config = _config_from_env_and_yaml()
+        _config_loaded_from_yaml = True
 
     # Warn if user is modifying event limits
     event_limit_keys = {"event_soft_limit", "event_hard_limit", "event_warning_interval"}

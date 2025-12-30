@@ -162,7 +162,7 @@ class RunService:
             input_args=input_args,
             input_kwargs=input_kwargs,
             result=result,
-            metadata=run.metadata,
+            metadata=run.context,
             max_duration=run.max_duration,
             max_recovery_attempts=run.max_recovery_attempts,
         )

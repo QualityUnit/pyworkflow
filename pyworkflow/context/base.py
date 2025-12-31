@@ -307,6 +307,10 @@ class WorkflowContext(ABC):
         """Get failure info for a step."""
         return None  # Default: no failure info
 
+    def is_step_in_progress(self, step_id: str) -> bool:
+        """Check if a step is currently in progress (dispatched but not completed)."""
+        return False  # Default: no in-progress tracking
+
     def should_execute_step(self, step_id: str) -> bool:
         """Check if step should be executed (not already completed)."""
         return True  # Default: always execute

@@ -283,8 +283,28 @@ async def _execute_workflow_local(
         return result
 
     except SuspensionSignal as e:
-        # Workflow suspended (sleep or hook)
+        # Workflow suspended (sleep, hook, or step dispatch)
         await storage.update_run_status(run_id=run_id, status=RunStatus.SUSPENDED)
+
+        # Record WORKFLOW_SUSPENDED event
+        from pyworkflow.engine.events import create_workflow_suspended_event
+
+        step_id = e.data.get("step_id") if e.data else None
+        step_name = e.data.get("step_name") if e.data else None
+        sleep_id = e.data.get("sleep_id") if e.data else None
+        hook_id = e.data.get("hook_id") if e.data else None
+        child_id = e.data.get("child_id") if e.data else None
+
+        suspended_event = create_workflow_suspended_event(
+            run_id=run_id,
+            reason=e.reason,
+            step_id=step_id,
+            step_name=step_name,
+            sleep_id=sleep_id,
+            hook_id=hook_id,
+            child_id=child_id,
+        )
+        await storage.record_event(suspended_event)
 
         logger.info(
             f"Workflow suspended: {e.reason}",

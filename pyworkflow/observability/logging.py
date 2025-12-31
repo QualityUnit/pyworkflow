@@ -79,10 +79,13 @@ def configure_logging(
     # This ensures Celery and other libraries' logs go through loguru
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
 
-    # Also intercept specific loggers that Celery uses
+    # Suppress verbose Celery logs - only show warnings and above
+    # PyWorkflow provides its own task execution logs
     for logger_name in ("celery", "celery.task", "celery.worker", "kombu", "amqp"):
-        logging.getLogger(logger_name).handlers = [InterceptHandler()]
-        logging.getLogger(logger_name).propagate = False
+        celery_logger = logging.getLogger(logger_name)
+        celery_logger.handlers = [InterceptHandler()]
+        celery_logger.propagate = False
+        celery_logger.setLevel(logging.WARNING)
 
     # Console format
     if json_logs:

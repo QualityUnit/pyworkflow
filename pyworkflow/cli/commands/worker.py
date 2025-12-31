@@ -153,6 +153,10 @@ def run_worker(
         os.getenv("PYWORKFLOW_CELERY_RESULT_BACKEND", "redis://localhost:6379/1"),
     )
 
+    # Worker processes always need logging enabled
+    from loguru import logger as loguru_logger
+    loguru_logger.enable("pyworkflow")
+
     print_info("Starting Celery worker...")
     print_info(f"Broker: {broker_url}")
     print_info(f"Queues: {', '.join(queues)}")

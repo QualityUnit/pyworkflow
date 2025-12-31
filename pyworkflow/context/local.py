@@ -104,6 +104,10 @@ class LocalContext(WorkflowContext):
         # Step failure tracking (for handling failures during replay)
         self._step_failures: dict[str, dict[str, Any]] = {}
 
+        # Steps in progress (dispatched to Celery but not yet completed)
+        # Used to prevent re-dispatch during resume
+        self._steps_in_progress: set[str] = set()
+
         # Replay state if resuming
         if event_log:
             self._is_replaying = True
@@ -116,10 +120,18 @@ class LocalContext(WorkflowContext):
         from pyworkflow.serialization.decoder import deserialize
 
         for event in events:
-            if event.type == EventType.STEP_COMPLETED:
+            if event.type == EventType.STEP_STARTED:
+                # Track step as in-progress (dispatched but not completed)
+                step_id = event.data.get("step_id")
+                if step_id:
+                    self._steps_in_progress.add(step_id)
+
+            elif event.type == EventType.STEP_COMPLETED:
                 step_id = event.data.get("step_id")
                 result = deserialize(event.data.get("result"))
                 self._step_results[step_id] = result
+                # Step completed - no longer in progress
+                self._steps_in_progress.discard(step_id)
 
             elif event.type == EventType.SLEEP_COMPLETED:
                 sleep_id = event.data.get("sleep_id")
@@ -156,6 +168,8 @@ class LocalContext(WorkflowContext):
                         "error_type": event.data.get("error_type", "Exception"),
                         "is_retryable": is_retryable,
                     }
+                    # Terminal failure - no longer in progress
+                    self._steps_in_progress.discard(step_id)
 
             elif event.type == EventType.CANCELLATION_REQUESTED:
                 self._cancellation_requested = True
@@ -334,6 +348,18 @@ class LocalContext(WorkflowContext):
             "error_type": error_type,
             "is_retryable": is_retryable,
         }
+
+    def is_step_in_progress(self, step_id: str) -> bool:
+        """
+        Check if a step is currently in progress (dispatched but not completed).
+
+        This is used to prevent re-dispatching a step that's already running
+        on a Celery worker during workflow resume.
+
+        Returns:
+            True if step has STEP_STARTED but no STEP_COMPLETED/terminal STEP_FAILED
+        """
+        return step_id in self._steps_in_progress
 
     # =========================================================================
     # Sleep state management (for @step decorator and EventReplayer compatibility)

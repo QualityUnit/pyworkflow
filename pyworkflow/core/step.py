@@ -151,6 +151,23 @@ def step(
                 )
                 return ctx.get_step_result(step_id)
 
+            # Check if step is already in progress (dispatched to Celery but not completed)
+            # This prevents re-dispatch during resume when step is still running/retrying
+            if ctx.is_step_in_progress(step_id):
+                logger.debug(
+                    f"Step {step_name} already in progress, waiting for completion",
+                    run_id=ctx.run_id,
+                    step_id=step_id,
+                )
+                # Re-suspend and wait for existing task to complete
+                from pyworkflow.core.exceptions import SuspensionSignal
+
+                raise SuspensionSignal(
+                    reason=f"step_dispatch:{step_id}",
+                    step_id=step_id,
+                    step_name=step_name,
+                )
+
             # ========== Distributed Step Dispatch ==========
             # When running in a distributed runtime (e.g., Celery), dispatch steps
             # to step workers instead of executing inline.

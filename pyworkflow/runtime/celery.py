@@ -248,7 +248,7 @@ class CeleryRuntime(Runtime):
         )
 
         # Use the existing schedule function which handles the delay calculation
-        schedule_workflow_resumption(run_id, wake_time)
+        schedule_workflow_resumption(run_id, wake_time, triggered_by="celery_runtime_schedule_wake")
 
         logger.info(
             f"Workflow wake scheduled: {run_id}",

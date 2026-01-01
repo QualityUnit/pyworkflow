@@ -24,6 +24,7 @@ from celery.exceptions import MaxRetriesExceededError, Retry, WorkerLostError
 from loguru import logger
 
 from pyworkflow.celery.app import celery_app
+from pyworkflow.celery.loop import run_async
 from pyworkflow.core.exceptions import (
     CancellationError,
     ContinueAsNewSignal,
@@ -172,7 +173,7 @@ def execute_step_task(
 
     # Check workflow status before executing - bail out if workflow is in terminal state
     storage = _get_storage_backend(storage_config)
-    run = asyncio.run(_get_workflow_run_safe(storage, run_id))
+    run = run_async(_get_workflow_run_safe(storage, run_id))
     if run is None:
         logger.warning(
             f"Workflow run not found, skipping step execution: {step_name}",
@@ -195,7 +196,7 @@ def execute_step_task(
     step_meta = _registry.get_step(step_name)
     if not step_meta:
         # Record failure and resume workflow
-        asyncio.run(
+        run_async(
             _record_step_failure_and_resume(
                 storage_config=storage_config,
                 run_id=run_id,
@@ -244,7 +245,7 @@ def execute_step_task(
 
         # Execute the step
         if asyncio.iscoroutinefunction(step_func):
-            result = asyncio.run(step_func(*args, **kwargs))
+            result = run_async(step_func(*args, **kwargs))
         else:
             result = step_func(*args, **kwargs)
 
@@ -255,7 +256,7 @@ def execute_step_task(
         )
 
         # Record STEP_COMPLETED event and trigger workflow resumption
-        asyncio.run(
+        run_async(
             _record_step_completion_and_resume(
                 storage_config=storage_config,
                 run_id=run_id,
@@ -283,7 +284,7 @@ def execute_step_task(
     except FatalError as e:
         logger.error(f"Step failed (fatal): {step_name}", run_id=run_id, step_id=step_id)
         # Record failure and resume workflow (workflow will fail on replay)
-        asyncio.run(
+        run_async(
             _record_step_failure_and_resume(
                 storage_config=storage_config,
                 run_id=run_id,
@@ -318,7 +319,7 @@ def execute_step_task(
                 run_id=run_id,
                 step_id=step_id,
             )
-            asyncio.run(
+            run_async(
                 _record_step_failure_and_resume(
                     storage_config=storage_config,
                     run_id=run_id,
@@ -355,7 +356,7 @@ def execute_step_task(
                 error=str(e),
                 exc_info=True,
             )
-            asyncio.run(
+            run_async(
                 _record_step_failure_and_resume(
                     storage_config=storage_config,
                     run_id=run_id,
@@ -654,7 +655,7 @@ def start_workflow_task(
     storage = _get_storage_backend(storage_config)
 
     # Execute workflow directly on worker
-    result_run_id = asyncio.run(
+    result_run_id = run_async(
         _start_workflow_on_worker(
             workflow_meta=workflow_meta,
             args=args,
@@ -727,7 +728,7 @@ def start_child_workflow_task(
     storage = _get_storage_backend(storage_config)
 
     # Execute child workflow on worker
-    asyncio.run(
+    run_async(
         _execute_child_workflow_on_worker(
             workflow_func=workflow_meta.func,
             workflow_name=workflow_name,
@@ -1747,7 +1748,7 @@ def resume_workflow_task(
     storage = _get_storage_backend(storage_config)
 
     # Resume workflow directly on worker
-    result = asyncio.run(_resume_workflow_on_worker(run_id, storage, storage_config))
+    result = run_async(_resume_workflow_on_worker(run_id, storage, storage_config))
 
     if result is not None:
         logger.info(f"Workflow completed on worker: {run_id}")
@@ -1789,7 +1790,7 @@ def execute_scheduled_workflow_task(
 
     storage = _get_storage_backend(storage_config)
 
-    return asyncio.run(
+    return run_async(
         _execute_scheduled_workflow(
             schedule_id=schedule_id,
             scheduled_time=datetime.fromisoformat(scheduled_time),
@@ -2230,9 +2231,6 @@ def _get_storage_backend(config: dict[str, Any] | None = None) -> StorageBackend
     from pyworkflow.storage.config import config_to_storage
 
     storage = config_to_storage(config)
-    logger.info(
-        f"_get_storage_backend: config={config}, storage_type={storage.__class__.__name__}",
-    )
     return storage
 
 

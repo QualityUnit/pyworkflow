@@ -211,7 +211,7 @@ celery_app = create_celery_app()
 # ========== Celery Worker Signals ==========
 # These signals ensure proper initialization in forked worker processes
 
-from celery.signals import worker_process_init, worker_init
+from celery.signals import worker_process_init, worker_init, worker_shutdown
 
 
 @worker_init.connect
@@ -230,11 +230,39 @@ def on_worker_process_init(**kwargs):
     """
     Called when a worker child process is initialized (after forking).
 
-    This is critical for prefork pool - loguru's background thread
-    doesn't survive fork(), so we must reconfigure logging in each
-    child process.
+    This is critical for prefork pool:
+    - loguru's background thread doesn't survive fork()
+    - We need a persistent event loop for connection pool reuse
     """
     _configure_worker_logging()
+
+    # Initialize persistent event loop for this worker
+    from pyworkflow.celery.loop import init_worker_loop
+
+    init_worker_loop()
+
+
+@worker_shutdown.connect
+def on_worker_shutdown(**kwargs):
+    """
+    Called when the worker is shutting down.
+
+    Cleans up:
+    - Storage backend connections (PostgreSQL connection pools, etc.)
+    - The persistent event loop
+    """
+    from pyworkflow.celery.loop import close_worker_loop, run_async
+    from pyworkflow.storage.config import disconnect_all_cached
+
+    try:
+        # Clean up storage connections using the persistent loop
+        run_async(disconnect_all_cached())
+    except Exception as e:
+        # Log but don't fail shutdown
+        logger.warning(f"Error during storage cleanup on shutdown: {e}")
+    finally:
+        # Close the persistent event loop
+        close_worker_loop()
 
 
 def get_celery_app() -> Celery:

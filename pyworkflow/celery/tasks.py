@@ -33,6 +33,7 @@ from pyworkflow.core.exceptions import (
     SuspensionSignal,
 )
 from pyworkflow.core.registry import WorkflowMetadata, get_workflow
+from pyworkflow.core.validation import validate_step_parameters
 from pyworkflow.core.workflow import execute_workflow_with_context
 from pyworkflow.engine.events import (
     EventType,
@@ -215,6 +216,9 @@ def execute_step_task(
     # Deserialize arguments
     args = deserialize_args(args_json)
     kwargs = deserialize_kwargs(kwargs_json)
+
+    # Validate parameters before execution on worker (defense in depth)
+    validate_step_parameters(step_meta.original_func, args, kwargs, step_name)
 
     # Set up step context if provided (read-only mode)
     step_context_token = None

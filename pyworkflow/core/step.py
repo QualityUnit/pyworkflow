@@ -23,6 +23,7 @@ from loguru import logger
 from pyworkflow.context import get_context, has_context
 from pyworkflow.core.exceptions import FatalError, RetryableError
 from pyworkflow.core.registry import register_step
+from pyworkflow.core.validation import validate_step_parameters
 from pyworkflow.engine.events import (
     create_step_completed_event,
     create_step_failed_event,
@@ -118,6 +119,8 @@ def step(
                     f"Step {step_name} in transient mode, executing directly",
                     run_id=ctx.run_id,
                 )
+                # Validate parameters before execution
+                validate_step_parameters(func, args, kwargs, step_name)
                 return await _execute_with_retries(
                     func, args, kwargs, step_name, max_retries, retry_delay
                 )
@@ -172,6 +175,8 @@ def step(
             # When running in a distributed runtime (e.g., Celery), dispatch steps
             # to step workers instead of executing inline.
             if ctx.runtime == "celery":
+                # Validate parameters before dispatching to Celery
+                validate_step_parameters(func, args, kwargs, step_name)
                 return await _dispatch_step_to_celery(
                     ctx=ctx,
                     func=func,
@@ -239,6 +244,9 @@ def step(
 
             # Check for cancellation before executing step
             ctx.check_cancellation()
+
+            # Validate parameters before execution
+            validate_step_parameters(func, args, kwargs, step_name)
 
             try:
                 # Execute step function

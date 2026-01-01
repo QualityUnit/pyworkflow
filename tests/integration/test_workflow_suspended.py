@@ -74,7 +74,7 @@ class TestWorkflowSuspensionEventRecording:
         # Configure storage globally
         configure(storage=storage, default_durable=True)
 
-        @step()
+        @step(name="suspended_event_test_step")
         async def my_step():
             return "result"
 

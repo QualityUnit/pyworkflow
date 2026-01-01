@@ -13,6 +13,7 @@ Note: For async backends (postgres, mysql), the backends handle event loop
 changes internally by detecting loop mismatches and recreating the pool.
 """
 
+import contextlib
 import hashlib
 import json
 from typing import Any
@@ -317,11 +318,8 @@ async def disconnect_all_cached() -> None:
     """
     for storage, _ in _storage_cache.values():
         if hasattr(storage, "disconnect"):
-            try:
+            with contextlib.suppress(Exception):
                 await storage.disconnect()
-            except Exception:
-                # Ignore errors during cleanup
-                pass
     _storage_cache.clear()
 
 

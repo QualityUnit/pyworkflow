@@ -15,6 +15,7 @@ garbage collector and Celery's saferepr module. It does not affect functionality
 import os
 
 from celery import Celery
+from celery.signals import worker_init, worker_process_init, worker_shutdown
 from kombu import Exchange, Queue
 
 from pyworkflow.observability.logging import configure_logging
@@ -211,8 +212,6 @@ celery_app = create_celery_app()
 # ========== Celery Worker Signals ==========
 # These signals ensure proper initialization in forked worker processes
 
-from celery.signals import worker_process_init, worker_init, worker_shutdown
-
 
 @worker_init.connect
 def on_worker_init(**kwargs):
@@ -251,6 +250,8 @@ def on_worker_shutdown(**kwargs):
     - Storage backend connections (PostgreSQL connection pools, etc.)
     - The persistent event loop
     """
+    from loguru import logger
+
     from pyworkflow.celery.loop import close_worker_loop, run_async
     from pyworkflow.storage.config import disconnect_all_cached
 

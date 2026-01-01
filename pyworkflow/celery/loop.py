@@ -14,7 +14,8 @@ Usage:
 
 import asyncio
 import threading
-from typing import Any, Coroutine, TypeVar
+from collections.abc import Coroutine
+from typing import Any, TypeVar
 
 T = TypeVar("T")
 

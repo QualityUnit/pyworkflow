@@ -14,6 +14,7 @@ the pool is automatically recreated when a loop change is detected.
 """
 
 import asyncio
+import contextlib
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -100,10 +101,8 @@ class PostgresStorageBackend(StorageBackend):
         # Check if we need to recreate the pool due to loop change
         if self._pool is not None and self._pool_loop_id != current_loop_id:
             # Loop changed - the old pool is invalid, close it
-            try:
+            with contextlib.suppress(Exception):
                 self._pool.terminate()  # Use terminate() instead of close() to avoid awaiting on wrong loop
-            except Exception:
-                pass  # Ignore errors, the old loop may be closed
             self._pool = None
             self._initialized = False
 

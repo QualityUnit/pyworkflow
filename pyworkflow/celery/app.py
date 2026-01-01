@@ -138,10 +138,10 @@ def create_celery_app(
         # Broker transport options - prevent task redelivery
         # See: https://github.com/celery/celery/issues/5935
         broker_transport_options={
-            "visibility_timeout": 43200,  # 12 hours - prevent Redis from re-queueing tasks
+            "visibility_timeout": 3600,  # 12 hours - prevent Redis from re-queueing tasks
         },
         result_backend_transport_options={
-            "visibility_timeout": 43200,
+            "visibility_timeout": 3600,
         },
         # Task routing
         task_default_queue="pyworkflow.default",

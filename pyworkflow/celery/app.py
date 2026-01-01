@@ -194,6 +194,16 @@ def create_celery_app(
         worker_task_log_format="[%(asctime)s: %(levelname)s/%(processName)s] [%(task_name)s(%(task_id)s)] %(message)s",
     )
 
+    # Configure singleton locking for Redis brokers
+    # This enables distributed locking to prevent duplicate task execution
+    is_redis_broker = broker_url.startswith("redis://") or broker_url.startswith("rediss://")
+    if is_redis_broker:
+        app.conf.update(
+            singleton_backend_url=broker_url,
+            singleton_key_prefix="pyworkflow:lock:",
+            singleton_lock_expiry=3600,  # 1 hour TTL (safety net)
+        )
+
     # Note: Logging is configured via Celery signals (worker_init, worker_process_init)
     # to ensure proper initialization AFTER process forking.
     # See on_worker_init() and on_worker_process_init() below.

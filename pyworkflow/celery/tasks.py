@@ -19,12 +19,12 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pyworkflow.context.step_context import StepContext
 
-from celery import Task
-from celery.exceptions import MaxRetriesExceededError, Retry, WorkerLostError
+from celery.exceptions import MaxRetriesExceededError, Retry
 from loguru import logger
 
 from pyworkflow.celery.app import celery_app
 from pyworkflow.celery.loop import run_async
+from pyworkflow.celery.singleton import SingletonWorkflowTask
 from pyworkflow.core.exceptions import (
     CancellationError,
     ContinueAsNewSignal,
@@ -74,58 +74,15 @@ def _calculate_exponential_backoff(
     return delay * jitter
 
 
-class WorkflowTask(Task):
-    """Base task class for workflow execution with custom error handling."""
-
-    # Allow unlimited Celery-level retries - our code controls the actual limit
-    # via the max_retries parameter passed to execute_step_task
-    max_retries = None
-    # Prevent message requeue loops when task fails
-    acks_on_failure_or_timeout = True
-
-    def on_failure(self, exc, task_id, args, kwargs, einfo):
-        """
-        Handle task failure.
-
-        Detects worker loss and handles recovery appropriately:
-        - WorkerLostError: Infrastructure failure, may trigger recovery
-        - Other exceptions: Application failure
-        """
-        is_worker_loss = isinstance(exc, WorkerLostError)
-        if is_worker_loss:
-            logger.warning(
-                f"Task {self.name} interrupted due to worker loss",
-                task_id=task_id,
-                error=str(exc),
-            )
-            # Note: Recovery is handled when the task is requeued and picked up
-            # by another worker. See _handle_workflow_recovery() for logic.
-        else:
-            logger.error(
-                f"Task {self.name} failed: {str(exc)}",
-                task_id=task_id,
-                error=str(exc),
-                traceback=einfo.traceback if einfo else None,
-            )
-
-    def on_retry(self, exc, task_id, args, kwargs, einfo):
-        """Handle task retry."""
-        logger.warning(
-            f"Task {self.name} retrying",
-            task_id=task_id,
-            error=str(exc),
-            retry_count=self.request.retries,
-        )
-
-
 @celery_app.task(
     name="pyworkflow.execute_step",
-    base=WorkflowTask,
+    base=SingletonWorkflowTask,
     bind=True,
     queue="pyworkflow.steps",
+    unique_on=["run_id", "step_id"],
 )
 def execute_step_task(
-    self: WorkflowTask,
+    self: SingletonWorkflowTask,
     step_name: str,
     args_json: str,
     kwargs_json: str,
@@ -612,8 +569,9 @@ def _resolve_context_class(class_name: str) -> type["StepContext"] | None:
 
 @celery_app.task(
     name="pyworkflow.start_workflow",
-    base=WorkflowTask,
+    base=SingletonWorkflowTask,
     queue="pyworkflow.workflows",
+    unique_on=["run_id"],
 )
 def start_workflow_task(
     workflow_name: str,
@@ -682,8 +640,9 @@ def start_workflow_task(
 
 @celery_app.task(
     name="pyworkflow.start_child_workflow",
-    base=WorkflowTask,
+    base=SingletonWorkflowTask,
     queue="pyworkflow.workflows",
+    unique_on=["child_run_id"],
 )
 def start_child_workflow_task(
     workflow_name: str,
@@ -1723,8 +1682,9 @@ async def _start_workflow_on_worker(
 
 @celery_app.task(
     name="pyworkflow.resume_workflow",
-    base=WorkflowTask,
+    base=SingletonWorkflowTask,
     queue="pyworkflow.schedules",
+    unique_on=["run_id"],
 )
 def resume_workflow_task(
     run_id: str,
@@ -1770,8 +1730,9 @@ def resume_workflow_task(
 
 @celery_app.task(
     name="pyworkflow.execute_scheduled_workflow",
-    base=WorkflowTask,
+    base=SingletonWorkflowTask,
     queue="pyworkflow.schedules",
+    # No unique_on - scheduled workflows create new runs each time, no deduplication needed
 )
 def execute_scheduled_workflow_task(
     schedule_id: str,

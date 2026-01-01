@@ -135,6 +135,14 @@ def create_celery_app(
         accept_content=["json"],
         timezone="UTC",
         enable_utc=True,
+        # Broker transport options - prevent task redelivery
+        # See: https://github.com/celery/celery/issues/5935
+        broker_transport_options={
+            "visibility_timeout": 43200,  # 12 hours - prevent Redis from re-queueing tasks
+        },
+        result_backend_transport_options={
+            "visibility_timeout": 43200,
+        },
         # Task routing
         task_default_queue="pyworkflow.default",
         task_default_exchange="pyworkflow",
@@ -165,7 +173,7 @@ def create_celery_app(
         ),
         # Result backend settings
         result_expires=3600,  # 1 hour
-        result_persistent=False,
+        result_persistent=True,
         # Task execution
         task_acks_late=True,
         task_reject_on_worker_lost=True,

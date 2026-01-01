@@ -43,8 +43,8 @@ def worker() -> None:
     "--concurrency",
     "-c",
     type=int,
-    default=None,
-    help="Number of worker processes (default: auto-detect)",
+    default=1,
+    help="Number of worker processes (default: 1)",
 )
 @click.option(
     "--loglevel",
@@ -67,8 +67,8 @@ def worker() -> None:
 @click.option(
     "--pool",
     type=click.Choice(["prefork", "solo", "eventlet", "gevent"], case_sensitive=False),
-    default=None,
-    help="Worker pool type. Use 'solo' for debugging with breakpoints",
+    default="prefork",
+    help="Worker pool type (default: prefork). Use 'solo' for debugging with breakpoints",
 )
 @click.pass_context
 def run_worker(
@@ -160,12 +160,8 @@ def run_worker(
     print_info("Starting Celery worker...")
     print_info(f"Broker: {broker_url}")
     print_info(f"Queues: {', '.join(queues)}")
-
-    if concurrency:
-        print_info(f"Concurrency: {concurrency}")
-
-    if pool:
-        print_info(f"Pool: {pool}")
+    print_info(f"Concurrency: {concurrency}")
+    print_info(f"Pool: {pool}")
 
     try:
         # Discover workflows using CLI discovery (reads from --module, env var, or YAML config)
@@ -216,10 +212,9 @@ def run_worker(
             "worker",
             f"--loglevel={loglevel.upper()}",
             f"--queues={','.join(queues)}",
+            f"--concurrency={concurrency}",  # Always set (default: 1)
+            f"--pool={pool}",  # Always set (default: prefork)
         ]
-
-        if concurrency:
-            worker_args.append(f"--concurrency={concurrency}")
 
         if hostname:
             worker_args.append(f"--hostname={hostname}")
@@ -227,9 +222,6 @@ def run_worker(
         if beat:
             worker_args.append("--beat")
             worker_args.append("--scheduler=pyworkflow.celery.scheduler:PyWorkflowScheduler")
-
-        if pool:
-            worker_args.append(f"--pool={pool}")
 
         print_success("Worker starting...")
         print_info("Press Ctrl+C to stop")

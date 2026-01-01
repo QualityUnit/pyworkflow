@@ -268,7 +268,7 @@ def execute_step_task(
                 max_retries=max_retries,
             )
             # Let Celery handle the retry - don't resume workflow yet
-            raise
+            raise self.retry(countdown=e.retry_after or 2, exc=e)
         else:
             # Max retries exhausted - record failure and resume workflow
             logger.error(
@@ -287,7 +287,7 @@ def execute_step_task(
                     is_retryable=False,  # Mark as not retryable since we exhausted retries
                 )
             )
-            raise
+            raise FatalError(f"Step '{step_name}' failed after retries: {str(e)}") from e
 
     except Exception as e:
         # Check if we have retries left
@@ -300,7 +300,7 @@ def execute_step_task(
                 attempt=self.request.retries + 1,
             )
             # Treat unexpected errors as retriable
-            raise
+            raise self.retry(exc=e, countdown=2)
         else:
             # Max retries exhausted
             logger.error(

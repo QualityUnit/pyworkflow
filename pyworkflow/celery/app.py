@@ -15,9 +15,27 @@ garbage collector and Celery's saferepr module. It does not affect functionality
 import os
 
 from celery import Celery
+from celery.signals import worker_init, worker_process_init, worker_shutdown
 from kombu import Exchange, Queue
 
 from pyworkflow.observability.logging import configure_logging
+
+# Track if logging has been configured in this process
+_logging_configured = False
+
+
+def _configure_worker_logging() -> None:
+    """Configure logging for the current worker process."""
+    global _logging_configured
+    if not _logging_configured:
+        from loguru import logger as loguru_logger
+
+        # Enable pyworkflow logging (may have been disabled by CLI)
+        loguru_logger.enable("pyworkflow")
+
+        log_level = os.getenv("PYWORKFLOW_LOG_LEVEL", "INFO").upper()
+        configure_logging(level=log_level)
+        _logging_configured = True
 
 
 def discover_workflows(modules: list[str] | None = None) -> None:
@@ -118,6 +136,14 @@ def create_celery_app(
         accept_content=["json"],
         timezone="UTC",
         enable_utc=True,
+        # Broker transport options - prevent task redelivery
+        # See: https://github.com/celery/celery/issues/5935
+        broker_transport_options={
+            "visibility_timeout": 3600,  # 12 hours - prevent Redis from re-queueing tasks
+        },
+        result_backend_transport_options={
+            "visibility_timeout": 3600,
+        },
         # Task routing
         task_default_queue="pyworkflow.default",
         task_default_exchange="pyworkflow",
@@ -154,7 +180,7 @@ def create_celery_app(
         task_reject_on_worker_lost=True,
         worker_prefetch_multiplier=1,  # Fair task distribution
         # Retry settings
-        task_autoretry_for=(Exception,),
+        task_autoretry_for=(),
         task_retry_backoff=True,
         task_retry_backoff_max=600,  # 10 minutes max
         task_retry_jitter=True,
@@ -168,8 +194,9 @@ def create_celery_app(
         worker_task_log_format="[%(asctime)s: %(levelname)s/%(processName)s] [%(task_name)s(%(task_id)s)] %(message)s",
     )
 
-    # Configure logging
-    configure_logging(level="INFO")
+    # Note: Logging is configured via Celery signals (worker_init, worker_process_init)
+    # to ensure proper initialization AFTER process forking.
+    # See on_worker_init() and on_worker_process_init() below.
 
     # Auto-discover workflows from environment variable or configured modules
     discover_workflows()
@@ -180,6 +207,63 @@ def create_celery_app(
 # Global Celery app instance
 # Can be customized by calling create_celery_app() with custom config
 celery_app = create_celery_app()
+
+
+# ========== Celery Worker Signals ==========
+# These signals ensure proper initialization in forked worker processes
+
+
+@worker_init.connect
+def on_worker_init(**kwargs):
+    """
+    Called when the main worker process starts (before forking).
+
+    For prefork pool, this runs in the parent process.
+    For solo/threads pool, this is the main initialization point.
+    """
+    _configure_worker_logging()
+
+
+@worker_process_init.connect
+def on_worker_process_init(**kwargs):
+    """
+    Called when a worker child process is initialized (after forking).
+
+    This is critical for prefork pool:
+    - loguru's background thread doesn't survive fork()
+    - We need a persistent event loop for connection pool reuse
+    """
+    _configure_worker_logging()
+
+    # Initialize persistent event loop for this worker
+    from pyworkflow.celery.loop import init_worker_loop
+
+    init_worker_loop()
+
+
+@worker_shutdown.connect
+def on_worker_shutdown(**kwargs):
+    """
+    Called when the worker is shutting down.
+
+    Cleans up:
+    - Storage backend connections (PostgreSQL connection pools, etc.)
+    - The persistent event loop
+    """
+    from loguru import logger
+
+    from pyworkflow.celery.loop import close_worker_loop, run_async
+    from pyworkflow.storage.config import disconnect_all_cached
+
+    try:
+        # Clean up storage connections using the persistent loop
+        run_async(disconnect_all_cached())
+    except Exception as e:
+        # Log but don't fail shutdown
+        logger.warning(f"Error during storage cleanup on shutdown: {e}")
+    finally:
+        # Close the persistent event loop
+        close_worker_loop()
 
 
 def get_celery_app() -> Celery:

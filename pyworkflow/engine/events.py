@@ -24,6 +24,7 @@ class EventType(Enum):
     WORKFLOW_PAUSED = "workflow.paused"
     WORKFLOW_RESUMED = "workflow.resumed"
     WORKFLOW_CONTINUED_AS_NEW = "workflow.continued_as_new"  # Workflow continued with fresh history
+    WORKFLOW_SUSPENDED = "workflow.suspended"  # Workflow suspended (waiting for step/sleep/hook)
 
     # Step lifecycle events
     STEP_STARTED = "step.started"
@@ -44,9 +45,6 @@ class EventType(Enum):
 
     # Cancellation events
     CANCELLATION_REQUESTED = "cancellation.requested"
-
-    # Context events
-    CONTEXT_UPDATED = "context.updated"
 
     # Child workflow events
     CHILD_WORKFLOW_STARTED = "child_workflow.started"
@@ -170,6 +168,49 @@ def create_workflow_continued_as_new_event(
             "kwargs": kwargs,
             "reason": reason,
             "continued_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_workflow_suspended_event(
+    run_id: str,
+    reason: str,
+    step_id: str | None = None,
+    step_name: str | None = None,
+    sleep_id: str | None = None,
+    hook_id: str | None = None,
+    child_id: str | None = None,
+) -> Event:
+    """
+    Create a workflow suspended event.
+
+    This event is recorded when a workflow suspends execution, typically
+    waiting for a step to complete on a worker, a sleep to elapse, a hook
+    to be received, or a child workflow to complete.
+
+    Args:
+        run_id: The workflow run ID
+        reason: Suspension reason (e.g., "step_dispatch:step_id", "sleep", "hook", "child_workflow")
+        step_id: Step ID if suspended for step execution
+        step_name: Step name if suspended for step execution
+        sleep_id: Sleep ID if suspended for sleep
+        hook_id: Hook ID if suspended for webhook
+        child_id: Child workflow ID if suspended for child
+
+    Returns:
+        Event: The workflow suspended event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.WORKFLOW_SUSPENDED,
+        data={
+            "reason": reason,
+            "step_id": step_id,
+            "step_name": step_name,
+            "sleep_id": sleep_id,
+            "hook_id": hook_id,
+            "child_id": child_id,
+            "suspended_at": datetime.now(UTC).isoformat(),
         },
     )
 
@@ -479,33 +520,6 @@ def create_step_cancelled_event(
             "step_name": step_name,
             "reason": reason,
             "cancelled_at": datetime.now(UTC).isoformat(),
-        },
-    )
-
-
-def create_context_updated_event(
-    run_id: str,
-    context_data: dict[str, Any],
-) -> Event:
-    """
-    Create a context updated event.
-
-    This event is recorded when set_step_context() is called in workflow code.
-    It captures the full context state for deterministic replay.
-
-    Args:
-        run_id: The workflow run ID
-        context_data: The serialized context data (from StepContext.to_dict())
-
-    Returns:
-        Event: The context updated event
-    """
-    return Event(
-        run_id=run_id,
-        type=EventType.CONTEXT_UPDATED,
-        data={
-            "context": context_data,
-            "updated_at": datetime.now(UTC).isoformat(),
         },
     )
 

@@ -7,8 +7,14 @@ This backend stores workflow data in a PostgreSQL database, suitable for:
 - High-availability requirements
 
 Provides ACID guarantees, connection pooling, and efficient querying with SQL indexes.
+
+Note: The connection pool is bound to a specific event loop. When running in
+environments where each task creates a new event loop (e.g., Celery prefork),
+the pool is automatically recreated when a loop change is detected.
 """
 
+import asyncio
+import contextlib
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -72,6 +78,7 @@ class PostgresStorageBackend(StorageBackend):
         self.min_pool_size = min_pool_size
         self.max_pool_size = max_pool_size
         self._pool: asyncpg.Pool | None = None
+        self._pool_loop_id: int | None = None  # Track which loop the pool was created on
         self._initialized = False
 
     def _build_dsn(self) -> str:
@@ -83,13 +90,29 @@ class PostgresStorageBackend(StorageBackend):
         return f"postgresql://{self.user}@{self.host}:{self.port}/{self.database}"
 
     async def connect(self) -> None:
-        """Initialize connection pool and create tables if needed."""
+        """Initialize connection pool and create tables if needed.
+
+        The pool is bound to the current event loop. If the loop has changed
+        since the pool was created (e.g., in Celery prefork workers), the old
+        pool is closed and a new one is created.
+        """
+        current_loop_id = id(asyncio.get_running_loop())
+
+        # Check if we need to recreate the pool due to loop change
+        if self._pool is not None and self._pool_loop_id != current_loop_id:
+            # Loop changed - the old pool is invalid, close it
+            with contextlib.suppress(Exception):
+                self._pool.terminate()  # Use terminate() instead of close() to avoid awaiting on wrong loop
+            self._pool = None
+            self._initialized = False
+
         if self._pool is None:
             self._pool = await asyncpg.create_pool(
                 dsn=self.dsn or self._build_dsn(),
                 min_size=self.min_pool_size,
                 max_size=self.max_pool_size,
             )
+            self._pool_loop_id = current_loop_id
 
         if not self._initialized:
             await self._initialize_schema()
@@ -100,6 +123,7 @@ class PostgresStorageBackend(StorageBackend):
         if self._pool:
             await self._pool.close()
             self._pool = None
+            self._pool_loop_id = None
             self._initialized = False
 
     async def _initialize_schema(self) -> None:
@@ -107,7 +131,7 @@ class PostgresStorageBackend(StorageBackend):
         if not self._pool:
             await self.connect()
 
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
         async with pool.acquire() as conn:
             # Workflow runs table
             await conn.execute("""
@@ -254,17 +278,62 @@ class PostgresStorageBackend(StorageBackend):
                 )
             """)
 
+    async def _get_pool(self) -> asyncpg.Pool:
+        """Get the connection pool, connecting/reconnecting if needed.
+
+        This method ensures the pool is connected and on the correct event loop.
+        It handles automatic reconnection when the event loop has changed.
+        """
+        current_loop_id = id(asyncio.get_running_loop())
+
+        # Check if we need to connect or reconnect
+        # - If no pool exists, we need to connect
+        # - If pool exists but was created on a different loop, we need to reconnect
+        # - If _pool_loop_id is None but pool exists (e.g., mocked for testing),
+        #   we trust the pool and set the loop ID to current
+        if self._pool is None:
+            await self.connect()
+        elif self._pool_loop_id is not None and self._pool_loop_id != current_loop_id:
+            # Pool was created on a different loop - need to reconnect
+            await self.connect()
+        elif self._pool_loop_id is None:
+            # Pool was set externally (e.g., for testing) - track current loop
+            self._pool_loop_id = current_loop_id
+
+        return self._pool  # type: ignore
+
     def _ensure_connected(self) -> asyncpg.Pool:
-        """Ensure database pool is connected."""
+        """Ensure database pool is connected.
+
+        DEPRECATED: Use _get_pool() instead for automatic reconnection.
+        This method is kept for backward compatibility but will raise an error
+        if the pool is on a different event loop.
+        """
         if not self._pool:
             raise RuntimeError("Database not connected. Call connect() first.")
+
+        # Check if we're on a different event loop than when the pool was created
+        try:
+            current_loop_id = id(asyncio.get_running_loop())
+            if self._pool_loop_id is not None and self._pool_loop_id != current_loop_id:
+                raise RuntimeError(
+                    "Database pool was created on a different event loop. "
+                    "Call connect() to recreate the pool on the current loop."
+                )
+        except RuntimeError as e:
+            if "no running event loop" in str(e).lower():
+                # No running loop - this will fail anyway when we try to use the pool
+                pass
+            else:
+                raise
+
         return self._pool
 
     # Workflow Run Operations
 
     async def create_run(self, run: WorkflowRun) -> None:
         """Create a new workflow run record."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             await conn.execute(
@@ -302,7 +371,7 @@ class PostgresStorageBackend(StorageBackend):
 
     async def get_run(self, run_id: str) -> WorkflowRun | None:
         """Retrieve a workflow run by ID."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM workflow_runs WHERE run_id = $1", run_id)
@@ -314,7 +383,7 @@ class PostgresStorageBackend(StorageBackend):
 
     async def get_run_by_idempotency_key(self, key: str) -> WorkflowRun | None:
         """Retrieve a workflow run by idempotency key."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM workflow_runs WHERE idempotency_key = $1", key)
@@ -332,7 +401,7 @@ class PostgresStorageBackend(StorageBackend):
         error: str | None = None,
     ) -> None:
         """Update workflow run status."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         now = datetime.now(UTC)
         completed_at = now if status == RunStatus.COMPLETED else None
@@ -371,7 +440,7 @@ class PostgresStorageBackend(StorageBackend):
         recovery_attempts: int,
     ) -> None:
         """Update the recovery attempts counter for a workflow run."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             await conn.execute(
@@ -391,7 +460,7 @@ class PostgresStorageBackend(StorageBackend):
         context: dict,
     ) -> None:
         """Update the step context for a workflow run."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             await conn.execute(
@@ -420,7 +489,7 @@ class PostgresStorageBackend(StorageBackend):
         cursor: str | None = None,
     ) -> tuple[list[WorkflowRun], str | None]:
         """List workflow runs with optional filtering and pagination."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         conditions = []
         params: list[Any] = []
@@ -482,7 +551,7 @@ class PostgresStorageBackend(StorageBackend):
 
     async def record_event(self, event: Event) -> None:
         """Record an event to the append-only event log."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn, conn.transaction():
             # Get next sequence number and insert in a transaction
@@ -511,7 +580,7 @@ class PostgresStorageBackend(StorageBackend):
         event_types: list[str] | None = None,
     ) -> list[Event]:
         """Retrieve all events for a workflow run, ordered by sequence."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             if event_types:
@@ -538,7 +607,7 @@ class PostgresStorageBackend(StorageBackend):
         event_type: str | None = None,
     ) -> Event | None:
         """Get the latest event for a run, optionally filtered by type."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             if event_type:
@@ -572,7 +641,7 @@ class PostgresStorageBackend(StorageBackend):
 
     async def create_step(self, step: StepExecution) -> None:
         """Create a step execution record."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             await conn.execute(
@@ -598,7 +667,7 @@ class PostgresStorageBackend(StorageBackend):
 
     async def get_step(self, step_id: str) -> StepExecution | None:
         """Retrieve a step execution by ID."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM steps WHERE step_id = $1", step_id)
@@ -616,7 +685,7 @@ class PostgresStorageBackend(StorageBackend):
         error: str | None = None,
     ) -> None:
         """Update step execution status."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         updates = ["status = $1"]
         params: list[Any] = [status]
@@ -647,7 +716,7 @@ class PostgresStorageBackend(StorageBackend):
 
     async def list_steps(self, run_id: str) -> list[StepExecution]:
         """List all steps for a workflow run."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             rows = await conn.fetch(
@@ -661,7 +730,7 @@ class PostgresStorageBackend(StorageBackend):
 
     async def create_hook(self, hook: Hook) -> None:
         """Create a hook record."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             await conn.execute(
@@ -684,7 +753,7 @@ class PostgresStorageBackend(StorageBackend):
 
     async def get_hook(self, hook_id: str) -> Hook | None:
         """Retrieve a hook by ID."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM hooks WHERE hook_id = $1", hook_id)
@@ -696,7 +765,7 @@ class PostgresStorageBackend(StorageBackend):
 
     async def get_hook_by_token(self, token: str) -> Hook | None:
         """Retrieve a hook by its token."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM hooks WHERE token = $1", token)
@@ -713,7 +782,7 @@ class PostgresStorageBackend(StorageBackend):
         payload: str | None = None,
     ) -> None:
         """Update hook status and optionally payload."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         updates = ["status = $1"]
         params: list[Any] = [status.value]
@@ -745,7 +814,7 @@ class PostgresStorageBackend(StorageBackend):
         offset: int = 0,
     ) -> list[Hook]:
         """List hooks with optional filtering."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         conditions = []
         params: list[Any] = []
@@ -780,7 +849,7 @@ class PostgresStorageBackend(StorageBackend):
 
     async def set_cancellation_flag(self, run_id: str) -> None:
         """Set a cancellation flag for a workflow run."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             await conn.execute(
@@ -795,7 +864,7 @@ class PostgresStorageBackend(StorageBackend):
 
     async def check_cancellation_flag(self, run_id: str) -> bool:
         """Check if a cancellation flag is set for a workflow run."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow("SELECT 1 FROM cancellation_flags WHERE run_id = $1", run_id)
@@ -804,7 +873,7 @@ class PostgresStorageBackend(StorageBackend):
 
     async def clear_cancellation_flag(self, run_id: str) -> None:
         """Clear the cancellation flag for a workflow run."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             await conn.execute("DELETE FROM cancellation_flags WHERE run_id = $1", run_id)
@@ -817,7 +886,7 @@ class PostgresStorageBackend(StorageBackend):
         continued_to_run_id: str,
     ) -> None:
         """Update the continuation link for a workflow run."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             await conn.execute(
@@ -836,7 +905,7 @@ class PostgresStorageBackend(StorageBackend):
         run_id: str,
     ) -> list[WorkflowRun]:
         """Get all runs in a continue-as-new chain."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         # Find the first run in the chain
         current_id: str | None = run_id
@@ -871,7 +940,7 @@ class PostgresStorageBackend(StorageBackend):
         status: RunStatus | None = None,
     ) -> list[WorkflowRun]:
         """Get all child workflow runs for a parent workflow."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             if status:
@@ -913,7 +982,7 @@ class PostgresStorageBackend(StorageBackend):
 
     async def create_schedule(self, schedule: Schedule) -> None:
         """Create a new schedule record."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         # Derive spec_type from the ScheduleSpec
         spec_type = (
@@ -951,7 +1020,7 @@ class PostgresStorageBackend(StorageBackend):
 
     async def get_schedule(self, schedule_id: str) -> Schedule | None:
         """Retrieve a schedule by ID."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM schedules WHERE schedule_id = $1", schedule_id)
@@ -963,7 +1032,7 @@ class PostgresStorageBackend(StorageBackend):
 
     async def update_schedule(self, schedule: Schedule) -> None:
         """Update an existing schedule."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         # Derive spec_type from the ScheduleSpec
         spec_type = (
@@ -1000,7 +1069,7 @@ class PostgresStorageBackend(StorageBackend):
 
     async def delete_schedule(self, schedule_id: str) -> None:
         """Mark a schedule as deleted (soft delete)."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         now = datetime.now(UTC)
         async with pool.acquire() as conn:
@@ -1024,7 +1093,7 @@ class PostgresStorageBackend(StorageBackend):
         offset: int = 0,
     ) -> list[Schedule]:
         """List schedules with optional filtering."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         conditions = []
         params: list[Any] = []
@@ -1057,7 +1126,7 @@ class PostgresStorageBackend(StorageBackend):
 
     async def get_due_schedules(self, now: datetime) -> list[Schedule]:
         """Get all schedules that are due to run."""
-        pool = self._ensure_connected()
+        pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             rows = await conn.fetch(

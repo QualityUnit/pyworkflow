@@ -391,6 +391,11 @@ def reset_config() -> None:
     _config = None
     _config_loaded_from_yaml = False
 
+    # Also clear the storage cache to ensure test isolation
+    from pyworkflow.storage.config import clear_storage_cache
+
+    clear_storage_cache()
+
 
 def get_storage() -> Optional["StorageBackend"]:
     """

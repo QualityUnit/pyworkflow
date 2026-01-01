@@ -5,11 +5,38 @@ Provides structured logging with context-aware formatting for workflows, steps,
 and events. Integrates with loguru for powerful logging capabilities.
 """
 
+import logging
 import sys
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 from loguru import logger
+
+
+class InterceptHandler(logging.Handler):
+    """
+    Intercept standard logging calls and redirect them to loguru.
+
+    This ensures all logs (including from third-party libraries like Celery)
+    go through loguru's unified formatting.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        # Get corresponding Loguru level if it exists
+        try:
+            level: str | int = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        # Find caller from where originated the logged message
+        frame_or_none: FrameType | None = logging.currentframe()
+        depth = 2
+        while frame_or_none is not None and frame_or_none.f_code.co_filename == logging.__file__:
+            frame_or_none = frame_or_none.f_back
+            depth += 1
+
+        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
 
 
 def configure_logging(
@@ -49,6 +76,18 @@ def configure_logging(
     """
     # Remove default logger
     logger.remove()
+
+    # Intercept standard library logging and redirect to loguru
+    # This ensures Celery and other libraries' logs go through loguru
+    logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
+
+    # Suppress verbose Celery logs - only show warnings and above
+    # PyWorkflow provides its own task execution logs
+    for logger_name in ("celery", "celery.task", "celery.worker", "kombu", "amqp"):
+        celery_logger = logging.getLogger(logger_name)
+        celery_logger.handlers = [InterceptHandler()]
+        celery_logger.propagate = False
+        celery_logger.setLevel(logging.WARNING)
 
     # Console format
     if json_logs:
@@ -90,13 +129,16 @@ def configure_logging(
         record["extra"]["_context"] = extra_str
         return True
 
+    # Add console handler - use stdout for better Celery worker compatibility
+    # enqueue=True makes it process-safe for multiprocessing (Celery workers)
     logger.add(
-        sys.stderr,
+        sys.stdout,
         format=console_format + "{extra[_context]}",
         level=level,
         colorize=not json_logs,
         serialize=json_logs,
         filter=format_with_context,  # type: ignore[arg-type]
+        enqueue=True,  # Process-safe logging for Celery workers
     )
 
     # Add file handler if requested

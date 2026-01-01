@@ -126,28 +126,47 @@ def step(
             # Generate step ID (deterministic based on name + args)
             step_id = _generate_step_id(step_name, args, kwargs)
 
+            # Check if step has already failed (must check BEFORE cached result check)
+            # A failed step has no cached result, so should_execute_step would return True
+            # and skip this check if it were inside the should_execute_step block
+            if ctx.has_step_failed(step_id):
+                error_info = ctx.get_step_failure(step_id)
+                logger.error(
+                    f"Step {step_name} failed on remote worker",
+                    run_id=ctx.run_id,
+                    step_id=step_id,
+                    error=error_info.get("error") if error_info else "Unknown error",
+                )
+                raise FatalError(
+                    f"Step {step_name} failed: "
+                    f"{error_info.get('error') if error_info else 'Unknown error'}"
+                )
+
             # Check if step has already completed (replay)
             if not ctx.should_execute_step(step_id):
-                # Check if step failed (for distributed step dispatch)
-                if ctx.has_step_failed(step_id):
-                    error_info = ctx.get_step_failure(step_id)
-                    logger.error(
-                        f"Step {step_name} failed on remote worker",
-                        run_id=ctx.run_id,
-                        step_id=step_id,
-                        error=error_info.get("error") if error_info else "Unknown error",
-                    )
-                    raise FatalError(
-                        f"Step {step_name} failed: "
-                        f"{error_info.get('error') if error_info else 'Unknown error'}"
-                    )
-
                 logger.debug(
                     f"Step {step_name} already completed, using cached result",
                     run_id=ctx.run_id,
                     step_id=step_id,
                 )
                 return ctx.get_step_result(step_id)
+
+            # Check if step is already in progress (dispatched to Celery but not completed)
+            # This prevents re-dispatch during resume when step is still running/retrying
+            if ctx.is_step_in_progress(step_id):
+                logger.debug(
+                    f"Step {step_name} already in progress, waiting for completion",
+                    run_id=ctx.run_id,
+                    step_id=step_id,
+                )
+                # Re-suspend and wait for existing task to complete
+                from pyworkflow.core.exceptions import SuspensionSignal
+
+                raise SuspensionSignal(
+                    reason=f"step_dispatch:{step_id}",
+                    step_id=step_id,
+                    step_name=step_name,
+                )
 
             # ========== Distributed Step Dispatch ==========
             # When running in a distributed runtime (e.g., Celery), dispatch steps
@@ -366,12 +385,13 @@ def step(
                     )
 
                     # Record final STEP_FAILED event
+                    # is_retryable=False since we've exhausted all retries
                     failure_event = create_step_failed_event(
                         run_id=ctx.run_id,
                         step_id=step_id,
                         error=str(e),
                         error_type=type(e).__name__,
-                        is_retryable=True,
+                        is_retryable=False,
                         attempt=current_attempt,
                     )
                     await ctx.storage.record_event(failure_event)  # type: ignore[union-attr]

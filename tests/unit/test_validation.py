@@ -277,9 +277,7 @@ class TestValidateStepParameters:
             name="John",
             address=Address(street="123 Main St", city="NYC"),
         )
-        validate_step_parameters(
-            process_customer, (valid_customer,), {}, "process_customer"
-        )
+        validate_step_parameters(process_customer, (valid_customer,), {}, "process_customer")
 
         # Valid dict representation
         validate_step_parameters(

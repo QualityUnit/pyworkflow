@@ -155,6 +155,7 @@ def run_worker(
 
     # Worker processes always need logging enabled
     from loguru import logger as loguru_logger
+
     loguru_logger.enable("pyworkflow")
 
     print_info("Starting Celery worker...")

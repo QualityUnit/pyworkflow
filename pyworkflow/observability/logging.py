@@ -8,6 +8,7 @@ and events. Integrates with loguru for powerful logging capabilities.
 import logging
 import sys
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 from loguru import logger
@@ -24,14 +25,15 @@ class InterceptHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         # Get corresponding Loguru level if it exists
         try:
-            level = logger.level(record.levelname).name
+            level: str | int = logger.level(record.levelname).name
         except ValueError:
             level = record.levelno
 
         # Find caller from where originated the logged message
-        frame, depth = logging.currentframe(), 2
-        while frame and frame.f_code.co_filename == logging.__file__:
-            frame = frame.f_back
+        frame_or_none: FrameType | None = logging.currentframe()
+        depth = 2
+        while frame_or_none is not None and frame_or_none.f_code.co_filename == logging.__file__:
+            frame_or_none = frame_or_none.f_back
             depth += 1
 
         logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())

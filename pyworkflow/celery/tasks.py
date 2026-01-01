@@ -49,7 +49,9 @@ from pyworkflow.storage.base import StorageBackend
 from pyworkflow.storage.schemas import RunStatus, WorkflowRun
 
 
-def _calculate_exponential_backoff(attempt: int, base: float = 2.0, max_delay: float = 300.0) -> float:
+def _calculate_exponential_backoff(
+    attempt: int, base: float = 2.0, max_delay: float = 300.0
+) -> float:
     """
     Calculate exponential backoff delay with jitter.
 
@@ -64,7 +66,7 @@ def _calculate_exponential_backoff(attempt: int, base: float = 2.0, max_delay: f
     Formula: min(base * 2^attempt, max_delay) * (0.5 + random(0, 0.5))
     This gives delays like: ~1s, ~2s, ~4s, ~8s, ~16s, ... capped at max_delay
     """
-    delay = min(base * (2 ** attempt), max_delay)
+    delay = min(base * (2**attempt), max_delay)
     # Add jitter: multiply by random factor between 0.5 and 1.0
     # This prevents thundering herd when multiple tasks retry simultaneously
     jitter = 0.5 + random.random() * 0.5
@@ -160,6 +162,7 @@ def execute_step_task(
     """
     # Ensure logging is configured in forked worker process
     from pyworkflow.celery.app import _configure_worker_logging
+
     _configure_worker_logging()
 
     from pyworkflow.core.registry import _registry
@@ -301,7 +304,11 @@ def execute_step_task(
         # Check if we have retries left
         if self.request.retries < max_retries:
             # Use explicit retry_after if provided, otherwise use exponential backoff
-            countdown = e.retry_after if e.retry_after else _calculate_exponential_backoff(self.request.retries)
+            countdown = (
+                e.retry_after
+                if e.retry_after
+                else _calculate_exponential_backoff(self.request.retries)
+            )
             logger.warning(
                 f"Step failed (retriable): {step_name}, retrying in {countdown:.1f}s...",
                 run_id=run_id,
@@ -380,6 +387,7 @@ def execute_step_task(
 
             _reset_step_context(step_context_token)
 
+
 async def _record_step_completion_and_resume(
     storage_config: dict[str, Any] | None,
     run_id: str,
@@ -438,9 +446,7 @@ async def _record_step_completion_and_resume(
 
     # Check if workflow has suspended (WORKFLOW_SUSPENDED event exists)
     # Only schedule resume if workflow has properly suspended
-    has_suspended = any(
-        evt.type == EventType.WORKFLOW_SUSPENDED for evt in events
-    )
+    has_suspended = any(evt.type == EventType.WORKFLOW_SUSPENDED for evt in events)
 
     if has_suspended:
         # Workflow has suspended, safe to schedule resume
@@ -531,9 +537,7 @@ async def _record_step_failure_and_resume(
 
     # Check if workflow has suspended (WORKFLOW_SUSPENDED event exists)
     # Only schedule resume if workflow has properly suspended
-    has_suspended = any(
-        evt.type == EventType.WORKFLOW_SUSPENDED for evt in events
-    )
+    has_suspended = any(evt.type == EventType.WORKFLOW_SUSPENDED for evt in events)
 
     if has_suspended:
         # Workflow has suspended, safe to schedule resume
@@ -633,6 +637,7 @@ def start_workflow_task(
     """
     # Ensure logging is configured in forked worker process
     from pyworkflow.celery.app import _configure_worker_logging
+
     _configure_worker_logging()
 
     logger.info(
@@ -707,6 +712,7 @@ def start_child_workflow_task(
     """
     # Ensure logging is configured in forked worker process
     from pyworkflow.celery.app import _configure_worker_logging
+
     _configure_worker_logging()
 
     logger.info(
@@ -1352,12 +1358,11 @@ async def _start_workflow_on_worker(
     workflow_name = workflow_meta.name
     config = get_config()
 
-    run = await storage.get_run(run_id)
+    run = await storage.get_run(run_id) if run_id else None
     logger.debug(
         f"_START_WORKFLOW_ON_WORKER ENTRY: {workflow_name} with run_id={run_id} and status={run.status.value if run else 'N/A'}",
         run_id=run_id,
     )
-
 
     # Check idempotency key
     if idempotency_key:
@@ -1736,6 +1741,7 @@ def resume_workflow_task(
     """
     # Ensure logging is configured in forked worker process
     from pyworkflow.celery.app import _configure_worker_logging
+
     _configure_worker_logging()
 
     logger.info(
@@ -1784,6 +1790,7 @@ def execute_scheduled_workflow_task(
     """
     # Ensure logging is configured in forked worker process
     from pyworkflow.celery.app import _configure_worker_logging
+
     _configure_worker_logging()
 
     logger.info("Executing scheduled workflow", schedule_id=schedule_id)

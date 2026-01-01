@@ -130,9 +130,7 @@ class TestStepCompletionResumePrevention:
 
         # Check events - should NOT have WORKFLOW_SUSPENDED
         events = await storage.get_events("test_run")
-        has_suspended = any(
-            e.type == EventType.WORKFLOW_SUSPENDED for e in events
-        )
+        has_suspended = any(e.type == EventType.WORKFLOW_SUSPENDED for e in events)
         assert has_suspended is False
 
         # This verifies the logic: when has_suspended is False,
@@ -181,9 +179,7 @@ class TestStepCompletionResumePrevention:
 
         # Check events - should have WORKFLOW_SUSPENDED
         events = await storage.get_events("test_run")
-        has_suspended = any(
-            e.type == EventType.WORKFLOW_SUSPENDED for e in events
-        )
+        has_suspended = any(e.type == EventType.WORKFLOW_SUSPENDED for e in events)
         assert has_suspended is True
 
         # This verifies the logic: when has_suspended is True,
@@ -224,9 +220,7 @@ class TestStepFailureResumePrevention:
 
         # Check events - should NOT have WORKFLOW_SUSPENDED
         events = await storage.get_events("test_run")
-        has_suspended = any(
-            e.type == EventType.WORKFLOW_SUSPENDED for e in events
-        )
+        has_suspended = any(e.type == EventType.WORKFLOW_SUSPENDED for e in events)
         assert has_suspended is False
 
     @pytest.mark.asyncio
@@ -264,9 +258,7 @@ class TestStepFailureResumePrevention:
 
         # Check events - should have WORKFLOW_SUSPENDED
         events = await storage.get_events("test_run")
-        has_suspended = any(
-            e.type == EventType.WORKFLOW_SUSPENDED for e in events
-        )
+        has_suspended = any(e.type == EventType.WORKFLOW_SUSPENDED for e in events)
         assert has_suspended is True
 
 

@@ -164,9 +164,7 @@ class TestBidirectionalEventCheck:
 
         # Case 1: No WORKFLOW_SUSPENDED event yet
         events = await storage.get_events(run_id)
-        has_suspended = any(
-            e.type == EventType.WORKFLOW_SUSPENDED for e in events
-        )
+        has_suspended = any(e.type == EventType.WORKFLOW_SUSPENDED for e in events)
         assert has_suspended is False  # Should NOT schedule resume
 
         # Case 2: Add WORKFLOW_SUSPENDED event
@@ -179,9 +177,7 @@ class TestBidirectionalEventCheck:
         await storage.record_event(suspended_event)
 
         events = await storage.get_events(run_id)
-        has_suspended = any(
-            e.type == EventType.WORKFLOW_SUSPENDED for e in events
-        )
+        has_suspended = any(e.type == EventType.WORKFLOW_SUSPENDED for e in events)
         assert has_suspended is True  # Should schedule resume
 
     @pytest.mark.asyncio
@@ -270,12 +266,14 @@ class TestEventBasedCoordination:
         await storage.create_run(run)
 
         # Record started event
-        await storage.record_event(create_workflow_started_event(
-            run_id=run_id,
-            workflow_name="test_workflow",
-            args=[],
-            kwargs={},
-        ))
+        await storage.record_event(
+            create_workflow_started_event(
+                run_id=run_id,
+                workflow_name="test_workflow",
+                args=[],
+                kwargs={},
+            )
+        )
 
         # === STEP COMPLETES FIRST ===
         step_event = create_step_completed_event(
@@ -332,12 +330,14 @@ class TestEventBasedCoordination:
         await storage.create_run(run)
 
         # Record started event
-        await storage.record_event(create_workflow_started_event(
-            run_id=run_id,
-            workflow_name="test_workflow",
-            args=[],
-            kwargs={},
-        ))
+        await storage.record_event(
+            create_workflow_started_event(
+                run_id=run_id,
+                workflow_name="test_workflow",
+                args=[],
+                kwargs={},
+            )
+        )
 
         # === WORKFLOW SUSPENDS FIRST ===
         suspended_event = create_workflow_suspended_event(
@@ -394,12 +394,14 @@ class TestEventBasedCoordination:
         await storage.create_run(run)
 
         # Record started event
-        await storage.record_event(create_workflow_started_event(
-            run_id=run_id,
-            workflow_name="test_workflow",
-            args=[],
-            kwargs={},
-        ))
+        await storage.record_event(
+            create_workflow_started_event(
+                run_id=run_id,
+                workflow_name="test_workflow",
+                args=[],
+                kwargs={},
+            )
+        )
 
         # === STEP FAILS FIRST ===
         step_event = create_step_failed_event(

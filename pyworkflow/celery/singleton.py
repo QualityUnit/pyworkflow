@@ -286,9 +286,7 @@ class SingletonWorkflowTask(Task):
                 existing_task_id=existing_task_id,
             )
             if self._raise_on_duplicate:
-                raise DuplicateTaskError(
-                    f"Duplicate of task {existing_task_id}", existing_task_id
-                )
+                raise DuplicateTaskError(f"Duplicate of task {existing_task_id}", existing_task_id)
             return self.AsyncResult(existing_task_id)
 
         # Race condition: lock disappeared, retry
@@ -308,7 +306,9 @@ class SingletonWorkflowTask(Task):
         logger.warning(f"Singleton lock unstable, submitting anyway: {self.name}")
         return super().apply_async(args, kwargs, task_id=task_id, **options)
 
-    def on_success(self, retval: Any, task_id: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+    def on_success(
+        self, retval: Any, task_id: str, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> None:
         """Release lock on successful task completion."""
         if self.release_lock_on_success:
             self.release_lock(task_args=args, task_kwargs=kwargs)

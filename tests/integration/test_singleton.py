@@ -301,11 +301,14 @@ class TestSingletonWorkflowTaskIntegration:
         lock_key = task.generate_lock("failing_apply_task", ["test_id"], {})
 
         # Make parent's apply_async raise
-        with patch.object(
-            SingletonWorkflowTask.__bases__[0],
-            "apply_async",
-            side_effect=Exception("Connection failed"),
-        ), pytest.raises(Exception, match="Connection failed"):
+        with (
+            patch.object(
+                SingletonWorkflowTask.__bases__[0],
+                "apply_async",
+                side_effect=Exception("Connection failed"),
+            ),
+            pytest.raises(Exception, match="Connection failed"),
+        ):
             task.apply_async(args=["test_id"], kwargs={})
 
         # Lock should be released after failure
@@ -431,9 +434,7 @@ class TestSingletonConcurrency:
 
         # Start multiple threads
         with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [
-                executor.submit(try_apply, "shared_run_id", i) for i in range(5)
-            ]
+            futures = [executor.submit(try_apply, "shared_run_id", i) for i in range(5)]
             start_event.set()
             for f in futures:
                 f.result()
@@ -443,4 +444,6 @@ class TestSingletonConcurrency:
         existing_tasks = [r for r in results if r[0] == "existing"]
 
         assert len(new_tasks) == 1, f"Expected 1 new task, got {len(new_tasks)}: {results}"
-        assert len(existing_tasks) == 4, f"Expected 4 existing, got {len(existing_tasks)}: {results}"
+        assert len(existing_tasks) == 4, (
+            f"Expected 4 existing, got {len(existing_tasks)}: {results}"
+        )

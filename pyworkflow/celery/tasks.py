@@ -170,6 +170,21 @@ def execute_step_task(
         )
         raise FatalError(f"Step '{step_name}' not found in registry")
 
+    # Ignore processing step if already completed (idempotency)
+    events = run_async(storage.get_events(run_id))
+    already_completed = any(
+        evt.type == EventType.STEP_COMPLETED and evt.data.get("step_id") == step_id
+        for evt in events
+    )
+    if already_completed:
+        logger.warning(
+            f"Step already completed by another task, skipping execution",
+            run_id=run_id,
+            step_id=step_id,
+            step_name=step_name,
+        )
+        return None
+
     # Deserialize arguments
     args = deserialize_args(args_json)
     kwargs = deserialize_kwargs(kwargs_json)

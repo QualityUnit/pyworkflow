@@ -10,6 +10,7 @@ These tasks enable:
 """
 
 import asyncio
+import random
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
     from pyworkflow.context.step_context import StepContext
 
 from celery import Task
-from celery.exceptions import WorkerLostError
+from celery.exceptions import MaxRetriesExceededError, Retry, WorkerLostError
 from loguru import logger
 
 from pyworkflow.celery.app import celery_app
@@ -47,10 +48,36 @@ from pyworkflow.storage.base import StorageBackend
 from pyworkflow.storage.schemas import RunStatus, WorkflowRun
 
 
+def _calculate_exponential_backoff(attempt: int, base: float = 2.0, max_delay: float = 300.0) -> float:
+    """
+    Calculate exponential backoff delay with jitter.
+
+    Args:
+        attempt: Current retry attempt (0-indexed)
+        base: Base delay multiplier (default: 2.0)
+        max_delay: Maximum delay in seconds (default: 300s / 5 minutes)
+
+    Returns:
+        Delay in seconds with jitter applied
+
+    Formula: min(base * 2^attempt, max_delay) * (0.5 + random(0, 0.5))
+    This gives delays like: ~1s, ~2s, ~4s, ~8s, ~16s, ... capped at max_delay
+    """
+    delay = min(base * (2 ** attempt), max_delay)
+    # Add jitter: multiply by random factor between 0.5 and 1.0
+    # This prevents thundering herd when multiple tasks retry simultaneously
+    jitter = 0.5 + random.random() * 0.5
+    return delay * jitter
+
+
 class WorkflowTask(Task):
     """Base task class for workflow execution with custom error handling."""
 
-    max_retries=0
+    # Allow unlimited Celery-level retries - our code controls the actual limit
+    # via the max_retries parameter passed to execute_step_task
+    max_retries = None
+    # Prevent message requeue loops when task fails
+    acks_on_failure_or_timeout = True
 
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         """
@@ -240,6 +267,19 @@ def execute_step_task(
 
         return result
 
+    except Retry:
+        # Celery retry in progress - let it propagate correctly
+        raise
+
+    except MaxRetriesExceededError:
+        # Celery hit its internal retry limit - treat as fatal
+        logger.error(
+            f"Step exceeded Celery retry limit: {step_name}",
+            run_id=run_id,
+            step_id=step_id,
+        )
+        raise
+
     except FatalError as e:
         logger.error(f"Step failed (fatal): {step_name}", run_id=run_id, step_id=step_id)
         # Record failure and resume workflow (workflow will fail on replay)
@@ -259,16 +299,18 @@ def execute_step_task(
     except RetryableError as e:
         # Check if we have retries left
         if self.request.retries < max_retries:
+            # Use explicit retry_after if provided, otherwise use exponential backoff
+            countdown = e.retry_after if e.retry_after else _calculate_exponential_backoff(self.request.retries)
             logger.warning(
-                f"Step failed (retriable): {step_name}, retrying...",
+                f"Step failed (retriable): {step_name}, retrying in {countdown:.1f}s...",
                 run_id=run_id,
                 step_id=step_id,
-                retry_after=e.retry_after,
+                countdown=countdown,
                 attempt=self.request.retries + 1,
                 max_retries=max_retries,
             )
             # Let Celery handle the retry - don't resume workflow yet
-            raise self.retry(countdown=e.retry_after or 2, exc=e)
+            raise self.retry(countdown=countdown, exc=e)
         else:
             # Max retries exhausted - record failure and resume workflow
             logger.error(
@@ -292,15 +334,18 @@ def execute_step_task(
     except Exception as e:
         # Check if we have retries left
         if self.request.retries < max_retries:
+            # Use exponential backoff for unexpected errors
+            countdown = _calculate_exponential_backoff(self.request.retries)
             logger.warning(
-                f"Step failed (unexpected): {step_name}, retrying...",
+                f"Step failed (unexpected): {step_name}, retrying in {countdown:.1f}s...",
                 run_id=run_id,
                 step_id=step_id,
                 error=str(e),
+                countdown=countdown,
                 attempt=self.request.retries + 1,
             )
-            # Treat unexpected errors as retriable
-            raise self.retry(exc=e, countdown=2)
+            # Treat unexpected errors as retriable with exponential backoff
+            raise self.retry(exc=e, countdown=countdown)
         else:
             # Max retries exhausted
             logger.error(
@@ -558,6 +603,7 @@ def _resolve_context_class(class_name: str) -> type["StepContext"] | None:
 
 @celery_app.task(
     name="pyworkflow.start_workflow",
+    base=WorkflowTask,
     queue="pyworkflow.workflows",
 )
 def start_workflow_task(
@@ -626,6 +672,7 @@ def start_workflow_task(
 
 @celery_app.task(
     name="pyworkflow.start_child_workflow",
+    base=WorkflowTask,
     queue="pyworkflow.workflows",
 )
 def start_child_workflow_task(
@@ -1304,6 +1351,13 @@ async def _start_workflow_on_worker(
     workflow_name = workflow_meta.name
     config = get_config()
 
+    run = await storage.get_run(run_id)
+    logger.debug(
+        f"_START_WORKFLOW_ON_WORKER ENTRY: {workflow_name} with run_id={run_id} and status={run.status.value if run else 'N/A'}",
+        run_id=run_id,
+    )
+
+
     # Check idempotency key
     if idempotency_key:
         existing_run = await storage.get_run_by_idempotency_key(idempotency_key)
@@ -1659,6 +1713,7 @@ async def _start_workflow_on_worker(
 
 @celery_app.task(
     name="pyworkflow.resume_workflow",
+    base=WorkflowTask,
     queue="pyworkflow.schedules",
 )
 def resume_workflow_task(
@@ -1704,6 +1759,7 @@ def resume_workflow_task(
 
 @celery_app.task(
     name="pyworkflow.execute_scheduled_workflow",
+    base=WorkflowTask,
     queue="pyworkflow.schedules",
 )
 def execute_scheduled_workflow_task(
@@ -2173,7 +2229,11 @@ def _get_storage_backend(config: dict[str, Any] | None = None) -> StorageBackend
     """
     from pyworkflow.storage.config import config_to_storage
 
-    return config_to_storage(config)
+    storage = config_to_storage(config)
+    logger.info(
+        f"_get_storage_backend: config={config}, storage_type={storage.__class__.__name__}",
+    )
+    return storage
 
 
 def schedule_workflow_resumption(

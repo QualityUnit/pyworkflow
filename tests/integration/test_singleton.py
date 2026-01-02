@@ -314,8 +314,8 @@ class TestSingletonWorkflowTaskIntegration:
         # Lock should be released after failure
         assert backend.get(lock_key) is None
 
-    def test_retry_keeps_lock(self, mock_celery_app, clean_redis):
-        """Test that lock is kept during retries."""
+    def test_on_failure_lock_behavior(self, mock_celery_app, clean_redis):
+        """Test that on_failure keeps lock when retries remain, releases on max retries."""
 
         class RetryingTask(SingletonWorkflowTask):
             name = "retrying_task"
@@ -351,7 +351,7 @@ class TestSingletonWorkflowTaskIntegration:
                 einfo=None,
             )
 
-            # Lock should still be held
+            # Lock should still be held (on_failure doesn't release when retries remain)
             assert backend.get(lock_key) == "task_id_123"
 
             # Simulate final failure (max retries exceeded)
@@ -368,6 +368,47 @@ class TestSingletonWorkflowTaskIntegration:
             )
 
             # Lock should now be released
+            assert backend.get(lock_key) is None
+        finally:
+            task.request_stack.pop()
+
+    def test_on_retry_releases_lock(self, mock_celery_app, clean_redis):
+        """Test that on_retry releases lock so retry can acquire it via apply_async."""
+
+        class RetryingTask(SingletonWorkflowTask):
+            name = "retrying_task_on_retry"
+            unique_on = ["task_id"]
+            max_retries = 5
+
+            def run(self, task_id: str):
+                return task_id
+
+        task = RetryingTask()
+        task.bind(mock_celery_app)
+        task._singleton_backend = None
+        task._singleton_config = None
+
+        backend = task.singleton_backend
+        lock_key = task.generate_lock("retrying_task_on_retry", ["retry_test"], {})
+
+        # Acquire lock manually
+        backend.lock(lock_key, "task_id_456", expiry=60)
+
+        # Simulate retry using Celery's request stack
+        mock_request = MagicMock()
+        mock_request.retries = 1
+        task.request_stack.push(mock_request)
+
+        try:
+            task.on_retry(
+                exc=Exception("temporary error"),
+                task_id="task_id_456",
+                args=("retry_test",),
+                kwargs={},
+                einfo=None,
+            )
+
+            # Lock should be released so retry can acquire it
             assert backend.get(lock_key) is None
         finally:
             task.request_stack.pop()

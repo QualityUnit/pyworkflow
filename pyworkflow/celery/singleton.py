@@ -96,7 +96,7 @@ class SingletonWorkflowTask(Task):
     Features:
     - Redis-based lock prevents duplicate execution
     - Support for unique_on with nested dict/list access (e.g., "data.run_id")
-    - Retry-safe: locks NOT released on failure (prevents duplicate during retries)
+    - Retry-safe: lock released in on_retry callback to allow retry to acquire it
     - Lock released on success or when max retries exceeded
     - Time-based lock expiry as safety net
 
@@ -124,7 +124,7 @@ class SingletonWorkflowTask(Task):
 
     # Lock behavior
     release_lock_on_success: bool = True
-    release_lock_on_failure: bool = False  # Keep lock during retries
+    release_lock_on_failure: bool = False  # Only release on max retries exceeded
 
     # Celery task settings
     max_retries: int | None = None
@@ -360,9 +360,11 @@ class SingletonWorkflowTask(Task):
         kwargs: dict[str, Any],
         einfo: Any,
     ) -> None:
-        """Lock is retained during retry."""
+        """Release lock during retry to allow retry task to acquire it."""
+        # Release lock so retry can acquire it via apply_async()
+        self.release_lock(task_args=args, task_kwargs=kwargs)
         logger.warning(
-            f"Task {self.name} retrying (lock retained)",
+            f"Task {self.name} retrying (lock released for retry)",
             task_id=task_id,
             retry_count=self.request.retries,
         )

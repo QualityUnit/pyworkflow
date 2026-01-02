@@ -4,7 +4,14 @@
 
 import { Button } from '@/components/ui/button'
 import { Maximize2, Minimize2 } from 'lucide-react'
-import type { ViewMode, LegendItem } from './timeline-types'
+import {
+  IconRoute,
+  IconPlayerTrackNext,
+  IconMoon,
+  IconWebhook,
+  IconGitBranch,
+} from '@tabler/icons-react'
+import type { ViewMode, LegendItem, EventCategory } from './timeline-types'
 import { getLegendItems } from './timeline-utils'
 
 interface TimelineControlsProps {
@@ -59,48 +66,29 @@ export function TimelineLegend() {
 }
 
 /**
+ * Get the icon component for a category.
+ */
+function getCategoryIconComponent(category: EventCategory, color: string, size: number = 14) {
+  const iconProps = { size, color, stroke: 1.5 }
+  switch (category) {
+    case 'workflow':
+      return <IconRoute {...iconProps} />
+    case 'step':
+      return <IconPlayerTrackNext {...iconProps} />
+    case 'sleep':
+      return <IconMoon {...iconProps} />
+    case 'hook':
+      return <IconWebhook {...iconProps} />
+    case 'child_workflow':
+      return <IconGitBranch {...iconProps} />
+    default:
+      return <IconRoute {...iconProps} />
+  }
+}
+
+/**
  * Render the shape icon for a legend item.
  */
 function LegendShape({ item }: { item: LegendItem }) {
-  const size = 14
-
-  switch (item.shape) {
-    case 'circle':
-      return (
-        <svg width={size} height={size} viewBox="0 0 16 16">
-          <circle cx="8" cy="8" r="5" fill={item.color} />
-        </svg>
-      )
-    case 'square':
-      return (
-        <svg width={size} height={size} viewBox="0 0 16 16">
-          <rect x="3" y="3" width="10" height="10" rx="1" fill={item.color} />
-        </svg>
-      )
-    case 'bar':
-      return (
-        <svg width={size} height={size} viewBox="0 0 16 16">
-          <rect x="2" y="5" width="12" height="6" rx="3" fill={item.color} />
-        </svg>
-      )
-    case 'diamond':
-      return (
-        <svg width={size} height={size} viewBox="0 0 16 16">
-          <polygon points="8,2 14,8 8,14 2,8" fill={item.color} />
-        </svg>
-      )
-    case 'double-circle':
-      return (
-        <svg width={size} height={size} viewBox="0 0 16 16">
-          <circle cx="8" cy="8" r="5" fill={item.color} />
-          <circle cx="8" cy="8" r="2.5" fill="white" fillOpacity="0.8" />
-        </svg>
-      )
-    default:
-      return (
-        <svg width={size} height={size} viewBox="0 0 16 16">
-          <circle cx="8" cy="8" r="5" fill={item.color} />
-        </svg>
-      )
-  }
+  return getCategoryIconComponent(item.category, item.color, 14)
 }

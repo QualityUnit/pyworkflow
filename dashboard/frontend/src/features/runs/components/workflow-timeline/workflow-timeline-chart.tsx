@@ -8,10 +8,11 @@ import * as d3 from 'd3'
 import type { TimelineEvent, ViewMode } from './timeline-types'
 import {
   formatDuration,
-  getNodeSymbol,
   pairEvents,
-  createBarPath,
   extractLanes,
+  formatEventType,
+  getCategoryIconPaths,
+  type OverheadSegment,
 } from './timeline-utils'
 import type { Event } from '@/api/types'
 
@@ -21,8 +22,9 @@ interface WorkflowTimelineChartProps {
   totalDurationMs: number
   selectedEventId: string | null
   onEventClick: (eventId: string) => void
-  onEventHover: (event: TimelineEvent | null) => void
+  onEventHover: (event: TimelineEvent | null, position?: { x: number; y: number }) => void
   viewMode: ViewMode
+  overheadSegments?: OverheadSegment[]
 }
 
 const LANE_HEIGHT = 40
@@ -36,6 +38,7 @@ export function WorkflowTimelineChart({
   onEventClick,
   onEventHover,
   viewMode,
+  overheadSegments = [],
 }: WorkflowTimelineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -92,6 +95,17 @@ export function WorkflowTimelineChart({
     // Clear previous render
     svg.selectAll('*').remove()
 
+    // Add clip path for zoom content
+    svg
+      .append('defs')
+      .append('clipPath')
+      .attr('id', 'chart-clip')
+      .append('rect')
+      .attr('x', 0)
+      .attr('y', 0)
+      .attr('width', width)
+      .attr('height', height)
+
     // Main group with margin
     const g = svg
       .attr('width', dimensions.width)
@@ -104,7 +118,7 @@ export function WorkflowTimelineChart({
       .scaleBand<number>()
       .domain(lanes.map((_, i) => i))
       .range([0, height])
-      .padding(0.2)
+      .padding(0.15)
 
     // Time scale (X axis)
     const xScale = d3
@@ -112,22 +126,17 @@ export function WorkflowTimelineChart({
       .domain([0, Math.max(totalDurationMs, 1000)])
       .range([0, width])
 
-    // Draw lane backgrounds with alternating colors
+    // Static elements group (lane labels - not affected by zoom)
+    const staticGroup = g.append('g').attr('class', 'static-elements')
+
+    // Draw lane labels (static)
     lanes.forEach((lane, i) => {
       const y = yScale(i) ?? 0
       const laneHeight = yScale.bandwidth()
 
-      // Lane background
-      g.append('rect')
-        .attr('x', 0)
-        .attr('y', y)
-        .attr('width', width)
-        .attr('height', laneHeight)
-        .attr('fill', i % 2 === 0 ? 'var(--muted)' : 'transparent')
-        .attr('opacity', 0.3)
-
       // Lane label
-      g.append('text')
+      staticGroup
+        .append('text')
         .attr('x', -10)
         .attr('y', y + laneHeight / 2)
         .attr('text-anchor', 'end')
@@ -136,138 +145,272 @@ export function WorkflowTimelineChart({
         .text(lane.name.length > 12 ? lane.name.slice(0, 12) + '…' : lane.name)
 
       // Color indicator dot
-      g.append('circle')
+      staticGroup
+        .append('circle')
         .attr('cx', -margin.left + 15)
         .attr('cy', y + laneHeight / 2)
         .attr('r', 5)
         .attr('fill', lane.color)
     })
 
-    // Draw duration bars for paired events
+    // Zoomable content group with clip path
+    const zoomGroup = g
+      .append('g')
+      .attr('class', 'zoom-content')
+      .attr('clip-path', 'url(#chart-clip)')
+
+    // Draw lane backgrounds with alternating colors
+    const laneBgGroup = zoomGroup.append('g').attr('class', 'lane-backgrounds')
+    lanes.forEach((_, i) => {
+      const y = yScale(i) ?? 0
+      const laneHeight = yScale.bandwidth()
+
+      laneBgGroup
+        .append('rect')
+        .attr('class', 'lane-bg')
+        .attr('x', 0)
+        .attr('y', y)
+        .attr('width', width)
+        .attr('height', laneHeight)
+        .attr('fill', i % 2 === 0 ? 'var(--muted)' : 'transparent')
+        .attr('opacity', 0.3)
+    })
+
+    // Vertical grid lines
+    const gridGroup = zoomGroup.append('g').attr('class', 'grid-lines')
+    const tickCount = Math.min(8, Math.floor(width / 100))
+    const gridTicks = xScale.ticks(tickCount)
+    gridTicks.forEach((tick: number) => {
+      gridGroup
+        .append('line')
+        .attr('class', 'grid-line')
+        .attr('x1', xScale(tick))
+        .attr('x2', xScale(tick))
+        .attr('y1', 0)
+        .attr('y2', height)
+        .attr('stroke', 'var(--border)')
+        .attr('stroke-opacity', 0.3)
+        .attr('stroke-dasharray', '2,2')
+        .attr('data-time', tick)
+    })
+
+    // Overhead segments group (hatched areas representing framework overhead)
+    const overheadGroup = zoomGroup.append('g').attr('class', 'overhead-segments')
+
+    // Create a hatched pattern for overhead visualization
+    const defs = svg.select('defs')
+    defs
+      .append('pattern')
+      .attr('id', 'overhead-pattern')
+      .attr('patternUnits', 'userSpaceOnUse')
+      .attr('width', 8)
+      .attr('height', 8)
+      .attr('patternTransform', 'rotate(45)')
+      .append('line')
+      .attr('x1', 0)
+      .attr('y1', 0)
+      .attr('x2', 0)
+      .attr('y2', 8)
+      .attr('stroke', 'var(--destructive)')
+      .attr('stroke-width', 2)
+      .attr('stroke-opacity', 0.3)
+
+    // Draw overhead segments as hatched bars
+    overheadSegments.forEach((segment) => {
+      const startX = xScale(segment.startMs)
+      const endX = xScale(segment.endMs)
+      const segmentWidth = Math.max(endX - startX, 2)
+
+      // Only draw if segment is visible (>2px)
+      if (segmentWidth > 2) {
+        overheadGroup
+          .append('rect')
+          .attr('class', 'overhead-bar')
+          .attr('x', startX)
+          .attr('y', 0)
+          .attr('width', segmentWidth)
+          .attr('height', height)
+          .attr('fill', 'url(#overhead-pattern)')
+          .attr('data-start-time', segment.startMs)
+          .attr('data-end-time', segment.endMs)
+          .attr('pointer-events', 'none')
+
+        // Add a small label at the top if segment is wide enough
+        if (segmentWidth > 40) {
+          overheadGroup
+            .append('text')
+            .attr('class', 'overhead-label')
+            .attr('x', startX + segmentWidth / 2)
+            .attr('y', 10)
+            .attr('text-anchor', 'middle')
+            .attr('fill', 'var(--destructive)')
+            .attr('font-size', '9px')
+            .attr('font-weight', '500')
+            .attr('opacity', 0.7)
+            .attr('data-start-time', segment.startMs)
+            .attr('data-end-time', segment.endMs)
+            .text(`+${formatDuration(segment.durationMs)}`)
+        }
+      }
+    })
+
+    // Duration bars group
+    const barsGroup = zoomGroup.append('g').attr('class', 'duration-bars')
+
+    // Draw duration bars for paired events (main visualization)
     eventPairs
       .filter((pair) => pair.endEvent && pair.durationMs && pair.durationMs > 0)
       .forEach((pair) => {
-        const startX = xScale(pair.startEvent.relativeTimeMs)
-        const endX = xScale(pair.endEvent!.relativeTimeMs)
+        const startTime = pair.startEvent.relativeTimeMs
+        const endTime = pair.endEvent!.relativeTimeMs
+        const startX = xScale(startTime)
+        const endX = xScale(endTime)
         const y = yScale(pair.startEvent.laneIndex) ?? 0
         const laneHeight = yScale.bandwidth()
-        const barHeight = Math.min(laneHeight * 0.5, 16)
+        const barHeight = Math.min(laneHeight * 0.7, 24)
         const barY = y + (laneHeight - barHeight) / 2
+        const barWidth = Math.max(endX - startX, 8)
+        const isSelected = pair.startEvent.event_id === selectedEventId || pair.endEvent?.event_id === selectedEventId
 
-        // Duration bar with lane color
-        g.append('rect')
+        // Create bar group for this pair
+        const barGroup = barsGroup.append('g').attr('class', 'bar-group')
+
+        // Duration bar with lane color - rounded pill style
+        barGroup
+          .append('rect')
+          .attr('class', 'duration-bar')
           .attr('x', startX)
           .attr('y', barY)
-          .attr('width', Math.max(endX - startX, 2))
+          .attr('width', barWidth)
           .attr('height', barHeight)
-          .attr('rx', 3)
+          .attr('rx', 6)
           .attr('fill', pair.startEvent.laneColor)
-          .attr('opacity', 0.4)
-          .attr('class', 'cursor-pointer')
+          .attr('opacity', isSelected ? 0.9 : 0.7)
+          .attr('stroke', isSelected ? 'var(--ring)' : 'none')
+          .attr('stroke-width', isSelected ? 2 : 0)
+          .attr('cursor', 'pointer')
+          .attr('data-start-time', startTime)
+          .attr('data-end-time', endTime)
+          .attr('data-bar-y', barY)
+          .attr('data-bar-height', barHeight)
           .on('click', () => onEventClick(pair.startEvent.event_id))
-          .on('mouseenter', () => onEventHover(pair.startEvent))
-          .on('mouseleave', () => onEventHover(null))
+          .on('mouseenter', function (this: SVGRectElement, e: MouseEvent) {
+            const [px, py] = d3.pointer(e, containerRef.current)
+            onEventHover(pair.startEvent, { x: px, y: py })
+            d3.select(this).attr('opacity', 0.9)
+          })
+          .on('mouseleave', function (this: SVGRectElement) {
+            onEventHover(null)
+            d3.select(this).attr('opacity', isSelected ? 0.9 : 0.7)
+          })
 
-        // Duration label on bar (if wide enough)
-        const barWidth = endX - startX
-        if (barWidth > 50 && pair.durationMs) {
-          g.append('text')
-            .attr('x', startX + barWidth / 2)
+        // Label inside bar - show step name or event type
+        const labelText = pair.startEvent.data?.step_name
+          ? String(pair.startEvent.data.step_name)
+          : formatEventType(pair.startEvent.type).split(' ')[0]
+
+        // Icon size
+        const iconSize = Math.min(barHeight - 4, 14)
+        const iconPadding = 4
+
+        // Add category icon at the left of the bar (if bar is wide enough)
+        if (barWidth > 30) {
+          const iconGroup = barGroup
+            .append('g')
+            .attr('class', 'bar-icon')
+            .attr('transform', `translate(${startX + iconPadding + iconSize / 2}, ${barY + barHeight / 2})`)
+            .attr('pointer-events', 'none')
+            .attr('data-start-time', startTime)
+            .attr('data-end-time', endTime)
+
+          // Draw each path of the icon (Tabler icons use multiple paths)
+          const iconPaths = getCategoryIconPaths(pair.startEvent.category)
+          iconPaths.forEach((pathData) => {
+            iconGroup
+              .append('path')
+              .attr('d', pathData)
+              .attr('transform', `scale(${iconSize / 24}) translate(-12, -12)`)
+              .attr('fill', 'none')
+              .attr('stroke', 'var(--foreground)')
+              .attr('stroke-width', 2)
+              .attr('stroke-linecap', 'round')
+              .attr('stroke-linejoin', 'round')
+          })
+        }
+
+        // Only show text label if bar is wide enough (accounting for icon)
+        const textStartX = barWidth > 30 ? startX + iconSize + iconPadding * 2 : startX
+        const availableTextWidth = barWidth > 30 ? barWidth - iconSize - iconPadding * 3 : barWidth
+
+        if (availableTextWidth > 30) {
+          barGroup
+            .append('text')
+            .attr('class', 'bar-label')
+            .attr('x', textStartX + availableTextWidth / 2)
             .attr('y', barY + barHeight / 2)
             .attr('text-anchor', 'middle')
             .attr('dominant-baseline', 'middle')
-            .attr('class', 'text-[10px] fill-foreground font-medium pointer-events-none')
-            .text(formatDuration(pair.durationMs))
+            .attr('fill', 'var(--foreground)')
+            .attr('font-size', '10px')
+            .attr('font-weight', '500')
+            .attr('pointer-events', 'none')
+            .attr('data-start-time', startTime)
+            .attr('data-end-time', endTime)
+            .attr('data-icon-offset', barWidth > 30 ? iconSize + iconPadding * 2 : 0)
+            .text(labelText.length > 10 ? labelText.slice(0, 10) + '…' : labelText)
         }
+
+        // Duration label removed since it was barely visible - duration shown in tooltip
       })
 
-    // Symbol generator
-    const symbolGenerator = d3.symbol().size(viewMode === 'compact' ? 80 : 120)
+    // Handle unpaired events (events without an end, show as small markers)
+    eventPairs
+      .filter((pair) => !pair.endEvent)
+      .forEach((pair) => {
+        const startTime = pair.startEvent.relativeTimeMs
+        const x = xScale(startTime)
+        const y = yScale(pair.startEvent.laneIndex) ?? 0
+        const laneHeight = yScale.bandwidth()
+        const markerSize = 8
+        const isSelected = pair.startEvent.event_id === selectedEventId
 
-    // Event nodes group
-    const nodesGroup = g.append('g').attr('class', 'event-nodes')
-
-    // Draw event nodes
-    events.forEach((event) => {
-      const x = xScale(event.relativeTimeMs)
-      const y = (yScale(event.laneIndex) ?? 0) + yScale.bandwidth() / 2
-      const isSelected = event.event_id === selectedEventId
-      const nodeSize = isSelected ? 1.3 : 1
-      const symbol = getNodeSymbol(event.category)
-
-      const nodeGroup = nodesGroup
-        .append('g')
-        .attr('transform', `translate(${x},${y})`)
-        .attr('class', 'cursor-pointer')
-        .on('click', (e) => {
-          e.stopPropagation()
-          onEventClick(event.event_id)
-        })
-        .on('mouseenter', () => onEventHover(event))
-        .on('mouseleave', () => onEventHover(null))
-
-      // Draw the shape based on category
-      if (symbol === 'bar') {
-        nodeGroup
-          .append('path')
-          .attr('d', createBarPath(16 * nodeSize, 8 * nodeSize))
-          .attr('fill', event.laneColor)
-          .attr('stroke', isSelected ? 'var(--ring)' : 'white')
-          .attr('stroke-width', isSelected ? 2 : 1.5)
-      } else if (symbol === 'double-circle') {
-        nodeGroup
+        barsGroup
           .append('circle')
-          .attr('r', 7 * nodeSize)
-          .attr('fill', event.laneColor)
+          .attr('class', 'unpaired-marker')
+          .attr('cx', x)
+          .attr('cy', y + laneHeight / 2)
+          .attr('r', markerSize)
+          .attr('fill', pair.startEvent.laneColor)
+          .attr('opacity', isSelected ? 0.9 : 0.7)
           .attr('stroke', isSelected ? 'var(--ring)' : 'white')
-          .attr('stroke-width', isSelected ? 2 : 1.5)
-        nodeGroup
-          .append('circle')
-          .attr('r', 3 * nodeSize)
-          .attr('fill', 'white')
-          .attr('fill-opacity', 0.8)
-      } else {
-        nodeGroup
-          .append('path')
-          .attr(
-            'd',
-            symbolGenerator.type(symbol).size((viewMode === 'compact' ? 80 : 120) * nodeSize * nodeSize)()
-          )
-          .attr('fill', event.laneColor)
-          .attr('stroke', isSelected ? 'var(--ring)' : 'white')
-          .attr('stroke-width', isSelected ? 2 : 1.5)
-      }
-
-      // Selection indicator
-      if (isSelected) {
-        nodeGroup
-          .append('circle')
-          .attr('r', 12)
-          .attr('fill', 'none')
-          .attr('stroke', event.laneColor)
-          .attr('stroke-width', 2)
-          .attr('stroke-opacity', 0.5)
-          .attr('stroke-dasharray', '3,2')
-      }
-    })
+          .attr('stroke-width', isSelected ? 2 : 1)
+          .attr('cursor', 'pointer')
+          .attr('data-time', startTime)
+          .on('click', () => onEventClick(pair.startEvent.event_id))
+          .on('mouseenter', (e: MouseEvent) => {
+            const [px, py] = d3.pointer(e, containerRef.current)
+            onEventHover(pair.startEvent, { x: px, y: py })
+          })
+          .on('mouseleave', () => onEventHover(null))
+      })
 
     // Time axis at bottom
     const xAxis = d3
       .axisBottom(xScale)
-      .ticks(Math.min(8, Math.floor(width / 100)))
-      .tickFormat((d) => formatDuration(d as number))
+      .ticks(tickCount)
+      .tickFormat((d: d3.NumberValue) => formatDuration(d as number))
 
-    g.append('g')
+    staticGroup
+      .append('g')
       .attr('transform', `translate(0,${height})`)
       .attr('class', 'timeline-axis')
       .call(xAxis)
       .selectAll('text')
       .attr('class', 'text-xs fill-muted-foreground')
 
-    g.selectAll('.timeline-axis path, .timeline-axis line').attr(
-      'class',
-      'stroke-border'
-    )
+    staticGroup
+      .selectAll('.timeline-axis path, .timeline-axis line')
+      .attr('class', 'stroke-border')
 
     // Zoom behavior
     const zoom = d3
@@ -281,31 +424,94 @@ export function WorkflowTimelineChart({
         [0, 0],
         [dimensions.width, dimensions.height],
       ])
-      .on('zoom', (event) => {
+      .on('zoom', (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
         const newXScale = event.transform.rescaleX(xScale)
 
         // Update axis
-        g.select<SVGGElement>('.timeline-axis').call(
+        staticGroup.select<SVGGElement>('.timeline-axis').call(
           xAxis.scale(newXScale) as unknown as (
             selection: d3.Selection<SVGGElement, unknown, null, undefined>
           ) => void
         )
 
-        // Update node positions (only X)
-        nodesGroup.selectAll('g').attr('transform', (_, i) => {
-          const e = events[i]
-          const y = (yScale(e.laneIndex) ?? 0) + yScale.bandwidth() / 2
-          return `translate(${newXScale(e.relativeTimeMs)},${y})`
+        // Update lane backgrounds width based on zoom
+        const zoomWidth = width * event.transform.k
+        const translateX = event.transform.x
+        laneBgGroup.selectAll<SVGRectElement, unknown>('.lane-bg').each(function (this: SVGRectElement) {
+          d3.select(this)
+            .attr('x', Math.min(0, translateX))
+            .attr('width', Math.max(zoomWidth, width))
+        })
+
+        // Update grid lines
+        gridGroup.selectAll<SVGLineElement, unknown>('.grid-line').each(function (this: SVGLineElement) {
+          const line = d3.select(this)
+          const time = parseFloat(line.attr('data-time') ?? '0')
+          const newX = newXScale(time)
+          line.attr('x1', newX).attr('x2', newX)
         })
 
         // Update duration bars
-        g.selectAll('rect').each(function () {
+        barsGroup.selectAll<SVGRectElement, unknown>('.duration-bar').each(function (this: SVGRectElement) {
           const rect = d3.select(this)
-          const x = parseFloat(rect.attr('data-start-x') || rect.attr('x'))
-          const endX = parseFloat(rect.attr('data-end-x') || '0')
-          if (endX > 0) {
-            rect.attr('x', newXScale(x)).attr('width', newXScale(endX) - newXScale(x))
-          }
+          const startTime = parseFloat(rect.attr('data-start-time') ?? '0')
+          const endTime = parseFloat(rect.attr('data-end-time') ?? '0')
+          const newStartX = newXScale(startTime)
+          const newEndX = newXScale(endTime)
+          rect.attr('x', newStartX).attr('width', Math.max(newEndX - newStartX, 8))
+        })
+
+        // Update bar icons
+        barsGroup.selectAll<SVGGElement, unknown>('.bar-icon').each(function (this: SVGGElement) {
+          const iconGroup = d3.select(this)
+          const startTime = parseFloat(iconGroup.attr('data-start-time') ?? '0')
+          const newStartX = newXScale(startTime)
+          const barY = parseFloat(iconGroup.attr('transform')?.match(/translate\([^,]+,\s*([^)]+)\)/)?.[1] ?? '0')
+          const iconSize = 14
+          const iconPadding = 4
+          iconGroup.attr('transform', `translate(${newStartX + iconPadding + iconSize / 2}, ${barY})`)
+        })
+
+        // Update bar labels (accounting for icon offset)
+        barsGroup.selectAll<SVGTextElement, unknown>('.bar-label').each(function (this: SVGTextElement) {
+          const text = d3.select(this)
+          const startTime = parseFloat(text.attr('data-start-time') ?? '0')
+          const endTime = parseFloat(text.attr('data-end-time') ?? '0')
+          const iconOffset = parseFloat(text.attr('data-icon-offset') ?? '0')
+          const newStartX = newXScale(startTime)
+          const newEndX = newXScale(endTime)
+          const barWidth = newEndX - newStartX
+          const textStartX = iconOffset > 0 ? newStartX + iconOffset : newStartX
+          const availableWidth = iconOffset > 0 ? barWidth - iconOffset - 4 : barWidth
+          text.attr('x', textStartX + availableWidth / 2)
+        })
+
+        // Update unpaired markers
+        barsGroup.selectAll<SVGCircleElement, unknown>('.unpaired-marker').each(function (this: SVGCircleElement) {
+          const circle = d3.select(this)
+          const time = parseFloat(circle.attr('data-time') ?? '0')
+          circle.attr('cx', newXScale(time))
+        })
+
+        // Update overhead bars
+        overheadGroup.selectAll<SVGRectElement, unknown>('.overhead-bar').each(function (this: SVGRectElement) {
+          const rect = d3.select(this)
+          const startTime = parseFloat(rect.attr('data-start-time') ?? '0')
+          const endTime = parseFloat(rect.attr('data-end-time') ?? '0')
+          const newStartX = newXScale(startTime)
+          const newEndX = newXScale(endTime)
+          rect.attr('x', newStartX).attr('width', Math.max(newEndX - newStartX, 2))
+        })
+
+        // Update overhead labels
+        overheadGroup.selectAll<SVGTextElement, unknown>('.overhead-label').each(function (this: SVGTextElement) {
+          const text = d3.select(this)
+          const startTime = parseFloat(text.attr('data-start-time') ?? '0')
+          const endTime = parseFloat(text.attr('data-end-time') ?? '0')
+          const newStartX = newXScale(startTime)
+          const newEndX = newXScale(endTime)
+          const segmentWidth = newEndX - newStartX
+          text.attr('x', newStartX + segmentWidth / 2)
         })
       })
 
@@ -325,6 +531,7 @@ export function WorkflowTimelineChart({
     viewMode,
     onEventClick,
     onEventHover,
+    overheadSegments,
   ])
 
   return (

@@ -178,7 +178,7 @@ def execute_step_task(
     )
     if already_completed:
         logger.warning(
-            f"Step already completed by another task, skipping execution",
+            "Step already completed by another task, skipping execution",
             run_id=run_id,
             step_id=step_id,
             step_name=step_name,

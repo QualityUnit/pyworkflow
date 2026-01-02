@@ -17,41 +17,41 @@ import type {
  * Uses Tailwind CSS colors for consistency with the design system.
  */
 export const eventColors: Record<string, string> = {
-  // Workflow events - Blue spectrum
-  'workflow.started': '#3b82f6', // blue-500
-  'workflow.completed': '#22c55e', // green-500
-  'workflow.failed': '#ef4444', // red-500
-  'workflow.interrupted': '#f97316', // orange-500
-  'workflow.cancelled': '#64748b', // slate-500
-  'workflow.paused': '#8b5cf6', // violet-500
-  'workflow.resumed': '#3b82f6', // blue-500
-  'workflow.continued_as_new': '#06b6d4', // cyan-500
+  // Workflow events - Soft blue spectrum
+  'workflow.started': '#93C5FD', // blue-300
+  'workflow.completed': '#86EFAC', // green-300
+  'workflow.failed': '#FCA5A5', // red-300
+  'workflow.interrupted': '#FDBA74', // orange-300
+  'workflow.cancelled': '#CBD5E1', // slate-300
+  'workflow.paused': '#C4B5FD', // violet-300
+  'workflow.resumed': '#93C5FD', // blue-300
+  'workflow.continued_as_new': '#67E8F9', // cyan-300
 
-  // Step events - Cyan/Green spectrum
-  'step.started': '#06b6d4', // cyan-500
-  'step.completed': '#22c55e', // green-500
-  'step.failed': '#ef4444', // red-500
-  'step.retrying': '#eab308', // yellow-500
-  'step.cancelled': '#64748b', // slate-500
+  // Step events - Soft cyan/green spectrum
+  'step.started': '#67E8F9', // cyan-300
+  'step.completed': '#86EFAC', // green-300
+  'step.failed': '#FCA5A5', // red-300
+  'step.retrying': '#FDE047', // yellow-300
+  'step.cancelled': '#CBD5E1', // slate-300
 
-  // Sleep events - Purple spectrum
-  'sleep.started': '#a855f7', // purple-500
-  'sleep.completed': '#7c3aed', // violet-600
+  // Sleep events - Soft purple spectrum
+  'sleep.started': '#D8B4FE', // purple-300
+  'sleep.completed': '#C4B5FD', // violet-300
 
-  // Hook events - Orange spectrum
-  'hook.created': '#f97316', // orange-500
-  'hook.received': '#22c55e', // green-500
-  'hook.expired': '#ef4444', // red-500
-  'hook.disposed': '#64748b', // slate-500
+  // Hook events - Soft orange spectrum
+  'hook.created': '#FDBA74', // orange-300
+  'hook.received': '#86EFAC', // green-300
+  'hook.expired': '#FCA5A5', // red-300
+  'hook.disposed': '#CBD5E1', // slate-300
 
-  // Child workflow events - Indigo spectrum
-  'child_workflow.started': '#6366f1', // indigo-500
-  'child_workflow.completed': '#22c55e', // green-500
-  'child_workflow.failed': '#ef4444', // red-500
-  'child_workflow.cancelled': '#64748b', // slate-500
+  // Child workflow events - Soft indigo spectrum
+  'child_workflow.started': '#A5B4FC', // indigo-300
+  'child_workflow.completed': '#86EFAC', // green-300
+  'child_workflow.failed': '#FCA5A5', // red-300
+  'child_workflow.cancelled': '#CBD5E1', // slate-300
 
   // Cancellation
-  'cancellation.requested': '#ef4444', // red-500
+  'cancellation.requested': '#FCA5A5', // red-300
 }
 
 /**
@@ -59,18 +59,18 @@ export const eventColors: Record<string, string> = {
  * Provides visually distinct colors for up to 12 different items.
  */
 export const laneColors: string[] = [
-  '#3b82f6', // blue-500
-  '#22c55e', // green-500
-  '#f97316', // orange-500
-  '#a855f7', // purple-500
-  '#06b6d4', // cyan-500
-  '#ec4899', // pink-500
-  '#eab308', // yellow-500
-  '#6366f1', // indigo-500
-  '#14b8a6', // teal-500
-  '#f43f5e', // rose-500
-  '#84cc16', // lime-500
-  '#8b5cf6', // violet-500
+  '#93C5FD', // blue-300
+  '#86EFAC', // green-300
+  '#FDBA74', // orange-300
+  '#D8B4FE', // purple-300
+  '#67E8F9', // cyan-300
+  '#F9A8D4', // pink-300
+  '#FDE047', // yellow-300
+  '#A5B4FC', // indigo-300
+  '#5EEAD4', // teal-300
+  '#FDA4AF', // rose-300
+  '#BEF264', // lime-300
+  '#C4B5FD', // violet-300
 ]
 
 /**
@@ -265,6 +265,158 @@ export function calculateTotalDuration(events: TimelineEvent[]): number {
 }
 
 /**
+ * Overhead statistics for the workflow.
+ */
+export interface OverheadStats {
+  totalDurationMs: number
+  stepDurationMs: number
+  sleepDurationMs: number
+  hookDurationMs: number
+  overheadMs: number
+  overheadPercent: number
+}
+
+/**
+ * Overhead segment representing a gap in the timeline.
+ */
+export interface OverheadSegment {
+  startMs: number
+  endMs: number
+  durationMs: number
+  afterEvent: string // Description of what event this gap follows
+}
+
+/**
+ * Calculate framework overhead.
+ * Overhead = Total workflow time - (step durations + sleep durations + hook durations)
+ *
+ * Steps represent actual work being done.
+ * Sleeps and hooks are expected waiting periods (not overhead).
+ * Overhead represents framework processing time (event recording, task scheduling, etc.)
+ */
+export function calculateOverheadStats(pairs: EventPair[]): OverheadStats {
+  let totalDurationMs = 0
+  let stepDurationMs = 0
+  let sleepDurationMs = 0
+  let hookDurationMs = 0
+
+  for (const pair of pairs) {
+    if (!pair.endEvent || !pair.durationMs) continue
+
+    const category = pair.startEvent.category
+
+    if (category === 'workflow') {
+      totalDurationMs = Math.max(totalDurationMs, pair.durationMs)
+    } else if (category === 'step') {
+      stepDurationMs += pair.durationMs
+    } else if (category === 'sleep') {
+      sleepDurationMs += pair.durationMs
+    } else if (category === 'hook') {
+      hookDurationMs += pair.durationMs
+    }
+    // child_workflow durations are not added since they're tracked separately
+  }
+
+  // Overhead = total - (steps + sleep + hooks)
+  // This represents time spent on framework operations
+  const workTime = stepDurationMs + sleepDurationMs + hookDurationMs
+  const overheadMs = Math.max(0, totalDurationMs - workTime)
+  const overheadPercent = totalDurationMs > 0 ? (overheadMs / totalDurationMs) * 100 : 0
+
+  return {
+    totalDurationMs,
+    stepDurationMs,
+    sleepDurationMs,
+    hookDurationMs,
+    overheadMs,
+    overheadPercent,
+  }
+}
+
+/**
+ * Find overhead segments (gaps between events) for visualization.
+ * Returns segments where no step/sleep/hook was actively running.
+ */
+export function findOverheadSegments(pairs: EventPair[]): OverheadSegment[] {
+  // Get all completed pairs sorted by start time
+  const completedPairs = pairs
+    .filter((p) => p.endEvent && p.durationMs && p.startEvent.category !== 'workflow')
+    .sort((a, b) => a.startEvent.relativeTimeMs - b.startEvent.relativeTimeMs)
+
+  if (completedPairs.length === 0) return []
+
+  // Find the workflow pair for total duration
+  const workflowPair = pairs.find((p) => p.startEvent.category === 'workflow' && p.endEvent)
+  const workflowEndMs = workflowPair?.endEvent?.relativeTimeMs ??
+    Math.max(...completedPairs.map((p) => p.endEvent!.relativeTimeMs))
+
+  const segments: OverheadSegment[] = []
+
+  // Check for initial overhead (before first event)
+  const firstPair = completedPairs[0]
+  if (firstPair.startEvent.relativeTimeMs > 10) { // >10ms threshold
+    segments.push({
+      startMs: 0,
+      endMs: firstPair.startEvent.relativeTimeMs,
+      durationMs: firstPair.startEvent.relativeTimeMs,
+      afterEvent: 'Workflow started',
+    })
+  }
+
+  // Build timeline of active periods
+  type TimePoint = { time: number; type: 'start' | 'end'; name: string }
+  const points: TimePoint[] = []
+
+  for (const pair of completedPairs) {
+    const name = pair.startEvent.data?.step_name
+      ? String(pair.startEvent.data.step_name)
+      : pair.startEvent.laneName
+    points.push({ time: pair.startEvent.relativeTimeMs, type: 'start', name })
+    points.push({ time: pair.endEvent!.relativeTimeMs, type: 'end', name })
+  }
+
+  points.sort((a, b) => a.time - b.time || (a.type === 'start' ? -1 : 1))
+
+  // Find gaps where nothing is running
+  let activeCount = 0
+  let lastEndTime = 0
+  let lastEndName = ''
+
+  for (const point of points) {
+    if (point.type === 'start') {
+      // Check for gap before this start
+      if (activeCount === 0 && point.time - lastEndTime > 10) { // >10ms threshold
+        segments.push({
+          startMs: lastEndTime,
+          endMs: point.time,
+          durationMs: point.time - lastEndTime,
+          afterEvent: lastEndName || 'Previous event',
+        })
+      }
+      activeCount++
+    } else {
+      activeCount--
+      if (activeCount === 0) {
+        lastEndTime = point.time
+        lastEndName = point.name
+      }
+    }
+  }
+
+  // Check for final overhead (after last event)
+  if (lastEndTime < workflowEndMs - 10) { // >10ms threshold
+    segments.push({
+      startMs: lastEndTime,
+      endMs: workflowEndMs,
+      durationMs: workflowEndMs - lastEndTime,
+      afterEvent: lastEndName || 'Last event',
+    })
+  }
+
+  return segments
+}
+
+/**
  * Pair start/end events for connecting lines.
  */
 export function pairEvents(events: TimelineEvent[]): EventPair[] {
@@ -379,32 +531,32 @@ export function getLegendItems(): LegendItem[] {
     {
       category: 'workflow',
       label: 'Workflow',
-      color: '#3b82f6',
-      shape: 'circle',
+      color: '#93C5FD',
+      shape: 'bar',
     },
     {
       category: 'step',
       label: 'Step',
-      color: '#06b6d4',
-      shape: 'square',
+      color: '#67E8F9',
+      shape: 'bar',
     },
     {
       category: 'sleep',
       label: 'Sleep',
-      color: '#a855f7',
+      color: '#D8B4FE',
       shape: 'bar',
     },
     {
       category: 'hook',
       label: 'Hook',
-      color: '#f97316',
-      shape: 'diamond',
+      color: '#FDBA74',
+      shape: 'bar',
     },
     {
       category: 'child_workflow',
       label: 'Child WF',
-      color: '#6366f1',
-      shape: 'double-circle',
+      color: '#A5B4FC',
+      shape: 'bar',
     },
   ]
 }
@@ -415,6 +567,65 @@ export function getLegendItems(): LegendItem[] {
 export function createBarPath(width: number = 16, height: number = 8): string {
   const r = height / 2
   return `M${-width / 2},${-r} h${width - r} a${r},${r} 0 0 1 0,${height} h${-(width - r)} a${r},${r} 0 0 1 0,${-height} Z`
+}
+
+/**
+ * Get SVG path data for category icons (exact paths from Tabler Icons).
+ * These paths are sized for a 24x24 viewBox.
+ * Returns an array of path strings for multi-path icons.
+ */
+export function getCategoryIconPaths(category: EventCategory): string[] {
+  switch (category) {
+    case 'workflow':
+      // IconRoute - represents workflow path
+      return [
+        'M3 19a2 2 0 1 0 4 0a2 2 0 0 0 -4 0',
+        'M19 7a2 2 0 1 0 0 -4a2 2 0 0 0 0 4z',
+        'M11 19h5.5a3.5 3.5 0 0 0 0 -7h-8a3.5 3.5 0 0 1 0 -7h4.5',
+      ]
+    case 'step':
+      // IconPlayerTrackNext - represents a step forward
+      return [
+        'M3 5v14l8 -7z',
+        'M14 5v14l8 -7z',
+      ]
+    case 'sleep':
+      // IconMoon
+      return [
+        'M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z',
+      ]
+    case 'hook':
+      // IconWebhook
+      return [
+        'M4.876 13.61a4 4 0 1 0 6.124 3.39h6',
+        'M15.066 20.502a4 4 0 1 0 1.934 -7.502c-.706 0 -1.424 .179 -2 .5l-3 -5.5',
+        'M16 8a4 4 0 1 0 -8 0c0 1.506 .77 2.818 2 3.5l-3 5.5',
+      ]
+    case 'child_workflow':
+      // IconGitBranch - represents child workflow branching
+      return [
+        'M7 18m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0',
+        'M7 6m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0',
+        'M17 6m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0',
+        'M7 8l0 8',
+        'M9 18h6a2 2 0 0 0 2 -2v-5',
+        'M14 14l3 -3l3 3',
+      ]
+    default:
+      return [
+        'M3 19a2 2 0 1 0 4 0a2 2 0 0 0 -4 0',
+        'M19 7a2 2 0 1 0 0 -4a2 2 0 0 0 0 4z',
+        'M11 19h5.5a3.5 3.5 0 0 0 0 -7h-8a3.5 3.5 0 0 1 0 -7h4.5',
+      ]
+  }
+}
+
+/**
+ * Get SVG path data for category icons as a single combined path.
+ * @deprecated Use getCategoryIconPaths() for proper multi-path rendering.
+ */
+export function getCategoryIconPath(category: EventCategory): string {
+  return getCategoryIconPaths(category).join(' ')
 }
 
 /**

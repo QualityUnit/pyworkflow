@@ -291,12 +291,13 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def get_hook(self, hook_id: str) -> Hook | None:
+    async def get_hook(self, hook_id: str, run_id: str | None = None) -> Hook | None:
         """
         Retrieve a hook by ID.
 
         Args:
             hook_id: Hook identifier
+            run_id: Run ID (required for composite key lookup in SQL backends)
 
         Returns:
             Hook if found, None otherwise
@@ -322,6 +323,7 @@ class StorageBackend(ABC):
         hook_id: str,
         status: HookStatus,
         payload: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         """
         Update hook status and optionally payload.
@@ -330,6 +332,7 @@ class StorageBackend(ABC):
             hook_id: Hook identifier
             status: New status
             payload: JSON serialized payload (if received)
+            run_id: Run ID (required for composite key lookup in SQL backends)
         """
         pass
 

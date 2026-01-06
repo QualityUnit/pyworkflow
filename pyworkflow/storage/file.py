@@ -464,7 +464,8 @@ class FileStorageBackend(StorageBackend):
 
     async def create_hook(self, hook: Hook) -> None:
         """Create a hook record."""
-        hook_file = self.hooks_dir / f"{hook.hook_id}.json"
+        # Use composite filename: run_id__hook_id.json (double underscore separator)
+        hook_file = self.hooks_dir / f"{hook.run_id}__{hook.hook_id}.json"
         lock_file = self.locks_dir / "token_index.lock"
         lock = FileLock(str(lock_file))
 
@@ -473,16 +474,25 @@ class FileStorageBackend(StorageBackend):
         def _write() -> None:
             with lock:
                 hook_file.write_text(json.dumps(data, indent=2))
-                # Update token index
+                # Update token index (stores run_id:hook_id as value)
                 index = self._load_token_index()
-                index[hook.token] = hook.hook_id
+                index[hook.token] = f"{hook.run_id}:{hook.hook_id}"
                 self._save_token_index(index)
 
         await asyncio.to_thread(_write)
 
-    async def get_hook(self, hook_id: str) -> Hook | None:
-        """Retrieve a hook by ID."""
-        hook_file = self.hooks_dir / f"{hook_id}.json"
+    async def get_hook(self, hook_id: str, run_id: str | None = None) -> Hook | None:
+        """Retrieve a hook by ID (requires run_id for composite filename)."""
+        if run_id:
+            hook_file = self.hooks_dir / f"{run_id}__{hook_id}.json"
+        else:
+            # Fallback: try old format for backwards compat
+            hook_file = self.hooks_dir / f"{hook_id}.json"
+            if not hook_file.exists():
+                # Search for any file with this hook_id
+                for f in self.hooks_dir.glob(f"*__{hook_id}.json"):
+                    hook_file = f
+                    break
 
         if not hook_file.exists():
             return None
@@ -496,13 +506,18 @@ class FileStorageBackend(StorageBackend):
     async def get_hook_by_token(self, token: str) -> Hook | None:
         """Retrieve a hook by its token."""
 
-        def _lookup() -> str | None:
+        def _lookup() -> tuple[str, str] | None:
             index = self._load_token_index()
-            return index.get(token)
+            value = index.get(token)
+            if value and ":" in value:
+                parts = value.split(":", 1)
+                return (parts[0], parts[1])
+            return None
 
-        hook_id = await asyncio.to_thread(_lookup)
-        if hook_id:
-            return await self.get_hook(hook_id)
+        result = await asyncio.to_thread(_lookup)
+        if result:
+            run_id, hook_id = result
+            return await self.get_hook(hook_id, run_id)
         return None
 
     async def update_hook_status(
@@ -510,14 +525,25 @@ class FileStorageBackend(StorageBackend):
         hook_id: str,
         status: HookStatus,
         payload: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         """Update hook status and optionally payload."""
-        hook_file = self.hooks_dir / f"{hook_id}.json"
+        if run_id:
+            hook_file = self.hooks_dir / f"{run_id}__{hook_id}.json"
+        else:
+            # Fallback: try old format
+            hook_file = self.hooks_dir / f"{hook_id}.json"
+            if not hook_file.exists():
+                # Search for any file with this hook_id
+                for f in self.hooks_dir.glob(f"*__{hook_id}.json"):
+                    hook_file = f
+                    break
 
         if not hook_file.exists():
             raise ValueError(f"Hook {hook_id} not found")
 
-        lock_file = self.locks_dir / f"hook_{hook_id}.lock"
+        safe_hook_id = hook_id.replace("/", "_").replace(":", "_")
+        lock_file = self.locks_dir / f"hook_{safe_hook_id}.lock"
         lock = FileLock(str(lock_file))
 
         def _update() -> None:

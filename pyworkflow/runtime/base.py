@@ -97,6 +97,7 @@ class Runtime(ABC):
         self,
         run_id: str,
         storage: "StorageBackend",
+        triggered_by_hook_id: str | None = None,
     ) -> None:
         """
         Schedule a workflow to be resumed immediately.
@@ -109,6 +110,9 @@ class Runtime(ABC):
         Args:
             run_id: The run_id of the workflow to resume
             storage: Storage backend
+            triggered_by_hook_id: Optional hook ID that triggered this resume.
+                                  Used by distributed runtimes to prevent
+                                  spurious resumes from duplicate calls.
         """
         # Default implementation: no-op
         # Subclasses override if they support async scheduling

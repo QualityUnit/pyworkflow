@@ -175,11 +175,11 @@ class MySQLStorageBackend(StorageBackend):
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """)
 
-            # Hooks table
+            # Hooks table (composite PK: run_id + hook_id since hook_id is only unique per run)
             await cur.execute("""
                     CREATE TABLE IF NOT EXISTS hooks (
-                        hook_id VARCHAR(255) PRIMARY KEY,
                         run_id VARCHAR(255) NOT NULL,
+                        hook_id VARCHAR(255) NOT NULL,
                         token VARCHAR(255) UNIQUE NOT NULL,
                         created_at DATETIME(6) NOT NULL,
                         received_at DATETIME(6),
@@ -187,6 +187,7 @@ class MySQLStorageBackend(StorageBackend):
                         status VARCHAR(50) NOT NULL,
                         payload LONGTEXT,
                         metadata LONGTEXT DEFAULT '{}',
+                        PRIMARY KEY (run_id, hook_id),
                         UNIQUE INDEX idx_hooks_token (token),
                         INDEX idx_hooks_run_id (run_id),
                         INDEX idx_hooks_status (status),
@@ -660,12 +661,19 @@ class MySQLStorageBackend(StorageBackend):
                 ),
             )
 
-    async def get_hook(self, hook_id: str) -> Hook | None:
-        """Retrieve a hook by ID."""
+    async def get_hook(self, hook_id: str, run_id: str | None = None) -> Hook | None:
+        """Retrieve a hook by ID (requires run_id for composite key lookup)."""
         pool = self._ensure_connected()
 
         async with pool.acquire() as conn, conn.cursor(aiomysql.DictCursor) as cur:
-            await cur.execute("SELECT * FROM hooks WHERE hook_id = %s", (hook_id,))
+            if run_id:
+                await cur.execute(
+                    "SELECT * FROM hooks WHERE run_id = %s AND hook_id = %s",
+                    (run_id, hook_id),
+                )
+            else:
+                # Fallback: find any hook with this ID (may return wrong one if duplicates)
+                await cur.execute("SELECT * FROM hooks WHERE hook_id = %s", (hook_id,))
             row = await cur.fetchone()
 
         if not row:
@@ -691,6 +699,7 @@ class MySQLStorageBackend(StorageBackend):
         hook_id: str,
         status: HookStatus,
         payload: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         """Update hook status and optionally payload."""
         pool = self._ensure_connected()
@@ -706,13 +715,20 @@ class MySQLStorageBackend(StorageBackend):
             updates.append("received_at = %s")
             params.append(datetime.now(UTC))
 
-        params.append(hook_id)
-
         async with pool.acquire() as conn, conn.cursor() as cur:
-            await cur.execute(
-                f"UPDATE hooks SET {', '.join(updates)} WHERE hook_id = %s",
-                tuple(params),
-            )
+            if run_id:
+                params.append(run_id)
+                params.append(hook_id)
+                await cur.execute(
+                    f"UPDATE hooks SET {', '.join(updates)} WHERE run_id = %s AND hook_id = %s",
+                    tuple(params),
+                )
+            else:
+                params.append(hook_id)
+                await cur.execute(
+                    f"UPDATE hooks SET {', '.join(updates)} WHERE hook_id = %s",
+                    tuple(params),
+                )
 
     async def list_hooks(
         self,

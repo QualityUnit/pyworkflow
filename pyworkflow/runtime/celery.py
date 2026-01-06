@@ -202,25 +202,36 @@ class CeleryRuntime(Runtime):
         self,
         run_id: str,
         storage: "StorageBackend",
+        triggered_by_hook_id: str | None = None,
     ) -> None:
         """
         Schedule immediate workflow resumption via Celery task.
 
         This is called by resume_hook() to trigger workflow resumption
         after a hook event is received.
+
+        Args:
+            run_id: The workflow run ID to resume
+            storage: Storage backend for configuration
+            triggered_by_hook_id: Optional hook ID that triggered this resume.
+                                  Used to prevent spurious resumes from duplicate calls.
         """
         from pyworkflow.celery.tasks import resume_workflow_task
 
         logger.info(
             f"Scheduling workflow resume via Celery: {run_id}",
             run_id=run_id,
+            triggered_by_hook_id=triggered_by_hook_id,
         )
 
         storage_config = self._get_storage_config(storage)
 
         resume_workflow_task.apply_async(
             args=[run_id],
-            kwargs={"storage_config": storage_config},
+            kwargs={
+                "storage_config": storage_config,
+                "triggered_by_hook_id": triggered_by_hook_id,
+            },
         )
 
         logger.info(

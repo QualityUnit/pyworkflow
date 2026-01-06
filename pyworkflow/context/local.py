@@ -114,6 +114,31 @@ class LocalContext(WorkflowContext):
             self._replay_events(event_log)
             self._is_replaying = False
 
+    def _extract_counter_from_id(self, id_string: str) -> int:
+        """Extract counter value from hook_id or sleep_id.
+
+        Formats:
+        - hook_{name}_{counter}
+        - sleep_{counter}_{duration}s
+
+        Args:
+            id_string: The hook_id or sleep_id string
+
+        Returns:
+            The counter value, or 0 if parsing fails
+        """
+        try:
+            parts = id_string.split("_")
+            if id_string.startswith("hook_"):
+                # hook_{name}_{counter} - counter is last part
+                return int(parts[-1])
+            elif id_string.startswith("sleep_"):
+                # sleep_{counter}_{duration}s - counter is second part
+                return int(parts[1])
+        except (ValueError, IndexError):
+            pass
+        return 0
+
     def _replay_events(self, events: list[Any]) -> None:
         """Replay events to restore state."""
         from pyworkflow.engine.events import EventType
@@ -141,6 +166,12 @@ class LocalContext(WorkflowContext):
                 hook_id = event.data.get("hook_id")
                 payload = deserialize(event.data.get("payload"))
                 self._hook_results[hook_id] = payload
+
+            elif event.type == EventType.HOOK_CREATED:
+                # Track pending hooks for re-suspension
+                hook_id = event.data.get("hook_id")
+                if hook_id:
+                    self._pending_hooks[hook_id] = event.data
 
             elif event.type == EventType.STEP_RETRYING:
                 step_id = event.data.get("step_id")
@@ -892,6 +923,21 @@ class LocalContext(WorkflowContext):
         if hook_id in self._hook_results:
             logger.debug(f"[replay] Hook {hook_id} already received")
             return self._hook_results[hook_id]
+
+        # Check if already pending (created but not yet received - replay mode)
+        # This prevents duplicate hook creation when workflow resumes
+        if hook_id in self._pending_hooks:
+            logger.debug(f"[replay] Hook {hook_id} already pending, re-suspending")
+            pending_data = self._pending_hooks[hook_id]
+            actual_token = pending_data.get("token")
+            # Call on_created callback if provided
+            if on_created is not None:
+                await on_created(actual_token)
+            raise SuspensionSignal(
+                reason=f"hook:{hook_id}",
+                hook_id=hook_id,
+                token=actual_token,
+            )
 
         # Generate composite token: run_id:hook_id
         from pyworkflow.primitives.resume_hook import create_hook_token

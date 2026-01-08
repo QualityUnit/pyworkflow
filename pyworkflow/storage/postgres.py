@@ -216,18 +216,19 @@ class PostgresStorageBackend(StorageBackend):
             # Indexes for steps
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_steps_run_id ON steps(run_id)")
 
-            # Hooks table
+            # Hooks table (composite PK: run_id + hook_id since hook_id is only unique per run)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS hooks (
-                    hook_id TEXT PRIMARY KEY,
                     run_id TEXT NOT NULL REFERENCES workflow_runs(run_id) ON DELETE CASCADE,
+                    hook_id TEXT NOT NULL,
                     token TEXT UNIQUE NOT NULL,
                     created_at TIMESTAMPTZ NOT NULL,
                     received_at TIMESTAMPTZ,
                     expires_at TIMESTAMPTZ,
                     status TEXT NOT NULL,
                     payload TEXT,
-                    metadata TEXT DEFAULT '{}'
+                    metadata TEXT DEFAULT '{}',
+                    PRIMARY KEY (run_id, hook_id)
                 )
             """)
 
@@ -751,12 +752,20 @@ class PostgresStorageBackend(StorageBackend):
                 json.dumps(hook.metadata),
             )
 
-    async def get_hook(self, hook_id: str) -> Hook | None:
-        """Retrieve a hook by ID."""
+    async def get_hook(self, hook_id: str, run_id: str | None = None) -> Hook | None:
+        """Retrieve a hook by ID (requires run_id for composite key lookup)."""
         pool = await self._get_pool()
 
         async with pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT * FROM hooks WHERE hook_id = $1", hook_id)
+            if run_id:
+                row = await conn.fetchrow(
+                    "SELECT * FROM hooks WHERE run_id = $1 AND hook_id = $2",
+                    run_id,
+                    hook_id,
+                )
+            else:
+                # Fallback: find any hook with this ID (may return wrong one if duplicates)
+                row = await conn.fetchrow("SELECT * FROM hooks WHERE hook_id = $1", hook_id)
 
         if not row:
             return None
@@ -780,6 +789,7 @@ class PostgresStorageBackend(StorageBackend):
         hook_id: str,
         status: HookStatus,
         payload: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         """Update hook status and optionally payload."""
         pool = await self._get_pool()
@@ -798,13 +808,20 @@ class PostgresStorageBackend(StorageBackend):
             params.append(datetime.now(UTC))
             param_idx += 1
 
-        params.append(hook_id)
-
         async with pool.acquire() as conn:
-            await conn.execute(
-                f"UPDATE hooks SET {', '.join(updates)} WHERE hook_id = ${param_idx}",
-                *params,
-            )
+            if run_id:
+                params.append(run_id)
+                params.append(hook_id)
+                await conn.execute(
+                    f"UPDATE hooks SET {', '.join(updates)} WHERE run_id = ${param_idx} AND hook_id = ${param_idx + 1}",
+                    *params,
+                )
+            else:
+                params.append(hook_id)
+                await conn.execute(
+                    f"UPDATE hooks SET {', '.join(updates)} WHERE hook_id = ${param_idx}",
+                    *params,
+                )
 
     async def list_hooks(
         self,

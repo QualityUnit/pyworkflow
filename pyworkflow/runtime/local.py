@@ -507,16 +507,24 @@ class LocalRuntime(Runtime):
         self,
         run_id: str,
         storage: "StorageBackend",
+        triggered_by_hook_id: str | None = None,
     ) -> None:
         """
         Schedule immediate workflow resumption.
 
         For local runtime, this directly calls resume_workflow since
         execution happens in-process.
+
+        Args:
+            run_id: The workflow run ID to resume
+            storage: Storage backend
+            triggered_by_hook_id: Optional hook ID that triggered this resume.
+                                  Not used in local runtime (no queueing).
         """
         logger.info(
             f"Scheduling immediate workflow resume: {run_id}",
             run_id=run_id,
+            triggered_by_hook_id=triggered_by_hook_id,
         )
 
         try:

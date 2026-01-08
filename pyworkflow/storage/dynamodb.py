@@ -722,9 +722,9 @@ class DynamoDBStorageBackend(StorageBackend):
     async def create_hook(self, hook: Hook) -> None:
         """Create a hook record."""
         async with self._get_client() as client:
-            # Main hook item
+            # Main hook item (composite key: run_id + hook_id)
             item = {
-                "PK": f"HOOK#{hook.hook_id}",
+                "PK": f"HOOK#{hook.run_id}#{hook.hook_id}",
                 "SK": "#METADATA",
                 "entity_type": "hook",
                 "hook_id": hook.hook_id,
@@ -741,12 +741,13 @@ class DynamoDBStorageBackend(StorageBackend):
                 "GSI1SK": f"{hook.status.value}#{hook.created_at.isoformat()}",
             }
 
-            # Token lookup item
+            # Token lookup item (stores run_id and hook_id for lookup)
             token_item = {
                 "PK": f"TOKEN#{hook.token}",
-                "SK": f"HOOK#{hook.hook_id}",
+                "SK": f"HOOK#{hook.run_id}#{hook.hook_id}",
                 "entity_type": "hook_token",
                 "hook_id": hook.hook_id,
+                "run_id": hook.run_id,
             }
 
             # Write both items
@@ -759,16 +760,26 @@ class DynamoDBStorageBackend(StorageBackend):
                 Item=self._dict_to_item(token_item),
             )
 
-    async def get_hook(self, hook_id: str) -> Hook | None:
-        """Retrieve a hook by ID."""
+    async def get_hook(self, hook_id: str, run_id: str | None = None) -> Hook | None:
+        """Retrieve a hook by ID (requires run_id for composite key)."""
         async with self._get_client() as client:
-            response = await client.get_item(
-                TableName=self.table_name,
-                Key={
-                    "PK": {"S": f"HOOK#{hook_id}"},
-                    "SK": {"S": "#METADATA"},
-                },
-            )
+            if run_id:
+                response = await client.get_item(
+                    TableName=self.table_name,
+                    Key={
+                        "PK": {"S": f"HOOK#{run_id}#{hook_id}"},
+                        "SK": {"S": "#METADATA"},
+                    },
+                )
+            else:
+                # Fallback: try old format without run_id
+                response = await client.get_item(
+                    TableName=self.table_name,
+                    Key={
+                        "PK": {"S": f"HOOK#{hook_id}"},
+                        "SK": {"S": "#METADATA"},
+                    },
+                )
 
             item = response.get("Item")
             if not item:
@@ -779,7 +790,7 @@ class DynamoDBStorageBackend(StorageBackend):
     async def get_hook_by_token(self, token: str) -> Hook | None:
         """Retrieve a hook by its token."""
         async with self._get_client() as client:
-            # First get the hook_id from the token lookup item
+            # First get the hook_id and run_id from the token lookup item
             response = await client.query(
                 TableName=self.table_name,
                 KeyConditionExpression="PK = :pk",
@@ -792,13 +803,16 @@ class DynamoDBStorageBackend(StorageBackend):
                 return None
 
             hook_id = self._deserialize_value(items[0]["hook_id"])
-            return await self.get_hook(hook_id)
+            run_id_attr = items[0].get("run_id")
+            run_id = self._deserialize_value(run_id_attr) if run_id_attr else None
+            return await self.get_hook(hook_id, run_id)
 
     async def update_hook_status(
         self,
         hook_id: str,
         status: HookStatus,
         payload: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         """Update hook status and optionally payload."""
         async with self._get_client() as client:
@@ -814,10 +828,12 @@ class DynamoDBStorageBackend(StorageBackend):
                 update_expr += ", received_at = :received_at"
                 expr_values[":received_at"] = {"S": datetime.now(UTC).isoformat()}
 
+            pk = f"HOOK#{run_id}#{hook_id}" if run_id else f"HOOK#{hook_id}"
+
             await client.update_item(
                 TableName=self.table_name,
                 Key={
-                    "PK": {"S": f"HOOK#{hook_id}"},
+                    "PK": {"S": pk},
                     "SK": {"S": "#METADATA"},
                 },
                 UpdateExpression=update_expr,

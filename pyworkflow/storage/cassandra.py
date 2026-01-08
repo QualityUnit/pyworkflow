@@ -1072,29 +1072,31 @@ class CassandraStorageBackend(StorageBackend):
 
         session.execute(batch)
 
-    async def get_hook(self, hook_id: str) -> Hook | None:
-        """Retrieve a hook by ID."""
+    async def get_hook(self, hook_id: str, run_id: str | None = None) -> Hook | None:
+        """Retrieve a hook by ID (run_id allows skipping lookup table)."""
         session = self._ensure_connected()
 
-        # First lookup run_id
-        lookup = session.execute(
-            SimpleStatement(
-                "SELECT run_id FROM hooks_by_id WHERE hook_id = %s",
-                consistency_level=self.read_consistency,
-            ),
-            (hook_id,),
-        ).one()
+        if not run_id:
+            # First lookup run_id from lookup table
+            lookup = session.execute(
+                SimpleStatement(
+                    "SELECT run_id FROM hooks_by_id WHERE hook_id = %s",
+                    consistency_level=self.read_consistency,
+                ),
+                (hook_id,),
+            ).one()
 
-        if not lookup:
-            return None
+            if not lookup:
+                return None
+            run_id = lookup.run_id
 
-        # Then get full hook
+        # Get full hook
         row = session.execute(
             SimpleStatement(
                 "SELECT * FROM hooks WHERE run_id = %s AND hook_id = %s",
                 consistency_level=self.read_consistency,
             ),
-            (lookup.run_id, hook_id),
+            (run_id, hook_id),
         ).one()
 
         if not row:
@@ -1137,21 +1139,24 @@ class CassandraStorageBackend(StorageBackend):
         hook_id: str,
         status: HookStatus,
         payload: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         """Update hook status and optionally payload."""
         session = self._ensure_connected()
 
-        # First lookup run_id
-        lookup = session.execute(
-            SimpleStatement(
-                "SELECT run_id FROM hooks_by_id WHERE hook_id = %s",
-                consistency_level=self.read_consistency,
-            ),
-            (hook_id,),
-        ).one()
+        if not run_id:
+            # First lookup run_id from lookup table
+            lookup = session.execute(
+                SimpleStatement(
+                    "SELECT run_id FROM hooks_by_id WHERE hook_id = %s",
+                    consistency_level=self.read_consistency,
+                ),
+                (hook_id,),
+            ).one()
 
-        if not lookup:
-            return
+            if not lookup:
+                return
+            run_id = lookup.run_id
 
         received_at = datetime.now(UTC) if status == HookStatus.RECEIVED else None
 
@@ -1164,7 +1169,7 @@ class CassandraStorageBackend(StorageBackend):
                 """,
                 consistency_level=self.write_consistency,
             ),
-            (status.value, payload, received_at, lookup.run_id, hook_id),
+            (status.value, payload, received_at, run_id, hook_id),
         )
 
     async def list_hooks(

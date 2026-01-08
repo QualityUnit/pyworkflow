@@ -164,11 +164,11 @@ class SQLiteStorageBackend(StorageBackend):
         # Indexes for steps
         await db.execute("CREATE INDEX IF NOT EXISTS idx_steps_run_id ON steps(run_id)")
 
-        # Hooks table
+        # Hooks table (composite PK: run_id + hook_id since hook_id is only unique per run)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS hooks (
-                hook_id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL,
+                hook_id TEXT NOT NULL,
                 token TEXT UNIQUE NOT NULL,
                 created_at TIMESTAMP NOT NULL,
                 received_at TIMESTAMP,
@@ -176,6 +176,7 @@ class SQLiteStorageBackend(StorageBackend):
                 status TEXT NOT NULL,
                 payload TEXT,
                 metadata TEXT DEFAULT '{}',
+                PRIMARY KEY (run_id, hook_id),
                 FOREIGN KEY (run_id) REFERENCES workflow_runs(run_id) ON DELETE CASCADE
             )
         """)
@@ -645,12 +646,20 @@ class SQLiteStorageBackend(StorageBackend):
         )
         await db.commit()
 
-    async def get_hook(self, hook_id: str) -> Hook | None:
-        """Retrieve a hook by ID."""
+    async def get_hook(self, hook_id: str, run_id: str | None = None) -> Hook | None:
+        """Retrieve a hook by ID (requires run_id for composite key lookup)."""
         db = self._ensure_connected()
 
-        async with db.execute("SELECT * FROM hooks WHERE hook_id = ?", (hook_id,)) as cursor:
-            row = await cursor.fetchone()
+        if run_id:
+            async with db.execute(
+                "SELECT * FROM hooks WHERE run_id = ? AND hook_id = ?",
+                (run_id, hook_id),
+            ) as cursor:
+                row = await cursor.fetchone()
+        else:
+            # Fallback: find any hook with this ID (may return wrong one if duplicates)
+            async with db.execute("SELECT * FROM hooks WHERE hook_id = ?", (hook_id,)) as cursor:
+                row = await cursor.fetchone()
 
         if not row:
             return None
@@ -674,6 +683,7 @@ class SQLiteStorageBackend(StorageBackend):
         hook_id: str,
         status: HookStatus,
         payload: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         """Update hook status and optionally payload."""
         db = self._ensure_connected()
@@ -689,12 +699,19 @@ class SQLiteStorageBackend(StorageBackend):
             updates.append("received_at = ?")
             params.append(datetime.now(UTC).isoformat())
 
-        params.append(hook_id)
-
-        await db.execute(
-            f"UPDATE hooks SET {', '.join(updates)} WHERE hook_id = ?",
-            tuple(params),
-        )
+        if run_id:
+            params.append(run_id)
+            params.append(hook_id)
+            await db.execute(
+                f"UPDATE hooks SET {', '.join(updates)} WHERE run_id = ? AND hook_id = ?",
+                tuple(params),
+            )
+        else:
+            params.append(hook_id)
+            await db.execute(
+                f"UPDATE hooks SET {', '.join(updates)} WHERE hook_id = ?",
+                tuple(params),
+            )
         await db.commit()
 
     async def list_hooks(

@@ -43,10 +43,10 @@ class InMemoryStorageBackend(StorageBackend):
         self._runs: dict[str, WorkflowRun] = {}
         self._events: dict[str, list[Event]] = {}
         self._steps: dict[str, StepExecution] = {}
-        self._hooks: dict[str, Hook] = {}
+        self._hooks: dict[tuple[str, str], Hook] = {}  # (run_id, hook_id) -> Hook
         self._schedules: dict[str, Schedule] = {}
         self._idempotency_index: dict[str, str] = {}  # key -> run_id
-        self._token_index: dict[str, str] = {}  # token -> hook_id
+        self._token_index: dict[str, tuple[str, str]] = {}  # token -> (run_id, hook_id)
         self._cancellation_flags: dict[str, bool] = {}  # run_id -> cancelled
         self._lock = threading.RLock()
         self._event_sequences: dict[str, int] = {}  # run_id -> next sequence
@@ -292,20 +292,28 @@ class InMemoryStorageBackend(StorageBackend):
     async def create_hook(self, hook: Hook) -> None:
         """Create a hook record."""
         with self._lock:
-            self._hooks[hook.hook_id] = hook
-            self._token_index[hook.token] = hook.hook_id
+            key = (hook.run_id, hook.hook_id)
+            self._hooks[key] = hook
+            self._token_index[hook.token] = key
 
-    async def get_hook(self, hook_id: str) -> Hook | None:
-        """Retrieve a hook by ID."""
+    async def get_hook(self, hook_id: str, run_id: str | None = None) -> Hook | None:
+        """Retrieve a hook by ID (requires run_id for composite key lookup)."""
         with self._lock:
-            return self._hooks.get(hook_id)
+            if run_id:
+                return self._hooks.get((run_id, hook_id))
+            else:
+                # Fallback: find any hook with this ID (may return wrong one if duplicates)
+                for (_r_id, h_id), hook in self._hooks.items():
+                    if h_id == hook_id:
+                        return hook
+                return None
 
     async def get_hook_by_token(self, token: str) -> Hook | None:
         """Retrieve a hook by its token."""
         with self._lock:
-            hook_id = self._token_index.get(token)
-            if hook_id:
-                return self._hooks.get(hook_id)
+            key = self._token_index.get(token)
+            if key:
+                return self._hooks.get(key)
             return None
 
     async def update_hook_status(
@@ -313,10 +321,19 @@ class InMemoryStorageBackend(StorageBackend):
         hook_id: str,
         status: HookStatus,
         payload: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         """Update hook status and optionally payload."""
         with self._lock:
-            hook = self._hooks.get(hook_id)
+            if run_id:
+                hook = self._hooks.get((run_id, hook_id))
+            else:
+                # Fallback: find any hook with this ID
+                hook = None
+                for (_r_id, h_id), h in self._hooks.items():
+                    if h_id == hook_id:
+                        hook = h
+                        break
             if hook:
                 hook.status = status
                 if payload is not None:

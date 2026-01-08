@@ -321,7 +321,7 @@ def execute_step_task(
             # Use exponential backoff for unexpected errors
             countdown = _calculate_exponential_backoff(self.request.retries)
             logger.warning(
-                f"Step failed (unexpected): {step_name}, retrying in {countdown:.1f}s...",
+                f"Step failed (unexpected): {step_name}, retrying in {countdown:.1f}s...: {str(e)}",
                 run_id=run_id,
                 step_id=step_id,
                 error=str(e),
@@ -1704,6 +1704,7 @@ async def _start_workflow_on_worker(
 def resume_workflow_task(
     run_id: str,
     storage_config: dict[str, Any] | None = None,
+    triggered_by_hook_id: str | None = None,
 ) -> Any | None:
     """
     Resume a suspended workflow.
@@ -1714,6 +1715,9 @@ def resume_workflow_task(
     Args:
         run_id: Workflow run ID to resume
         storage_config: Storage backend configuration
+        triggered_by_hook_id: Optional hook ID that triggered this resume.
+                              Used to prevent spurious resumes when a workflow
+                              has already moved past the triggering hook.
 
     Returns:
         Workflow result if completed, None if suspended again
@@ -1727,13 +1731,18 @@ def resume_workflow_task(
         f"RESUME_WORKFLOW_TASK ENTRY: {run_id}",
         run_id=run_id,
         celery_task_id=resume_workflow_task.request.id,
+        triggered_by_hook_id=triggered_by_hook_id,
     )
 
     # Get storage backend
     storage = _get_storage_backend(storage_config)
 
     # Resume workflow directly on worker
-    result = run_async(_resume_workflow_on_worker(run_id, storage, storage_config))
+    result = run_async(
+        _resume_workflow_on_worker(
+            run_id, storage, storage_config, triggered_by_hook_id=triggered_by_hook_id
+        )
+    )
 
     if result is not None:
         logger.info(f"Workflow completed on worker: {run_id}")
@@ -1940,15 +1949,81 @@ async def _complete_pending_sleeps(
     return updated_events
 
 
+def _is_hook_still_relevant(hook_id: str, events: list[Any]) -> bool:
+    """
+    Check if a hook is still relevant for resuming the workflow.
+
+    A hook is "still relevant" if there are no newer hooks created after
+    this hook was received. This prevents spurious resumes when:
+    1. resume_hook() is called multiple times for the same hook
+    2. The workflow moved past the first resume and created a new hook
+    3. The duplicate resume task runs but the workflow is now waiting on a different hook
+
+    Args:
+        hook_id: The hook ID that triggered the resume
+        events: List of workflow events
+
+    Returns:
+        True if the hook is still relevant, False if workflow has moved past it
+    """
+    from pyworkflow.engine.events import EventType
+
+    # Sort events by sequence to process in order
+    sorted_events = sorted(events, key=lambda e: e.sequence or 0)
+
+    # Find the sequence number of HOOK_RECEIVED for this hook
+    hook_received_sequence = None
+    for event in sorted_events:
+        if event.type == EventType.HOOK_RECEIVED and event.data.get("hook_id") == hook_id:
+            hook_received_sequence = event.sequence
+            break
+
+    if hook_received_sequence is None:
+        # Hook was never received - shouldn't happen, but allow resume
+        logger.warning(
+            f"Hook {hook_id} was not found in HOOK_RECEIVED events, allowing resume",
+            hook_id=hook_id,
+        )
+        return True
+
+    # Check if there's a HOOK_CREATED event after this hook was received
+    # (indicating the workflow has moved past this hook and created a new one)
+    for event in sorted_events:
+        if event.type == EventType.HOOK_CREATED:
+            event_sequence = event.sequence or 0
+            if event_sequence > hook_received_sequence:
+                # There's a newer hook - this resume is stale
+                newer_hook_id = event.data.get("hook_id")
+                logger.debug(
+                    f"Found newer hook {newer_hook_id} (seq {event_sequence}) "
+                    f"after triggered hook {hook_id} (received at seq {hook_received_sequence})",
+                    hook_id=hook_id,
+                    newer_hook_id=newer_hook_id,
+                )
+                return False
+
+    # No newer hooks created - this resume is still relevant
+    return True
+
+
 async def _resume_workflow_on_worker(
     run_id: str,
     storage: StorageBackend,
     storage_config: dict[str, Any] | None = None,
+    triggered_by_hook_id: str | None = None,
 ) -> Any | None:
     """
     Internal function to resume workflow on Celery worker.
 
     This mirrors the logic from testing.py but runs on workers.
+
+    Args:
+        run_id: Workflow run ID to resume
+        storage: Storage backend
+        storage_config: Storage configuration for task dispatch
+        triggered_by_hook_id: Optional hook ID that triggered this resume.
+                              If provided, we verify the hook is still relevant
+                              before resuming to prevent spurious resumes.
     """
     from pyworkflow.core.exceptions import WorkflowNotFoundError
 
@@ -1982,6 +2057,22 @@ async def _resume_workflow_on_worker(
             workflow_name=run.workflow_name,
         )
         return None
+
+    # If this resume was triggered by a specific hook, verify the hook is still relevant.
+    # A hook is "stale" if the workflow has already moved past it (created a newer hook).
+    # This prevents spurious resumes from duplicate resume_hook() calls.
+    if triggered_by_hook_id:
+        events = await storage.get_events(run_id)
+        hook_still_relevant = _is_hook_still_relevant(triggered_by_hook_id, events)
+        if not hook_still_relevant:
+            logger.info(
+                f"Hook {triggered_by_hook_id} is no longer relevant (workflow moved past it), "
+                "skipping spurious resume",
+                run_id=run_id,
+                workflow_name=run.workflow_name,
+                triggered_by_hook_id=triggered_by_hook_id,
+            )
+            return None
 
     # Check for cancellation flag
     cancellation_requested = await storage.check_cancellation_flag(run_id)

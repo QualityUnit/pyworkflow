@@ -185,6 +185,7 @@ async def resume_hook(
         hook_id=hook_id,
         status=HookStatus.RECEIVED,
         payload=serialized_payload,
+        run_id=run_id,
     )
 
     # Schedule workflow resumption via configured runtime
@@ -195,7 +196,7 @@ async def resume_hook(
     runtime = get_runtime(config.default_runtime)
 
     try:
-        await runtime.schedule_resume(run_id, storage)
+        await runtime.schedule_resume(run_id, storage, triggered_by_hook_id=hook_id)
     except Exception as e:
         logger.warning(
             f"Failed to schedule workflow resumption: {e}",

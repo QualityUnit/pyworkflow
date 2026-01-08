@@ -1974,10 +1974,7 @@ def _is_hook_still_relevant(hook_id: str, events: list[Any]) -> bool:
     # Find the sequence number of HOOK_RECEIVED for this hook
     hook_received_sequence = None
     for event in sorted_events:
-        if (
-            event.type == EventType.HOOK_RECEIVED
-            and event.data.get("hook_id") == hook_id
-        ):
+        if event.type == EventType.HOOK_RECEIVED and event.data.get("hook_id") == hook_id:
             hook_received_sequence = event.sequence
             break
 

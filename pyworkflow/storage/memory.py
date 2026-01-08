@@ -303,7 +303,7 @@ class InMemoryStorageBackend(StorageBackend):
                 return self._hooks.get((run_id, hook_id))
             else:
                 # Fallback: find any hook with this ID (may return wrong one if duplicates)
-                for (r_id, h_id), hook in self._hooks.items():
+                for (_r_id, h_id), hook in self._hooks.items():
                     if h_id == hook_id:
                         return hook
                 return None
@@ -330,7 +330,7 @@ class InMemoryStorageBackend(StorageBackend):
             else:
                 # Fallback: find any hook with this ID
                 hook = None
-                for (r_id, h_id), h in self._hooks.items():
+                for (_r_id, h_id), h in self._hooks.items():
                     if h_id == hook_id:
                         hook = h
                         break

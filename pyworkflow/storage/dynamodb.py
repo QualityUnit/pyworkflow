@@ -828,10 +828,7 @@ class DynamoDBStorageBackend(StorageBackend):
                 update_expr += ", received_at = :received_at"
                 expr_values[":received_at"] = {"S": datetime.now(UTC).isoformat()}
 
-            if run_id:
-                pk = f"HOOK#{run_id}#{hook_id}"
-            else:
-                pk = f"HOOK#{hook_id}"
+            pk = f"HOOK#{run_id}#{hook_id}" if run_id else f"HOOK#{hook_id}"
 
             await client.update_item(
                 TableName=self.table_name,

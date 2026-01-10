@@ -66,7 +66,7 @@
     "@tanstack/react-query-devtools": "^5.91.1",
     "@tanstack/react-router-devtools": "^1.144.0",
     "@tanstack/router-plugin": "^1.145.2",
-    "@trivago/prettier-plugin-sort-imports": "^6.0.1",
+    "@trivago/prettier-plugin-sort-imports": "^6.0.2",
     "@types/node": "^25.0.2",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",

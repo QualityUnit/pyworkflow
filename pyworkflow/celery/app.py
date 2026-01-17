@@ -14,7 +14,6 @@ garbage collector and Celery's saferepr module. It does not affect functionality
 
 import os
 from typing import Any
-from urllib.parse import urlparse
 
 from celery import Celery
 from celery.signals import worker_init, worker_process_init, worker_shutdown
@@ -207,9 +206,6 @@ def create_celery_app(
     is_sentinel_broker = is_sentinel_url(broker_url)
     is_sentinel_backend = is_sentinel_url(result_backend)
     is_redis_broker = broker_url.startswith("redis://") or broker_url.startswith("rediss://")
-    is_redis_backend = result_backend.startswith("redis://") or result_backend.startswith(
-        "rediss://"
-    )
 
     # Get Sentinel master name from param, env, or default
     master_name = (

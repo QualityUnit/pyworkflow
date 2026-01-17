@@ -763,7 +763,7 @@ class TestRedisLockBackendSentinel:
             mock_master = MagicMock()
             mock_sentinel.master_for.return_value = mock_master
 
-            backend = RedisLockBackend(
+            RedisLockBackend(
                 "sentinel://host1:26379/0",
                 is_sentinel=True,
                 sentinel_master=None,  # Should default to "mymaster"
@@ -794,7 +794,7 @@ class TestSingletonConfigSentinel:
         """Test is_sentinel defaults to False."""
         mock_app = MagicMock()
         # Properly handle default parameter
-        mock_app.conf.get.side_effect = lambda key, default=None: default
+        mock_app.conf.get.side_effect = lambda _key, default=None: default
 
         config = SingletonConfig(mock_app)
         assert config.is_sentinel is False

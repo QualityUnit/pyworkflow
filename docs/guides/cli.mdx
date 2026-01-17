@@ -416,10 +416,15 @@ pyworkflow worker run
 | `--workflow` | Only process workflow orchestration tasks |
 | `--step` | Only process step execution tasks |
 | `--schedule` | Only process scheduled resumption tasks |
-| `--concurrency N` | Number of worker processes (default: auto) |
+| `--concurrency N` | Number of worker processes (default: 1) |
 | `--loglevel LEVEL` | Log level: `debug`, `info`, `warning`, `error` |
 | `--hostname NAME` | Custom worker hostname |
 | `--beat` | Also start Celery Beat scheduler |
+| `--autoscale MIN,MAX` | Enable worker autoscaling (e.g., `2,10`) |
+| `--max-tasks-per-child N` | Replace worker child after N tasks |
+| `--prefetch-multiplier N` | Task prefetch count per worker process |
+| `--time-limit SECONDS` | Hard time limit for tasks |
+| `--soft-time-limit SECONDS` | Soft time limit for tasks |
 
 <Tabs>
   <Tab title="All Queues (Default)">
@@ -438,6 +443,21 @@ pyworkflow worker run
 
     # Terminal 3: Scheduled tasks
     pyworkflow worker run --schedule
+    ```
+  </Tab>
+  <Tab title="Advanced Celery Options">
+    ```bash
+    # Enable autoscaling (min 2, max 10 workers)
+    pyworkflow worker run --step --autoscale 2,10
+
+    # Set task limits
+    pyworkflow worker run --max-tasks-per-child 100 --time-limit 300
+
+    # Pass arbitrary Celery arguments after --
+    pyworkflow worker run -- --max-memory-per-child=200000
+
+    # Combine PyWorkflow options with Celery passthrough
+    pyworkflow worker run --step --autoscale 2,8 -- --max-memory-per-child=150000
     ```
   </Tab>
 </Tabs>

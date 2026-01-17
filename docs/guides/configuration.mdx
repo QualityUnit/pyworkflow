@@ -542,19 +542,39 @@ print(f"Celery Broker: {config.celery_broker}")
 
 ---
 
+## Worker Configuration
+
+When running Celery workers, you can configure worker behavior through CLI options.
+See the [CLI Guide](/guides/cli#worker-run) for all available options including:
+
+- **Autoscaling**: Automatically scale worker processes based on load
+- **Task limits**: Control tasks per child and prefetch multiplier
+- **Time limits**: Set hard and soft time limits for tasks
+- **Celery passthrough**: Forward arbitrary arguments to Celery
+
+```bash
+# Example: Production worker with autoscaling and task limits
+pyworkflow worker run --step --autoscale 2,10 --max-tasks-per-child 100
+
+# Example: Pass arbitrary Celery options
+pyworkflow worker run -- --max-memory-per-child=200000
+```
+
+---
+
 ## Next Steps
 
 <CardGroup cols={2}>
   <Card title="CLI Guide" icon="terminal" href="/guides/cli">
     Learn CLI commands and options.
   </Card>
-  <Card title="Celery Runtime" icon="server" href="/guides/celery">
-    Configure distributed execution with Celery.
+  <Card title="Celery Brokers" icon="server" href="/guides/brokers">
+    Configure message brokers for distributed execution.
   </Card>
   <Card title="Storage Backends" icon="database" href="/concepts/storage">
     Choose the right storage backend.
   </Card>
-  <Card title="Deployment" icon="cloud" href="/guides/deployment">
-    Deploy workflows to production.
+  <Card title="Fault Tolerance" icon="shield" href="/concepts/fault-tolerance">
+    Learn about automatic recovery.
   </Card>
 </CardGroup>

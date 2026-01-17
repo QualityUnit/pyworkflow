@@ -12,12 +12,15 @@ Based on:
 import inspect
 import json
 from hashlib import md5
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from celery import Task
 from celery.exceptions import WorkerLostError
 from loguru import logger
+
+if TYPE_CHECKING:
+    from redis.sentinel import Sentinel
 
 
 def generate_lock_key(
@@ -72,6 +75,9 @@ class SingletonConfig:
 
 class RedisLockBackend:
     """Redis backend for distributed locking with Sentinel support."""
+
+    _sentinel: "Sentinel | None"
+    _master_name: str | None
 
     def __init__(
         self,

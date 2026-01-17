@@ -70,6 +70,11 @@ def worker() -> None:
     default="prefork",
     help="Worker pool type (default: prefork). Use 'solo' for debugging with breakpoints",
 )
+@click.option(
+    "--sentinel-master",
+    default=None,
+    help="Redis Sentinel master name (required for sentinel:// URLs)",
+)
 @click.pass_context
 def run_worker(
     ctx: click.Context,
@@ -81,6 +86,7 @@ def run_worker(
     hostname: str | None,
     beat: bool,
     pool: str | None,
+    sentinel_master: str | None,
 ) -> None:
     """
     Start a Celery worker for processing workflows.
@@ -158,8 +164,16 @@ def run_worker(
 
     loguru_logger.enable("pyworkflow")
 
+    # Get Sentinel master from CLI option, config file, or environment
+    sentinel_master_name = sentinel_master or celery_config.get(
+        "sentinel_master",
+        os.getenv("PYWORKFLOW_CELERY_SENTINEL_MASTER"),
+    )
+
     print_info("Starting Celery worker...")
     print_info(f"Broker: {broker_url}")
+    if broker_url.startswith("sentinel://") or broker_url.startswith("sentinel+ssl://"):
+        print_info(f"Sentinel master: {sentinel_master_name or 'mymaster'}")
     print_info(f"Queues: {', '.join(queues)}")
     print_info(f"Concurrency: {concurrency}")
     print_info(f"Pool: {pool}")
@@ -177,6 +191,7 @@ def run_worker(
         app = create_celery_app(
             broker_url=broker_url,
             result_backend=result_backend,
+            sentinel_master_name=sentinel_master_name,
         )
 
         # Log discovered workflows and steps

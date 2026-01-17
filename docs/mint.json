@@ -70,6 +70,7 @@
       "group": "Guides",
       "pages": [
         "guides/configuration",
+        "guides/brokers",
         "guides/cli"
       ]
     }

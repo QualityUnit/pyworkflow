@@ -20,7 +20,13 @@ def worker() -> None:
     pass
 
 
-@worker.command(name="run")
+@worker.command(
+    name="run",
+    context_settings={
+        "allow_extra_args": True,
+        "allow_interspersed_args": False,
+    },
+)
 @click.option(
     "--workflow",
     "queue_workflow",
@@ -70,6 +76,40 @@ def worker() -> None:
     default="prefork",
     help="Worker pool type (default: prefork). Use 'solo' for debugging with breakpoints",
 )
+@click.option(
+    "--sentinel-master",
+    default=None,
+    help="Redis Sentinel master name (required for sentinel:// URLs)",
+)
+@click.option(
+    "--autoscale",
+    default=None,
+    help="Enable autoscaling: MIN,MAX (e.g., '2,10')",
+)
+@click.option(
+    "--max-tasks-per-child",
+    type=int,
+    default=None,
+    help="Maximum tasks per worker child before replacement",
+)
+@click.option(
+    "--prefetch-multiplier",
+    type=int,
+    default=None,
+    help="Task prefetch count per worker process",
+)
+@click.option(
+    "--time-limit",
+    type=float,
+    default=None,
+    help="Hard time limit for tasks in seconds",
+)
+@click.option(
+    "--soft-time-limit",
+    type=float,
+    default=None,
+    help="Soft time limit for tasks in seconds",
+)
 @click.pass_context
 def run_worker(
     ctx: click.Context,
@@ -81,12 +121,20 @@ def run_worker(
     hostname: str | None,
     beat: bool,
     pool: str | None,
+    sentinel_master: str | None,
+    autoscale: str | None,
+    max_tasks_per_child: int | None,
+    prefetch_multiplier: int | None,
+    time_limit: float | None,
+    soft_time_limit: float | None,
 ) -> None:
     """
     Start a Celery worker for processing workflows.
 
     By default, processes all queues. Use --workflow, --step, or --schedule
     flags to limit to specific queue types.
+
+    Use -- to pass arbitrary Celery arguments directly to the worker.
 
     Examples:
 
@@ -107,6 +155,15 @@ def run_worker(
 
         # Start with custom log level
         pyworkflow worker run --loglevel debug
+
+        # Enable autoscaling (min 2, max 10 workers)
+        pyworkflow worker run --step --autoscale 2,10
+
+        # Set task limits
+        pyworkflow worker run --max-tasks-per-child 100 --time-limit 300
+
+        # Pass arbitrary Celery arguments after --
+        pyworkflow worker run -- --max-memory-per-child=200000
     """
     # Get config from CLI context (TOML config)
     config = ctx.obj.get("config", {})
@@ -123,6 +180,9 @@ def run_worker(
         if "celery" in yaml_config and "celery" not in config:
             merged_config["celery"] = yaml_config["celery"]
         config = merged_config
+
+    # Get extra args passed after --
+    extra_args = ctx.args
 
     # Determine queues to process
     queues = []
@@ -158,11 +218,21 @@ def run_worker(
 
     loguru_logger.enable("pyworkflow")
 
+    # Get Sentinel master from CLI option, config file, or environment
+    sentinel_master_name = sentinel_master or celery_config.get(
+        "sentinel_master",
+        os.getenv("PYWORKFLOW_CELERY_SENTINEL_MASTER"),
+    )
+
     print_info("Starting Celery worker...")
     print_info(f"Broker: {broker_url}")
+    if broker_url.startswith("sentinel://") or broker_url.startswith("sentinel+ssl://"):
+        print_info(f"Sentinel master: {sentinel_master_name or 'mymaster'}")
     print_info(f"Queues: {', '.join(queues)}")
     print_info(f"Concurrency: {concurrency}")
     print_info(f"Pool: {pool}")
+    if extra_args:
+        print_info(f"Extra args: {' '.join(extra_args)}")
 
     try:
         # Discover workflows using CLI discovery (reads from --module, env var, or YAML config)
@@ -177,6 +247,7 @@ def run_worker(
         app = create_celery_app(
             broker_url=broker_url,
             result_backend=result_backend,
+            sentinel_master_name=sentinel_master_name,
         )
 
         # Log discovered workflows and steps
@@ -212,10 +283,11 @@ def run_worker(
         worker_args = [
             "worker",
             f"--loglevel={loglevel.upper()}",
-            f"--queues={','.join(queues)}",
             f"--concurrency={concurrency}",  # Always set (default: 1)
             f"--pool={pool}",  # Always set (default: prefork)
         ]
+
+        worker_args.append(f"--queues={','.join(queues)}")
 
         if hostname:
             worker_args.append(f"--hostname={hostname}")
@@ -223,6 +295,26 @@ def run_worker(
         if beat:
             worker_args.append("--beat")
             worker_args.append("--scheduler=pyworkflow.celery.scheduler:PyWorkflowScheduler")
+
+        # Add new explicit options
+        if autoscale:
+            worker_args.append(f"--autoscale={autoscale}")
+
+        if max_tasks_per_child is not None:
+            worker_args.append(f"--max-tasks-per-child={max_tasks_per_child}")
+
+        if prefetch_multiplier is not None:
+            worker_args.append(f"--prefetch-multiplier={prefetch_multiplier}")
+
+        if time_limit is not None:
+            worker_args.append(f"--time-limit={time_limit}")
+
+        if soft_time_limit is not None:
+            worker_args.append(f"--soft-time-limit={soft_time_limit}")
+
+        # Append extra args last (highest priority - they can override anything)
+        if extra_args:
+            worker_args.extend(extra_args)
 
         print_success("Worker starting...")
         print_info("Press Ctrl+C to stop")

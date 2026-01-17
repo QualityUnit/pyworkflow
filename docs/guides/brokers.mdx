@@ -1,0 +1,367 @@
+---
+title: 'Celery Brokers'
+description: 'Configure message brokers for distributed workflow execution with Celery runtime'
+---
+
+## Overview
+
+When using the **Celery runtime** (`runtime: celery`), PyWorkflow requires a **message broker** to
+transport messages between your application and workers, and optionally a **result backend** to
+store task results.
+
+<Note>
+  This guide only applies when using the Celery runtime for distributed execution. The local runtime
+  (`runtime: local`) runs workflows in-process and does not require a broker.
+</Note>
+
+PyWorkflow supports several broker configurations:
+
+<CardGroup cols={2}>
+  <Card title="Redis" icon="database">
+    Simple, fast, and recommended for most deployments
+  </Card>
+  <Card title="Redis Sentinel" icon="shield-halved">
+    High-availability Redis with automatic failover
+  </Card>
+</CardGroup>
+
+---
+
+## Redis
+
+Redis is the recommended broker for most PyWorkflow deployments. It's simple to set up, provides
+excellent performance, and supports both broker and result backend functionality.
+
+### Basic Configuration
+
+<Tabs>
+  <Tab title="Config File">
+    ```yaml
+    # pyworkflow.config.yaml
+    runtime: celery
+
+    celery:
+      broker: redis://localhost:6379/0
+      result_backend: redis://localhost:6379/1
+    ```
+  </Tab>
+  <Tab title="Environment Variables">
+    ```bash
+    export PYWORKFLOW_CELERY_BROKER=redis://localhost:6379/0
+    export PYWORKFLOW_CELERY_RESULT_BACKEND=redis://localhost:6379/1
+    ```
+  </Tab>
+  <Tab title="Programmatic">
+    ```python
+    import pyworkflow
+
+    pyworkflow.configure(
+        default_runtime="celery",
+        celery_broker="redis://localhost:6379/0",
+    )
+    ```
+  </Tab>
+</Tabs>
+
+### URL Format
+
+```
+redis://[[username:]password@]host[:port][/database]
+```
+
+| Component | Description | Default |
+|-----------|-------------|---------|
+| `username` | Redis username (Redis 6+ ACL) | None |
+| `password` | Redis password | None |
+| `host` | Redis server hostname | `localhost` |
+| `port` | Redis server port | `6379` |
+| `database` | Redis database number | `0` |
+
+### Examples
+
+```yaml
+# Local Redis (default)
+celery:
+  broker: redis://localhost:6379/0
+
+# Redis with password
+celery:
+  broker: redis://:mypassword@localhost:6379/0
+
+# Redis with username and password (Redis 6+ ACL)
+celery:
+  broker: redis://myuser:mypassword@localhost:6379/0
+
+# Remote Redis
+celery:
+  broker: redis://redis.example.com:6379/0
+
+# Different databases for broker and backend
+celery:
+  broker: redis://localhost:6379/0
+  result_backend: redis://localhost:6379/1
+```
+
+### TLS/SSL Connection
+
+For encrypted connections, use the `rediss://` scheme:
+
+```yaml
+celery:
+  broker: rediss://redis.example.com:6379/0
+  result_backend: rediss://redis.example.com:6379/1
+```
+
+<Note>
+  When using `rediss://`, ensure your Redis server is configured with TLS certificates.
+</Note>
+
+---
+
+## Redis Sentinel
+
+[Redis Sentinel](https://redis.io/docs/management/sentinel/) provides high availability for Redis
+through automatic failover. When a master node fails, Sentinel automatically promotes a replica
+to master, ensuring your workflows continue processing with minimal interruption.
+
+### When to Use Sentinel
+
+Use Redis Sentinel when you need:
+
+- **High availability**: Automatic failover when master fails
+- **Monitoring**: Constant health checks on Redis instances
+- **Notification**: Alerts when Redis instances change state
+- **Configuration provider**: Clients discover current master automatically
+
+### Basic Configuration
+
+<Tabs>
+  <Tab title="Config File">
+    ```yaml
+    # pyworkflow.config.yaml
+    runtime: celery
+
+    celery:
+      broker: sentinel://sentinel1:26379,sentinel2:26379,sentinel3:26379/0
+      result_backend: sentinel://sentinel1:26379,sentinel2:26379,sentinel3:26379/1
+      sentinel_master: mymaster
+    ```
+  </Tab>
+  <Tab title="Environment Variables">
+    ```bash
+    export PYWORKFLOW_CELERY_BROKER=sentinel://sentinel1:26379,sentinel2:26379,sentinel3:26379/0
+    export PYWORKFLOW_CELERY_RESULT_BACKEND=sentinel://sentinel1:26379,sentinel2:26379,sentinel3:26379/1
+    export PYWORKFLOW_CELERY_SENTINEL_MASTER=mymaster
+    ```
+  </Tab>
+  <Tab title="CLI Arguments">
+    ```bash
+    pyworkflow worker run --sentinel-master mymaster
+    ```
+  </Tab>
+</Tabs>
+
+### URL Format
+
+```
+sentinel://[[password@]host1[:port1],host2[:port2],...]/database
+```
+
+| Component | Description | Default |
+|-----------|-------------|---------|
+| `password` | Sentinel password | None |
+| `host1,host2,...` | Comma-separated Sentinel hosts | Required |
+| `port` | Sentinel port for each host | `26379` |
+| `database` | Redis database number | `0` |
+
+### Configuration Options
+
+| Option | Environment Variable | CLI Flag | Default | Description |
+|--------|---------------------|----------|---------|-------------|
+| `sentinel_master` | `PYWORKFLOW_CELERY_SENTINEL_MASTER` | `--sentinel-master` | `mymaster` | Name of the Sentinel master group |
+
+### Examples
+
+```yaml
+# Basic Sentinel setup
+celery:
+  broker: sentinel://sentinel1:26379,sentinel2:26379,sentinel3:26379/0
+  result_backend: sentinel://sentinel1:26379,sentinel2:26379,sentinel3:26379/1
+  sentinel_master: mymaster
+
+# Sentinel with password
+celery:
+  broker: sentinel://sentinelpassword@sentinel1:26379,sentinel2:26379/0
+  sentinel_master: mymaster
+
+# Sentinel with custom ports
+celery:
+  broker: sentinel://sentinel1:26380,sentinel2:26381,sentinel3:26382/0
+  sentinel_master: redis-primary
+
+# Single Sentinel (not recommended for production)
+celery:
+  broker: sentinel://sentinel1:26379/0
+  sentinel_master: mymaster
+```
+
+### TLS/SSL with Sentinel
+
+For encrypted connections to Sentinel, use the `sentinel+ssl://` scheme:
+
+```yaml
+celery:
+  broker: sentinel+ssl://sentinel1:26379,sentinel2:26379,sentinel3:26379/0
+  result_backend: sentinel+ssl://sentinel1:26379,sentinel2:26379,sentinel3:26379/1
+  sentinel_master: mymaster
+```
+
+### Sentinel Architecture
+
+A typical Sentinel deployment consists of:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Sentinel Cluster                        │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐              │
+│  │Sentinel 1│    │Sentinel 2│    │Sentinel 3│              │
+│  └────┬─────┘    └────┬─────┘    └────┬─────┘              │
+│       │               │               │                     │
+│       └───────────────┼───────────────┘                     │
+│                       │                                     │
+│                       ▼                                     │
+│              ┌────────────────┐                             │
+│              │  Redis Master  │◄──── Writes                 │
+│              └───────┬────────┘                             │
+│                      │ Replication                          │
+│         ┌────────────┼────────────┐                         │
+│         ▼            ▼            ▼                         │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐              │
+│  │  Replica 1 │ │  Replica 2 │ │  Replica 3 │              │
+│  └────────────┘ └────────────┘ └────────────┘              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+<Warning>
+  Always deploy at least **3 Sentinel instances** in production. Sentinel uses quorum-based
+  decision making, and a single Sentinel cannot reliably detect failures.
+</Warning>
+
+---
+
+## Configuration Reference
+
+### Environment Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `PYWORKFLOW_CELERY_BROKER` | Celery broker URL | `redis://localhost:6379/0` |
+| `PYWORKFLOW_CELERY_RESULT_BACKEND` | Celery result backend URL | `redis://localhost:6379/1` |
+| `PYWORKFLOW_CELERY_SENTINEL_MASTER` | Sentinel master name | `mymaster` |
+
+### CLI Options
+
+| Option | Description |
+|--------|-------------|
+| `--sentinel-master` | Redis Sentinel master name (required for `sentinel://` URLs) |
+
+See the [CLI Guide](/guides/cli#worker-run) for all available worker options including
+autoscaling, task limits, and arbitrary Celery argument passthrough.
+
+### Config File Options
+
+```yaml
+celery:
+  # Broker URL (required)
+  broker: redis://localhost:6379/0
+
+  # Result backend URL (optional, defaults to broker)
+  result_backend: redis://localhost:6379/1
+
+  # Sentinel master name (required for sentinel:// URLs)
+  sentinel_master: mymaster
+```
+
+---
+
+## Choosing a Broker
+
+| Requirement | Recommended Broker |
+|-------------|-------------------|
+| Development/Testing | Redis (single instance) |
+| Production (simple) | Redis (single instance or managed service) |
+| Production (HA required) | Redis Sentinel |
+| Cloud deployment | Managed Redis (AWS ElastiCache, Azure Cache, GCP Memorystore) |
+
+<Tip>
+  Most cloud providers offer managed Redis services with built-in high availability.
+  These are often easier to operate than self-managed Sentinel clusters.
+</Tip>
+
+---
+
+## Troubleshooting
+
+### Connection Refused
+
+```
+Error: Connection refused (redis://localhost:6379/0)
+```
+
+**Solution**: Ensure Redis is running and accessible:
+
+```bash
+# Check if Redis is running
+redis-cli ping
+
+# Start Redis (if using Docker)
+docker run -d -p 6379:6379 redis:7-alpine
+```
+
+### Sentinel Master Not Found
+
+```
+Error: No master found for 'mymaster'
+```
+
+**Solutions**:
+1. Verify the master name matches your Sentinel configuration
+2. Check that Sentinel instances are running and healthy
+3. Ensure network connectivity between your application and Sentinel
+
+```bash
+# Check Sentinel status
+redis-cli -p 26379 SENTINEL master mymaster
+```
+
+### Authentication Failed
+
+```
+Error: NOAUTH Authentication required
+```
+
+**Solution**: Include password in the URL:
+
+```yaml
+celery:
+  broker: redis://:yourpassword@localhost:6379/0
+```
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="CLI Guide" icon="terminal" href="/guides/cli">
+    Learn CLI commands for worker management
+  </Card>
+  <Card title="Configuration" icon="gear" href="/guides/configuration">
+    Complete configuration reference
+  </Card>
+  <Card title="Fault Tolerance" icon="shield" href="/concepts/fault-tolerance">
+    Learn about automatic recovery
+  </Card>
+  <Card title="Workflows" icon="diagram-project" href="/concepts/workflows">
+    Learn workflow concepts
+  </Card>
+</CardGroup>

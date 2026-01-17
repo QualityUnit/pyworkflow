@@ -12,12 +12,15 @@ Based on:
 import inspect
 import json
 from hashlib import md5
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from celery import Task
 from celery.exceptions import WorkerLostError
 from loguru import logger
+
+if TYPE_CHECKING:
+    from redis.sentinel import Sentinel
 
 
 def generate_lock_key(
@@ -59,14 +62,83 @@ class SingletonConfig:
     def raise_on_duplicate(self) -> bool:
         return self.app.conf.get("singleton_raise_on_duplicate", False)
 
+    @property
+    def is_sentinel(self) -> bool:
+        """Check if the backend uses Redis Sentinel."""
+        return self.app.conf.get("singleton_backend_is_sentinel", False)
+
+    @property
+    def sentinel_master(self) -> str | None:
+        """Get the Sentinel master name."""
+        return self.app.conf.get("singleton_sentinel_master")
+
 
 class RedisLockBackend:
-    """Redis backend for distributed locking."""
+    """Redis backend for distributed locking with Sentinel support."""
 
-    def __init__(self, url: str):
+    _sentinel: "Sentinel | None"
+    _master_name: str | None
+
+    def __init__(
+        self,
+        url: str,
+        is_sentinel: bool = False,
+        sentinel_master: str | None = None,
+    ):
         import redis
 
-        self.redis = redis.from_url(url, decode_responses=True)
+        if is_sentinel:
+            from redis.sentinel import Sentinel
+
+            sentinels = self._parse_sentinel_url(url)
+            self._sentinel = Sentinel(
+                sentinels,
+                socket_timeout=0.5,
+                decode_responses=True,
+            )
+            self._master_name = sentinel_master or "mymaster"
+            self.redis = self._sentinel.master_for(
+                self._master_name,
+                decode_responses=True,
+            )
+        else:
+            self._sentinel = None
+            self._master_name = None
+            self.redis = redis.from_url(url, decode_responses=True)
+
+    @staticmethod
+    def _parse_sentinel_url(url: str) -> list[tuple[str, int]]:
+        """
+        Parse sentinel:// URL to list of (host, port) tuples.
+
+        Args:
+            url: Sentinel URL (sentinel:// or sentinel+ssl://)
+
+        Returns:
+            List of (host, port) tuples for Sentinel servers
+        """
+        # Remove protocol
+        url = url.replace("sentinel://", "").replace("sentinel+ssl://", "")
+        # Remove database suffix and query params
+        if "/" in url:
+            url = url.split("/")[0]
+        if "?" in url:
+            url = url.split("?")[0]
+        # Handle password prefix (password@hosts)
+        if "@" in url:
+            url = url.split("@", 1)[1]
+
+        sentinels: list[tuple[str, int]] = []
+        for host_port in url.split(","):
+            host_port = host_port.strip()
+            if not host_port:
+                continue
+            if ":" in host_port:
+                host, port = host_port.rsplit(":", 1)
+                sentinels.append((host, int(port)))
+            else:
+                sentinels.append((host_port, 26379))  # Default Sentinel port
+        return sentinels
 
     def lock(self, lock_key: str, task_id: str, expiry: int | None = None) -> bool:
         """Acquire lock atomically. Returns True if acquired."""
@@ -144,13 +216,26 @@ class SingletonWorkflowTask(Task):
     def singleton_backend(self) -> RedisLockBackend | None:
         if self._singleton_backend is None:
             url = self.singleton_config.backend_url
+            is_sentinel = self.singleton_config.is_sentinel
+            sentinel_master = self.singleton_config.sentinel_master
+
             if not url:
-                # Try broker URL if it's Redis
+                # Try broker URL if it's Redis or Sentinel
                 broker = self.app.conf.broker_url or ""
                 if broker.startswith("redis://") or broker.startswith("rediss://"):
                     url = broker
+                    is_sentinel = False
+                elif broker.startswith("sentinel://") or broker.startswith("sentinel+ssl://"):
+                    url = broker
+                    is_sentinel = True
+                    sentinel_master = self.app.conf.get("singleton_sentinel_master", "mymaster")
+
             if url:
-                self._singleton_backend = RedisLockBackend(url)
+                self._singleton_backend = RedisLockBackend(
+                    url,
+                    is_sentinel=is_sentinel,
+                    sentinel_master=sentinel_master,
+                )
         return self._singleton_backend
 
     @property

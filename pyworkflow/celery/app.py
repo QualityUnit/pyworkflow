@@ -13,6 +13,7 @@ garbage collector and Celery's saferepr module. It does not affect functionality
 """
 
 import os
+from typing import Any
 
 from celery import Celery
 from celery.signals import worker_init, worker_process_init, worker_shutdown
@@ -36,6 +37,74 @@ def _configure_worker_logging() -> None:
         log_level = os.getenv("PYWORKFLOW_LOG_LEVEL", "INFO").upper()
         configure_logging(level=log_level)
         _logging_configured = True
+
+
+def is_sentinel_url(url: str) -> bool:
+    """Check if URL uses sentinel:// or sentinel+ssl:// protocol."""
+    return url.startswith("sentinel://") or url.startswith("sentinel+ssl://")
+
+
+def parse_sentinel_url(url: str) -> tuple[list[tuple[str, int]], int, str | None]:
+    """
+    Parse a sentinel:// URL into sentinel hosts, database number, and password.
+
+    Format: sentinel://[password@]host1:port1,host2:port2/db_number
+
+    Args:
+        url: Sentinel URL (sentinel:// or sentinel+ssl://)
+
+    Returns:
+        Tuple of ([(host, port), ...], db_number, password or None)
+
+    Examples:
+        >>> parse_sentinel_url("sentinel://host1:26379,host2:26379/0")
+        ([('host1', 26379), ('host2', 26379)], 0, None)
+
+        >>> parse_sentinel_url("sentinel://mypassword@host1:26379/0")
+        ([('host1', 26379)], 0, 'mypassword')
+    """
+    # Remove protocol prefix
+    if url.startswith("sentinel+ssl://"):
+        url_without_protocol = url[len("sentinel+ssl://") :]
+    elif url.startswith("sentinel://"):
+        url_without_protocol = url[len("sentinel://") :]
+    else:
+        raise ValueError(f"Invalid sentinel URL: {url}")
+
+    # Extract password if present (password@hosts)
+    password: str | None = None
+    if "@" in url_without_protocol:
+        password, url_without_protocol = url_without_protocol.split("@", 1)
+
+    # Extract database number from path
+    db_number = 0
+    if "/" in url_without_protocol:
+        hosts_part, db_part = url_without_protocol.rsplit("/", 1)
+        # Handle query params in db part
+        if "?" in db_part:
+            db_part = db_part.split("?")[0]
+        if db_part:
+            db_number = int(db_part)
+    else:
+        hosts_part = url_without_protocol
+        # Handle query params
+        if "?" in hosts_part:
+            hosts_part = hosts_part.split("?")[0]
+
+    # Parse hosts
+    sentinels: list[tuple[str, int]] = []
+    for host_port in hosts_part.split(","):
+        host_port = host_port.strip()
+        if not host_port:
+            continue
+        if ":" in host_port:
+            host, port_str = host_port.rsplit(":", 1)
+            sentinels.append((host, int(port_str)))
+        else:
+            # Default Sentinel port
+            sentinels.append((host_port, 26379))
+
+    return sentinels, db_number, password
 
 
 def discover_workflows(modules: list[str] | None = None) -> None:
@@ -79,6 +148,9 @@ def create_celery_app(
     broker_url: str | None = None,
     result_backend: str | None = None,
     app_name: str = "pyworkflow",
+    sentinel_master_name: str | None = None,
+    broker_transport_options: dict[str, Any] | None = None,
+    result_backend_transport_options: dict[str, Any] | None = None,
 ) -> Celery:
     """
     Create and configure a Celery application for PyWorkflow.
@@ -87,6 +159,9 @@ def create_celery_app(
         broker_url: Celery broker URL. Priority: parameter > PYWORKFLOW_CELERY_BROKER env var > redis://localhost:6379/0
         result_backend: Result backend URL. Priority: parameter > PYWORKFLOW_CELERY_RESULT_BACKEND env var > redis://localhost:6379/1
         app_name: Application name
+        sentinel_master_name: Redis Sentinel master name. Priority: parameter > PYWORKFLOW_CELERY_SENTINEL_MASTER env var > "mymaster"
+        broker_transport_options: Additional transport options for the broker (merged with defaults)
+        result_backend_transport_options: Additional transport options for the result backend (merged with defaults)
 
     Returns:
         Configured Celery application
@@ -94,6 +169,7 @@ def create_celery_app(
     Environment Variables:
         PYWORKFLOW_CELERY_BROKER: Celery broker URL (used if broker_url param not provided)
         PYWORKFLOW_CELERY_RESULT_BACKEND: Result backend URL (used if result_backend param not provided)
+        PYWORKFLOW_CELERY_SENTINEL_MASTER: Sentinel master name (used if sentinel_master_name param not provided)
 
     Examples:
         # Default configuration (uses env vars if set, otherwise localhost Redis)
@@ -110,6 +186,13 @@ def create_celery_app(
             broker_url="amqp://guest:guest@rabbitmq:5672//",
             result_backend="redis://localhost:6379/1"
         )
+
+        # Redis Sentinel for high availability
+        app = create_celery_app(
+            broker_url="sentinel://sentinel1:26379,sentinel2:26379,sentinel3:26379/0",
+            result_backend="sentinel://sentinel1:26379,sentinel2:26379,sentinel3:26379/1",
+            sentinel_master_name="mymaster"
+        )
     """
     # Priority: parameter > environment variable > hardcoded default
     broker_url = broker_url or os.getenv("PYWORKFLOW_CELERY_BROKER") or "redis://localhost:6379/0"
@@ -118,6 +201,45 @@ def create_celery_app(
         or os.getenv("PYWORKFLOW_CELERY_RESULT_BACKEND")
         or "redis://localhost:6379/1"
     )
+
+    # Detect broker and backend types
+    is_sentinel_broker = is_sentinel_url(broker_url)
+    is_sentinel_backend = is_sentinel_url(result_backend)
+    is_redis_broker = broker_url.startswith("redis://") or broker_url.startswith("rediss://")
+
+    # Get Sentinel master name from param, env, or default
+    master_name = (
+        sentinel_master_name or os.getenv("PYWORKFLOW_CELERY_SENTINEL_MASTER") or "mymaster"
+    )
+
+    # Build transport options for broker
+    if is_sentinel_broker:
+        sentinel_broker_opts: dict[str, Any] = {"master_name": master_name}
+        # Merge with user options (user takes precedence)
+        final_broker_opts: dict[str, Any] = {
+            "visibility_timeout": 3600,
+            **sentinel_broker_opts,
+            **(broker_transport_options or {}),
+        }
+    else:
+        final_broker_opts = {
+            "visibility_timeout": 3600,
+            **(broker_transport_options or {}),
+        }
+
+    # Build transport options for result backend
+    if is_sentinel_backend:
+        sentinel_backend_opts: dict[str, Any] = {"master_name": master_name}
+        final_backend_opts: dict[str, Any] = {
+            "visibility_timeout": 3600,
+            **sentinel_backend_opts,
+            **(result_backend_transport_options or {}),
+        }
+    else:
+        final_backend_opts = {
+            "visibility_timeout": 3600,
+            **(result_backend_transport_options or {}),
+        }
 
     app = Celery(
         app_name,
@@ -138,12 +260,8 @@ def create_celery_app(
         enable_utc=True,
         # Broker transport options - prevent task redelivery
         # See: https://github.com/celery/celery/issues/5935
-        broker_transport_options={
-            "visibility_timeout": 3600,  # 12 hours - prevent Redis from re-queueing tasks
-        },
-        result_backend_transport_options={
-            "visibility_timeout": 3600,
-        },
+        broker_transport_options=final_broker_opts,
+        result_backend_transport_options=final_backend_opts,
         # Task routing
         task_default_queue="pyworkflow.default",
         task_default_exchange="pyworkflow",
@@ -194,12 +312,13 @@ def create_celery_app(
         worker_task_log_format="[%(asctime)s: %(levelname)s/%(processName)s] [%(task_name)s(%(task_id)s)] %(message)s",
     )
 
-    # Configure singleton locking for Redis brokers
+    # Configure singleton locking for Redis or Sentinel brokers
     # This enables distributed locking to prevent duplicate task execution
-    is_redis_broker = broker_url.startswith("redis://") or broker_url.startswith("rediss://")
-    if is_redis_broker:
+    if is_redis_broker or is_sentinel_broker:
         app.conf.update(
             singleton_backend_url=broker_url,
+            singleton_backend_is_sentinel=is_sentinel_broker,
+            singleton_sentinel_master=master_name if is_sentinel_broker else None,
             singleton_key_prefix="pyworkflow:lock:",
             singleton_lock_expiry=3600,  # 1 hour TTL (safety net)
         )

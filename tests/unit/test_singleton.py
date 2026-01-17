@@ -684,3 +684,143 @@ class TestSingletonWorkflowTaskCallbacks:
 
         # Lock should be released (release_lock_on_failure=True)
         mock_backend.unlock.assert_called_once()
+
+
+class TestSentinelURLParsing:
+    """Test Sentinel URL parsing in RedisLockBackend."""
+
+    def test_parse_single_host(self):
+        """Test parsing sentinel URL with single host."""
+        sentinels = RedisLockBackend._parse_sentinel_url("sentinel://host1:26379/0")
+        assert sentinels == [("host1", 26379)]
+
+    def test_parse_multiple_hosts(self):
+        """Test parsing sentinel URL with multiple hosts."""
+        sentinels = RedisLockBackend._parse_sentinel_url(
+            "sentinel://host1:26379,host2:26379,host3:26379/0"
+        )
+        assert sentinels == [("host1", 26379), ("host2", 26379), ("host3", 26379)]
+
+    def test_parse_default_port(self):
+        """Test parsing sentinel URL with default port."""
+        sentinels = RedisLockBackend._parse_sentinel_url("sentinel://host1/0")
+        assert sentinels == [("host1", 26379)]
+
+    def test_parse_with_password(self):
+        """Test parsing sentinel URL with password prefix."""
+        sentinels = RedisLockBackend._parse_sentinel_url(
+            "sentinel://mypassword@host1:26379,host2:26379/0"
+        )
+        assert sentinels == [("host1", 26379), ("host2", 26379)]
+
+    def test_parse_ssl_url(self):
+        """Test parsing sentinel+ssl URL."""
+        sentinels = RedisLockBackend._parse_sentinel_url("sentinel+ssl://host1:26379/0")
+        assert sentinels == [("host1", 26379)]
+
+    def test_parse_with_query_params(self):
+        """Test parsing sentinel URL with query parameters."""
+        sentinels = RedisLockBackend._parse_sentinel_url("sentinel://host1:26379/0?timeout=5")
+        assert sentinels == [("host1", 26379)]
+
+    def test_parse_mixed_ports(self):
+        """Test parsing sentinel URL with mixed port specifications."""
+        sentinels = RedisLockBackend._parse_sentinel_url(
+            "sentinel://host1:26379,host2,host3:26380/0"
+        )
+        assert sentinels == [("host1", 26379), ("host2", 26379), ("host3", 26380)]
+
+
+class TestRedisLockBackendSentinel:
+    """Test RedisLockBackend with Sentinel support."""
+
+    def test_sentinel_initialization(self):
+        """Test that Sentinel is properly initialized."""
+        with patch("redis.sentinel.Sentinel") as mock_sentinel_class:
+            mock_sentinel = mock_sentinel_class.return_value
+            mock_master = MagicMock()
+            mock_sentinel.master_for.return_value = mock_master
+
+            backend = RedisLockBackend(
+                "sentinel://host1:26379,host2:26379/0",
+                is_sentinel=True,
+                sentinel_master="mymaster",
+            )
+
+            mock_sentinel_class.assert_called_once()
+            call_args = mock_sentinel_class.call_args
+            # First positional arg is the sentinels list
+            assert call_args[0][0] == [("host1", 26379), ("host2", 26379)]
+            mock_sentinel.master_for.assert_called_once_with("mymaster", decode_responses=True)
+            assert backend.redis == mock_master
+
+    def test_sentinel_default_master_name(self):
+        """Test Sentinel uses default master name if not provided."""
+        with patch("redis.sentinel.Sentinel") as mock_sentinel_class:
+            mock_sentinel = mock_sentinel_class.return_value
+            mock_master = MagicMock()
+            mock_sentinel.master_for.return_value = mock_master
+
+            RedisLockBackend(
+                "sentinel://host1:26379/0",
+                is_sentinel=True,
+                sentinel_master=None,  # Should default to "mymaster"
+            )
+
+            mock_sentinel.master_for.assert_called_once_with("mymaster", decode_responses=True)
+
+    def test_non_sentinel_initialization(self):
+        """Test that non-Sentinel URLs use regular Redis client."""
+        with patch("redis.from_url") as mock_from_url:
+            mock_redis = MagicMock()
+            mock_from_url.return_value = mock_redis
+
+            backend = RedisLockBackend(
+                "redis://localhost:6379/0",
+                is_sentinel=False,
+            )
+
+            mock_from_url.assert_called_once_with("redis://localhost:6379/0", decode_responses=True)
+            assert backend.redis == mock_redis
+            assert backend._sentinel is None
+
+
+class TestSingletonConfigSentinel:
+    """Test SingletonConfig Sentinel properties."""
+
+    def test_is_sentinel_default(self):
+        """Test is_sentinel defaults to False."""
+        mock_app = MagicMock()
+        # Properly handle default parameter
+        mock_app.conf.get.side_effect = lambda _key, default=None: default
+
+        config = SingletonConfig(mock_app)
+        assert config.is_sentinel is False
+
+    def test_is_sentinel_true(self):
+        """Test is_sentinel returns True when configured."""
+        mock_app = MagicMock()
+        mock_app.conf.get.side_effect = lambda key, default=None: {
+            "singleton_backend_is_sentinel": True,
+        }.get(key, default)
+
+        config = SingletonConfig(mock_app)
+        assert config.is_sentinel is True
+
+    def test_sentinel_master(self):
+        """Test sentinel_master returns configured value."""
+        mock_app = MagicMock()
+        mock_app.conf.get.side_effect = lambda key, default=None: {
+            "singleton_sentinel_master": "custom-master",
+        }.get(key, default)
+
+        config = SingletonConfig(mock_app)
+        assert config.sentinel_master == "custom-master"
+
+    def test_sentinel_master_none(self):
+        """Test sentinel_master returns None when not configured."""
+        mock_app = MagicMock()
+        mock_app.conf.get.return_value = None
+
+        config = SingletonConfig(mock_app)
+        assert config.sentinel_master is None

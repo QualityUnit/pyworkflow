@@ -209,9 +209,7 @@ def create_celery_app(
 
     # Get Sentinel master name from param, env, or default
     master_name = (
-        sentinel_master_name
-        or os.getenv("PYWORKFLOW_CELERY_SENTINEL_MASTER")
-        or "mymaster"
+        sentinel_master_name or os.getenv("PYWORKFLOW_CELERY_SENTINEL_MASTER") or "mymaster"
     )
 
     # Build transport options for broker

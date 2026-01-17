@@ -720,9 +720,7 @@ class TestSentinelURLParsing:
 
     def test_parse_with_query_params(self):
         """Test parsing sentinel URL with query parameters."""
-        sentinels = RedisLockBackend._parse_sentinel_url(
-            "sentinel://host1:26379/0?timeout=5"
-        )
+        sentinels = RedisLockBackend._parse_sentinel_url("sentinel://host1:26379/0?timeout=5")
         assert sentinels == [("host1", 26379)]
 
     def test_parse_mixed_ports(self):

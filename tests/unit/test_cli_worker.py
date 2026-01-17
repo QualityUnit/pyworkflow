@@ -35,9 +35,10 @@ class TestRunWorkerCommand:
     @pytest.fixture
     def mock_list_functions(self):
         """Mock list_workflows and list_steps."""
-        with patch("pyworkflow.list_workflows") as mock_workflows, patch(
-            "pyworkflow.list_steps"
-        ) as mock_steps:
+        with (
+            patch("pyworkflow.list_workflows") as mock_workflows,
+            patch("pyworkflow.list_steps") as mock_steps,
+        ):
             mock_workflows.return_value = {}
             mock_steps.return_value = {}
             yield mock_workflows, mock_steps
@@ -95,9 +96,7 @@ class TestRunWorkerCommand:
         self, runner, mock_celery_app, mock_discovery, mock_list_functions
     ):
         """Multiple queue flags can be combined."""
-        runner.invoke(
-            worker, ["run", "--workflow", "--step"], obj={"config": {}, "module": None}
-        )
+        runner.invoke(worker, ["run", "--workflow", "--step"], obj={"config": {}, "module": None})
 
         mock_celery_app.worker_main.assert_called_once()
         args = mock_celery_app.worker_main.call_args[1]["argv"]
@@ -108,9 +107,7 @@ class TestRunWorkerCommand:
 
     def test_autoscale_option(self, runner, mock_celery_app, mock_discovery, mock_list_functions):
         """--autoscale option is passed to Celery."""
-        runner.invoke(
-            worker, ["run", "--autoscale", "2,10"], obj={"config": {}, "module": None}
-        )
+        runner.invoke(worker, ["run", "--autoscale", "2,10"], obj={"config": {}, "module": None})
 
         mock_celery_app.worker_main.assert_called_once()
         args = mock_celery_app.worker_main.call_args[1]["argv"]
@@ -145,9 +142,7 @@ class TestRunWorkerCommand:
 
     def test_time_limit_option(self, runner, mock_celery_app, mock_discovery, mock_list_functions):
         """--time-limit option is passed to Celery."""
-        runner.invoke(
-            worker, ["run", "--time-limit", "300"], obj={"config": {}, "module": None}
-        )
+        runner.invoke(worker, ["run", "--time-limit", "300"], obj={"config": {}, "module": None})
 
         mock_celery_app.worker_main.assert_called_once()
         args = mock_celery_app.worker_main.call_args[1]["argv"]
@@ -204,13 +199,9 @@ class TestRunWorkerCommand:
         # Check extra args
         assert "--max-memory-per-child=150000" in args
 
-    def test_concurrency_option(
-        self, runner, mock_celery_app, mock_discovery, mock_list_functions
-    ):
+    def test_concurrency_option(self, runner, mock_celery_app, mock_discovery, mock_list_functions):
         """--concurrency option is passed to Celery."""
-        runner.invoke(
-            worker, ["run", "--concurrency", "4"], obj={"config": {}, "module": None}
-        )
+        runner.invoke(worker, ["run", "--concurrency", "4"], obj={"config": {}, "module": None})
 
         mock_celery_app.worker_main.assert_called_once()
         args = mock_celery_app.worker_main.call_args[1]["argv"]
@@ -219,9 +210,7 @@ class TestRunWorkerCommand:
 
     def test_loglevel_option(self, runner, mock_celery_app, mock_discovery, mock_list_functions):
         """--loglevel option is passed to Celery in uppercase."""
-        runner.invoke(
-            worker, ["run", "--loglevel", "debug"], obj={"config": {}, "module": None}
-        )
+        runner.invoke(worker, ["run", "--loglevel", "debug"], obj={"config": {}, "module": None})
 
         mock_celery_app.worker_main.assert_called_once()
         args = mock_celery_app.worker_main.call_args[1]["argv"]
@@ -230,9 +219,7 @@ class TestRunWorkerCommand:
 
     def test_pool_option(self, runner, mock_celery_app, mock_discovery, mock_list_functions):
         """--pool option is passed to Celery."""
-        runner.invoke(
-            worker, ["run", "--pool", "solo"], obj={"config": {}, "module": None}
-        )
+        runner.invoke(worker, ["run", "--pool", "solo"], obj={"config": {}, "module": None})
 
         mock_celery_app.worker_main.assert_called_once()
         args = mock_celery_app.worker_main.call_args[1]["argv"]

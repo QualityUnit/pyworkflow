@@ -67,7 +67,7 @@
     "@tanstack/react-router-devtools": "^1.144.0",
     "@tanstack/router-plugin": "^1.145.2",
     "@trivago/prettier-plugin-sort-imports": "^6.0.1",
-    "@types/node": "^25.0.2",
+    "@types/node": "^25.0.10",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react-swc": "^4.2.2",

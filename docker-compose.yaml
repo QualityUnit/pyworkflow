@@ -1,0 +1,165 @@
+# PyWorkflow Docker Compose
+# This file showcases the different services needed to run PyWorkflow
+
+services:
+  # PostgreSQL database for workflow storage
+  postgres:
+    image: postgres:16
+    container_name: pyworkflow-postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=pyworkflow
+      - POSTGRES_USER=pyworkflow
+      - POSTGRES_DB=pyworkflow
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pyworkflow -d pyworkflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Redis for Celery broker and result backend
+  redis:
+    image: redis:7-alpine
+    container_name: pyworkflow-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # PyWorkflow Dashboard Backend
+  pyworkflow-dashboard-backend:
+    image: yashabro/pyworkflow-dashboard-backend:0.1.17
+    platform: linux/amd64
+    container_name: pyworkflow-dashboard-backend
+    working_dir: /app/project
+    ports:
+      - "8585:8585"
+    environment:
+      - PYWORKFLOW_STORAGE_TYPE=postgres
+      - PYWORKFLOW_POSTGRES_HOST=postgres
+      - PYWORKFLOW_POSTGRES_PORT=5432
+      - PYWORKFLOW_POSTGRES_USER=pyworkflow
+      - PYWORKFLOW_POSTGRES_PASSWORD=pyworkflow
+      - PYWORKFLOW_POSTGRES_DATABASE=pyworkflow
+      - PYWORKFLOW_MODULE=your_workflow_module
+      - DASHBOARD_HOST=0.0.0.0
+      - DASHBOARD_PORT=8585
+      - DASHBOARD_CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
+      - PYWORKFLOW_CELERY_BROKER=redis://redis:6379/0
+      - PYWORKFLOW_CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - PYTHONPATH=/app/project
+    volumes:
+      - ./examples:/app/project:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # PyWorkflow Dashboard Frontend
+  pyworkflow-dashboard-frontend:
+    image: yashabro/pyworkflow-dashboard-frontend:0.1.17
+    platform: linux/amd64
+    container_name: pyworkflow-dashboard-frontend
+    ports:
+      - "5173:80"
+    environment:
+      # Runtime configurable API URL (fixed in 0.1.17+)
+      - VITE_API_URL=http://localhost:9999
+#    depends_on:
+#      - pyworkflow-dashboard-backend
+    restart: unless-stopped
+
+  # Celery worker for workflow orchestration
+  celery-workflow-worker:
+    image: yashabro/pyworkflow-dashboard-backend:0.1.17
+    platform: linux/amd64
+    container_name: pyworkflow-workflow-worker
+    working_dir: /app/project
+    command: celery -A pyworkflow.celery.tasks worker -Q workflows -n workflow@%h --loglevel=info
+    environment:
+      - PYWORKFLOW_STORAGE_TYPE=postgres
+      - PYWORKFLOW_POSTGRES_HOST=postgres
+      - PYWORKFLOW_POSTGRES_PORT=5432
+      - PYWORKFLOW_POSTGRES_USER=pyworkflow
+      - PYWORKFLOW_POSTGRES_PASSWORD=pyworkflow
+      - PYWORKFLOW_POSTGRES_DATABASE=pyworkflow
+      - PYWORKFLOW_CELERY_BROKER=redis://redis:6379/0
+      - PYWORKFLOW_CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - PYTHONPATH=/app/project
+    volumes:
+      - ./examples:/app/project:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Celery worker for step execution (scalable)
+  celery-step-worker:
+    image: yashabro/pyworkflow-dashboard-backend:0.1.17
+    platform: linux/amd64
+    container_name: pyworkflow-step-worker
+    working_dir: /app/project
+    command: celery -A pyworkflow.celery.tasks worker -Q steps -n step@%h --loglevel=info --concurrency=4
+    environment:
+      - PYWORKFLOW_STORAGE_TYPE=postgres
+      - PYWORKFLOW_POSTGRES_HOST=postgres
+      - PYWORKFLOW_POSTGRES_PORT=5432
+      - PYWORKFLOW_POSTGRES_USER=pyworkflow
+      - PYWORKFLOW_POSTGRES_PASSWORD=pyworkflow
+      - PYWORKFLOW_POSTGRES_DATABASE=pyworkflow
+      - PYWORKFLOW_CELERY_BROKER=redis://redis:6379/0
+      - PYWORKFLOW_CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - PYTHONPATH=/app/project
+    volumes:
+      - ./examples:/app/project:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Celery Beat for scheduled tasks (optional)
+  celery-beat:
+    image: yashabro/pyworkflow-dashboard-backend:0.1.17
+    platform: linux/amd64
+    container_name: pyworkflow-celery-beat
+    working_dir: /app/project
+    command: celery -A pyworkflow.celery.tasks beat --loglevel=info
+    environment:
+      - PYWORKFLOW_STORAGE_TYPE=postgres
+      - PYWORKFLOW_POSTGRES_HOST=postgres
+      - PYWORKFLOW_POSTGRES_PORT=5432
+      - PYWORKFLOW_POSTGRES_USER=pyworkflow
+      - PYWORKFLOW_POSTGRES_PASSWORD=pyworkflow
+      - PYWORKFLOW_POSTGRES_DATABASE=pyworkflow
+      - PYWORKFLOW_CELERY_BROKER=redis://redis:6379/0
+      - PYWORKFLOW_CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - PYTHONPATH=/app/project
+    volumes:
+      - ./examples:/app/project:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

@@ -29,7 +29,7 @@ Quick Start:
     >>> run_id = await start(my_workflow, "Alice")
 """
 
-__version__ = "0.1.17"
+__version__ = "0.1.18"
 
 # Configuration
 from pyworkflow.config import (

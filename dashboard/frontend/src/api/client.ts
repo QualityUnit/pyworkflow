@@ -3,9 +3,10 @@
  */
 
 // Use placeholder for runtime substitution in Docker, with fallback for development
-const API_BASE_URL = '__VITE_API_URL_PLACEHOLDER__' !== '__VITE_API_URL_PLACEHOLDER__'
-  ? '__VITE_API_URL_PLACEHOLDER__'
-  : (import.meta.env.VITE_API_URL || 'http://localhost:8585')
+const RUNTIME_URL = '__VITE_API_URL_PLACEHOLDER__'
+const API_BASE_URL = RUNTIME_URL.includes('PLACEHOLDER')
+  ? (import.meta.env.VITE_API_URL || 'http://localhost:8585')
+  : RUNTIME_URL
 
 export interface ApiError {
   detail: string

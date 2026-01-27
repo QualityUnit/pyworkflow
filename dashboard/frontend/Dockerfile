@@ -36,4 +36,13 @@ RUN echo 'server { \
 
 EXPOSE 80
 
+# Add entrypoint script that substitutes env vars at runtime
+RUN echo '#!/bin/sh' > /docker-entrypoint.sh && \
+    echo 'set -e' >> /docker-entrypoint.sh && \
+    echo 'API_URL="${VITE_API_URL:-http://localhost:8585}"' >> /docker-entrypoint.sh && \
+    echo 'find /usr/share/nginx/html -type f -name "*.js" -exec sed -i "s|__VITE_API_URL_PLACEHOLDER__|$API_URL|g" {} \;' >> /docker-entrypoint.sh && \
+    echo 'exec "$@"' >> /docker-entrypoint.sh && \
+    chmod +x /docker-entrypoint.sh
+
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]

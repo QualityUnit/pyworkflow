@@ -2,7 +2,10 @@
  * API client for PyWorkflow Dashboard backend.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8585'
+// Use placeholder for runtime substitution in Docker, with fallback for development
+const API_BASE_URL = '__VITE_API_URL_PLACEHOLDER__' !== '__VITE_API_URL_PLACEHOLDER__'
+  ? '__VITE_API_URL_PLACEHOLDER__'
+  : (import.meta.env.VITE_API_URL || 'http://localhost:8585')
 
 export interface ApiError {
   detail: string

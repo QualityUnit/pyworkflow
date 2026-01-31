@@ -364,7 +364,7 @@ class TestCooperativeCancellation:
 
             # Simulate a long-running step with cooperative cancellation
             with pytest.raises(CancellationError):
-                for i in range(100):
+                for _i in range(100):
                     await ctx.check_cancellation()
                     items_processed += 1
                     await asyncio.sleep(0.001)

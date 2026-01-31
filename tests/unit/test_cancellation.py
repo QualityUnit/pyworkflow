@@ -552,6 +552,7 @@ class TestStepContextCheckCancellation:
     async def test_step_context_storage_error_handled_gracefully(self):
         """Test StepContext.check_cancellation() handles storage errors gracefully."""
         from unittest.mock import AsyncMock
+
         from pyworkflow.context.step_context import StepContext
 
         storage = AsyncMock()

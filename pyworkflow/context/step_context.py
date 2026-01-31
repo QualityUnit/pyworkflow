@@ -117,7 +117,7 @@ class StepContext(BaseModel):
                     await ctx.check_cancellation()
                     await process(chunk)
         """
-        from pyworkflow.context import has_context, get_context
+        from pyworkflow.context import get_context, has_context
         from pyworkflow.core.exceptions import CancellationError
 
         # Fast path: delegate to WorkflowContext if available

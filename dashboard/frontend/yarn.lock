@@ -1432,6 +1432,11 @@
   resolved "https://registry.npmjs.org/@tanstack/history/-/history-1.141.0.tgz"
   integrity sha512-LS54XNyxyTs5m/pl1lkwlg7uZM3lvsv2FIIV1rsJgnfwVCnI+n4ZGZ2CcjNT13BPu/3hPP+iHmliBSscJxW5FQ==
 
+"@tanstack/history@1.154.14":
+  version "1.154.14"
+  resolved "https://registry.yarnpkg.com/@tanstack/history/-/history-1.154.14.tgz#eccbfd62a14c8364a0287ede0fb955bd6ae5aade"
+  integrity sha512-xyIfof8eHBuub1CkBnbKNKQXeRZC4dClhmzePHVOEel4G7lk/dW+TQ16da7CFdeNLv6u6Owf5VoBQxoo6DFTSA==
+
 "@tanstack/query-core@5.90.16":
   version "5.90.16"
   resolved "https://registry.npmjs.org/@tanstack/query-core/-/query-core-5.90.16.tgz"
@@ -1463,14 +1468,14 @@
   dependencies:
     "@tanstack/router-devtools-core" "1.144.0"
 
-"@tanstack/react-router@^1.144.0":
-  version "1.144.0"
-  resolved "https://registry.npmjs.org/@tanstack/react-router/-/react-router-1.144.0.tgz"
-  integrity sha512-GmRyIGmHtGj3VLTHXepIwXAxTcHyL5W7Vw7O1CnVEtFxQQWKMVOnWgI7tPY6FhlNwMKVb3n0mPFWz9KMYyd2GA==
+"@tanstack/react-router@^1.157.17":
+  version "1.157.17"
+  resolved "https://registry.yarnpkg.com/@tanstack/react-router/-/react-router-1.157.17.tgz#92943e3bc93b04ea45dd8c325f73d6ffc29cfe94"
+  integrity sha512-7i4wD8HFI/EZfwFYGNrcilqjrb+r/dxEl7F61rPfjUrfS39WGXQUSw0p/cQpcWEQZeYOGhqWjhmtM34H/Hul0g==
   dependencies:
-    "@tanstack/history" "1.141.0"
+    "@tanstack/history" "1.154.14"
     "@tanstack/react-store" "^0.8.0"
-    "@tanstack/router-core" "1.144.0"
+    "@tanstack/router-core" "1.157.16"
     isbot "^5.1.22"
     tiny-invariant "^1.3.3"
     tiny-warning "^1.0.3"
@@ -1500,6 +1505,19 @@
     cookie-es "^2.0.0"
     seroval "^1.4.1"
     seroval-plugins "^1.4.0"
+    tiny-invariant "^1.3.3"
+    tiny-warning "^1.0.3"
+
+"@tanstack/router-core@1.157.16":
+  version "1.157.16"
+  resolved "https://registry.yarnpkg.com/@tanstack/router-core/-/router-core-1.157.16.tgz#77d25de23845f596d200fd16d7377c99edfb0c6f"
+  integrity sha512-eJuVgM7KZYTTr4uPorbUzUflmljMVcaX2g6VvhITLnHmg9SBx9RAgtQ1HmT+72mzyIbRSlQ1q0fY/m+of/fosA==
+  dependencies:
+    "@tanstack/history" "1.154.14"
+    "@tanstack/store" "^0.8.0"
+    cookie-es "^2.0.0"
+    seroval "^1.4.2"
+    seroval-plugins "^1.4.2"
     tiny-invariant "^1.3.3"
     tiny-warning "^1.0.3"
 
@@ -3559,10 +3577,20 @@ seroval-plugins@^1.4.0:
   resolved "https://registry.npmjs.org/seroval-plugins/-/seroval-plugins-1.4.0.tgz"
   integrity sha512-zir1aWzoiax6pbBVjoYVd0O1QQXgIL3eVGBMsBsNmM8Ukq90yGaWlfx0AB9dTS8GPqrOrbXn79vmItCUP9U3BQ==
 
+seroval-plugins@^1.4.2:
+  version "1.5.0"
+  resolved "https://registry.yarnpkg.com/seroval-plugins/-/seroval-plugins-1.5.0.tgz#c02ba5f41d50b8105d4d9d4c553a4d01cec4226a"
+  integrity sha512-EAHqADIQondwRZIdeW2I636zgsODzoBDwb3PT/+7TLDWyw1Dy/Xv7iGUIEXXav7usHDE9HVhOU61irI3EnyyHA==
+
 seroval@^1.4.1:
   version "1.4.1"
   resolved "https://registry.npmjs.org/seroval/-/seroval-1.4.1.tgz"
   integrity sha512-9GOc+8T6LN4aByLN75uRvMbrwY5RDBW6lSlknsY4LEa9ZmWcxKcRe1G/Q3HZXjltxMHTrStnvrwAICxZrhldtg==
+
+seroval@^1.4.2:
+  version "1.5.0"
+  resolved "https://registry.yarnpkg.com/seroval/-/seroval-1.5.0.tgz#aba4cffbd0c4c8a4351358362acf40ee8d74d97b"
+  integrity sha512-OE4cvmJ1uSPrKorFIH9/w/Qwuvi/IMcGbv5RKgcJ/zjA/IohDLU6SVaxFN9FwajbP7nsX0dQqMDes1whk3y+yw==
 
 shebang-command@^2.0.0:
   version "2.0.0"

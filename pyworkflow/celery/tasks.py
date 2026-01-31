@@ -207,6 +207,9 @@ def execute_step_task(
             context_class = _resolve_context_class(context_class_name)
             if context_class is not None:
                 step_ctx = context_class.from_dict(context_data)
+                # Inject cancellation metadata so check_cancellation() works on workers
+                object.__setattr__(step_ctx, "_cancellation_run_id", run_id)
+                object.__setattr__(step_ctx, "_cancellation_storage", storage)
                 step_context_token = _set_step_context_internal(step_ctx)
                 # Set readonly mode to prevent mutation in steps
                 readonly_token = _set_step_context_readonly(True)

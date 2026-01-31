@@ -360,14 +360,14 @@ Cancellation is checked at these points:
 **Important Limitation:**
 Cancellation does NOT interrupt a step that is already executing. If a step function takes a long time (e.g., a 10-minute API call), cancellation will only be detected after the step completes. This is by design to avoid leaving operations in an inconsistent state.
 
-For long-running operations that need to be cancellable mid-execution, the step should periodically call `ctx.check_cancellation()` to cooperatively check for cancellation:
+For long-running operations that need to be cancellable mid-execution, the step should periodically call `await ctx.check_cancellation()` to cooperatively check for cancellation. This async method checks both the in-memory flag and the storage backend's cancellation flag (in durable mode), enabling detection of external cancellation requests:
 
 ```python
 @step()
 async def long_running_step():
     ctx = get_context()
     for chunk in process_large_dataset():
-        ctx.check_cancellation()  # Cooperative cancellation check
+        await ctx.check_cancellation()  # Cooperative cancellation check
         await process_chunk(chunk)
     return result
 ```

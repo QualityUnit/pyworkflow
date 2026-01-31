@@ -14,7 +14,7 @@ from pyworkflow.context import get_context, has_context
 from pyworkflow.core.exceptions import ContinueAsNewSignal
 
 
-def continue_as_new(*args: Any, **kwargs: Any) -> NoReturn:
+async def continue_as_new(*args: Any, **kwargs: Any) -> NoReturn:
     """
     Complete current workflow and start a new execution with fresh event history.
 
@@ -48,7 +48,7 @@ def continue_as_new(*args: Any, **kwargs: Any) -> NoReturn:
 
             # Continue with new cursor if more items
             if new_cursor:
-                continue_as_new(cursor=new_cursor)
+                await continue_as_new(cursor=new_cursor)
 
             return "done"
 
@@ -59,7 +59,7 @@ def continue_as_new(*args: Any, **kwargs: Any) -> NoReturn:
 
             # Continue with next day
             next_date = get_next_date(date)
-            continue_as_new(date=next_date)
+            await continue_as_new(date=next_date)
 
         @workflow
         async def batch_processor(offset: int = 0, batch_size: int = 100):
@@ -69,7 +69,7 @@ def continue_as_new(*args: Any, **kwargs: Any) -> NoReturn:
                 for item in items:
                     await process_item(item)
                 # Continue with next batch
-                continue_as_new(offset=offset + batch_size, batch_size=batch_size)
+                await continue_as_new(offset=offset + batch_size, batch_size=batch_size)
 
             return f"Processed {offset} items total"
     """
@@ -88,7 +88,7 @@ def continue_as_new(*args: Any, **kwargs: Any) -> NoReturn:
     ctx = get_context()
 
     # Check for cancellation - don't continue if cancelled
-    ctx.check_cancellation()
+    await ctx.check_cancellation()
 
     logger.info(
         "Workflow continuing as new execution",

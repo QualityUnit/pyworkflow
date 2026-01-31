@@ -15,7 +15,7 @@ Note:
     Cancellation does NOT interrupt a step mid-execution. If a step takes
     a long time, cancellation will only be detected after it completes.
     For cooperative cancellation within long-running steps, call
-    ``ctx.check_cancellation()`` periodically.
+    ``await ctx.check_cancellation()`` periodically.
 
 Example:
     @workflow

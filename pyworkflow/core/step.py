@@ -110,7 +110,7 @@ def step(
             ctx = get_context()
 
             # Check for cancellation before executing step
-            ctx.check_cancellation()
+            await ctx.check_cancellation()
 
             # Transient mode: execute directly without event sourcing
             # Retries are still supported via direct execution
@@ -243,7 +243,7 @@ def step(
             )
 
             # Check for cancellation before executing step
-            ctx.check_cancellation()
+            await ctx.check_cancellation()
 
             # Validate parameters before execution
             validate_step_parameters(func, args, kwargs, step_name)

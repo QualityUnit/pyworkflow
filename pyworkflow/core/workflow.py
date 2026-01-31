@@ -233,6 +233,9 @@ async def execute_workflow_with_context(
             context_data = await storage.get_run_context(run_id)
             if context_data:
                 step_ctx = context_class.from_dict(context_data)
+                # Inject cancellation metadata so check_cancellation() works
+                object.__setattr__(step_ctx, "_cancellation_run_id", run_id)
+                object.__setattr__(step_ctx, "_cancellation_storage", storage)
                 step_context_token = _set_step_context_internal(step_ctx)
 
     try:

@@ -47,7 +47,7 @@ class CancellationError(WorkflowError):
     Note:
         CancellationError is raised at checkpoint boundaries (before steps,
         sleeps, hooks), not during step execution. Long-running steps can
-        call ``ctx.check_cancellation()`` for cooperative cancellation.
+        call ``await ctx.check_cancellation()`` for cooperative cancellation.
 
     Example:
         @workflow

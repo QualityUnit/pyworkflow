@@ -189,7 +189,7 @@ async def cancel_demo_long_running_step(items: list) -> list:
     Example of cooperative cancellation within a long-running step.
 
     Since cancellation doesn't interrupt steps mid-execution, use
-    ctx.check_cancellation() for responsive cancellation in long loops.
+    await ctx.check_cancellation() for responsive cancellation in long loops.
     """
     ctx = get_context()
     results = []
@@ -197,7 +197,7 @@ async def cancel_demo_long_running_step(items: list) -> list:
     for i, item in enumerate(items):
         # Check for cancellation periodically
         if i % 10 == 0:
-            ctx.check_cancellation()  # Raises CancellationError if cancelled
+            await ctx.check_cancellation()  # Raises CancellationError if cancelled
 
         # Process item
         await asyncio.sleep(0.1)

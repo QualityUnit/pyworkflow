@@ -744,7 +744,7 @@ class LocalContext(WorkflowContext):
             return
 
         # Check for cancellation before sleeping
-        self.check_cancellation()
+        await self.check_cancellation()
 
         # Durable mode - suspend workflow
         sleep_id = self._generate_sleep_id(duration_seconds)
@@ -913,7 +913,7 @@ class LocalContext(WorkflowContext):
             )
 
         # Check for cancellation before waiting for hook
-        self.check_cancellation()
+        await self.check_cancellation()
 
         # Generate deterministic hook_id
         self._step_counter += 1
@@ -1038,19 +1038,22 @@ class LocalContext(WorkflowContext):
             reason=reason,
         )
 
-    def check_cancellation(self) -> None:
+    async def check_cancellation(self) -> None:
         """
         Check for cancellation and raise if requested.
 
         This should be called at interruptible points (before steps,
-        during sleeps, etc.) to allow graceful cancellation.
+        during sleeps, etc.) to allow graceful cancellation. In durable
+        mode, this also queries the storage backend to detect external
+        cancellation requests (e.g., from ``cancel_workflow()``).
 
         Raises:
             CancellationError: If cancellation was requested and not blocked
         """
-        if self._cancellation_requested and not self._cancellation_blocked:
-            from pyworkflow.core.exceptions import CancellationError
+        from pyworkflow.core.exceptions import CancellationError
 
+        # Fast path: in-memory flag
+        if self._cancellation_requested and not self._cancellation_blocked:
             logger.info(
                 "Cancellation check triggered - raising CancellationError",
                 run_id=self._run_id,
@@ -1060,6 +1063,27 @@ class LocalContext(WorkflowContext):
                 message=f"Workflow was cancelled: {self._cancellation_reason or 'no reason provided'}",
                 reason=self._cancellation_reason,
             )
+
+        # Storage check: detect external cancellation (durable mode only)
+        if not self._cancellation_blocked and self._durable and self._storage is not None:
+            try:
+                if await self._storage.check_cancellation_flag(self._run_id):
+                    self._cancellation_requested = True
+                    logger.info(
+                        "Cancellation detected via storage flag - raising CancellationError",
+                        run_id=self._run_id,
+                    )
+                    raise CancellationError(
+                        message="Workflow was cancelled: detected via storage flag",
+                        reason=self._cancellation_reason,
+                    )
+            except CancellationError:
+                raise
+            except Exception as e:
+                logger.warning(
+                    f"Failed to check cancellation flag in storage: {e}",
+                    run_id=self._run_id,
+                )
 
     @property
     def cancellation_blocked(self) -> bool:

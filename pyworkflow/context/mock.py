@@ -322,7 +322,7 @@ class MockContext(WorkflowContext):
         self._cancellation_requested = True
         self._cancellation_reason = reason
 
-    def check_cancellation(self) -> None:
+    async def check_cancellation(self) -> None:
         """Check if cancellation was requested and raise if not blocked."""
         from pyworkflow.core.exceptions import CancellationError
 

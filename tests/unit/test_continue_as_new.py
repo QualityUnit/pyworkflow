@@ -66,16 +66,18 @@ class TestContinueAsNewSignal:
 class TestContinueAsNewPrimitive:
     """Test continue_as_new() primitive function."""
 
-    def test_raises_runtime_error_outside_context(self):
+    @pytest.mark.asyncio
+    async def test_raises_runtime_error_outside_context(self):
         """Test continue_as_new raises RuntimeError outside context."""
         set_context(None)
 
         with pytest.raises(RuntimeError) as exc_info:
-            continue_as_new("arg1")
+            await continue_as_new("arg1")
 
         assert "must be called within a workflow context" in str(exc_info.value)
 
-    def test_raises_value_error_without_args(self):
+    @pytest.mark.asyncio
+    async def test_raises_value_error_without_args(self):
         """Test continue_as_new raises ValueError without args."""
         ctx = LocalContext(
             run_id="test_run",
@@ -87,13 +89,14 @@ class TestContinueAsNewPrimitive:
 
         try:
             with pytest.raises(ValueError) as exc_info:
-                continue_as_new()
+                await continue_as_new()
 
             assert "requires at least one argument" in str(exc_info.value)
         finally:
             set_context(None)
 
-    def test_raises_signal_with_positional_args(self):
+    @pytest.mark.asyncio
+    async def test_raises_signal_with_positional_args(self):
         """Test continue_as_new raises signal with positional args."""
         ctx = LocalContext(
             run_id="test_run",
@@ -105,14 +108,15 @@ class TestContinueAsNewPrimitive:
 
         try:
             with pytest.raises(ContinueAsNewSignal) as exc_info:
-                continue_as_new("arg1", "arg2")
+                await continue_as_new("arg1", "arg2")
 
             assert exc_info.value.workflow_args == ("arg1", "arg2")
             assert exc_info.value.workflow_kwargs == {}
         finally:
             set_context(None)
 
-    def test_raises_signal_with_keyword_args(self):
+    @pytest.mark.asyncio
+    async def test_raises_signal_with_keyword_args(self):
         """Test continue_as_new raises signal with keyword args."""
         ctx = LocalContext(
             run_id="test_run",
@@ -124,14 +128,15 @@ class TestContinueAsNewPrimitive:
 
         try:
             with pytest.raises(ContinueAsNewSignal) as exc_info:
-                continue_as_new(cursor="abc123")
+                await continue_as_new(cursor="abc123")
 
             assert exc_info.value.workflow_args == ()
             assert exc_info.value.workflow_kwargs == {"cursor": "abc123"}
         finally:
             set_context(None)
 
-    def test_raises_signal_with_mixed_args(self):
+    @pytest.mark.asyncio
+    async def test_raises_signal_with_mixed_args(self):
         """Test continue_as_new raises signal with mixed args."""
         ctx = LocalContext(
             run_id="test_run",
@@ -143,14 +148,15 @@ class TestContinueAsNewPrimitive:
 
         try:
             with pytest.raises(ContinueAsNewSignal) as exc_info:
-                continue_as_new("pos_arg", key1="val1", key2="val2")
+                await continue_as_new("pos_arg", key1="val1", key2="val2")
 
             assert exc_info.value.workflow_args == ("pos_arg",)
             assert exc_info.value.workflow_kwargs == {"key1": "val1", "key2": "val2"}
         finally:
             set_context(None)
 
-    def test_checks_cancellation_before_raising_signal(self):
+    @pytest.mark.asyncio
+    async def test_checks_cancellation_before_raising_signal(self):
         """Test continue_as_new checks cancellation first."""
         ctx = LocalContext(
             run_id="test_run",
@@ -163,7 +169,7 @@ class TestContinueAsNewPrimitive:
 
         try:
             with pytest.raises(CancellationError):
-                continue_as_new("arg1")
+                await continue_as_new("arg1")
         finally:
             set_context(None)
 
@@ -415,20 +421,22 @@ class TestStorageChainMethods:
 class TestMockContextContinueAsNew:
     """Test MockContext with continue_as_new."""
 
-    def test_mock_context_allows_continue_as_new(self):
+    @pytest.mark.asyncio
+    async def test_mock_context_allows_continue_as_new(self):
         """Test continue_as_new works with MockContext."""
         ctx = MockContext(run_id="test", workflow_name="test")
         set_context(ctx)
 
         try:
             with pytest.raises(ContinueAsNewSignal) as exc_info:
-                continue_as_new("arg1")
+                await continue_as_new("arg1")
 
             assert exc_info.value.workflow_args == ("arg1",)
         finally:
             set_context(None)
 
-    def test_mock_context_cancellation_prevents_continue_as_new(self):
+    @pytest.mark.asyncio
+    async def test_mock_context_cancellation_prevents_continue_as_new(self):
         """Test MockContext cancellation prevents continue_as_new."""
         ctx = MockContext(run_id="test", workflow_name="test")
         ctx.request_cancellation()
@@ -436,6 +444,6 @@ class TestMockContextContinueAsNew:
 
         try:
             with pytest.raises(CancellationError):
-                continue_as_new("arg1")
+                await continue_as_new("arg1")
         finally:
             set_context(None)

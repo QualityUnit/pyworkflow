@@ -319,7 +319,7 @@ class TestCancellationErrorHandling:
                     durable=False,
                 )
                 ctx.request_cancellation()
-                ctx.check_cancellation()
+                await ctx.check_cancellation()
             except CancellationError:
                 cleanup_called = True
                 raise
@@ -328,3 +328,87 @@ class TestCancellationErrorHandling:
             await workflow_with_cleanup()
 
         assert cleanup_called is True
+
+
+class TestCooperativeCancellation:
+    """Test cooperative cancellation for long-running steps via storage flag."""
+
+    @pytest.mark.asyncio
+    async def test_long_running_step_detects_storage_cancellation(self):
+        """Test that a step using await ctx.check_cancellation() detects external cancellation."""
+        from pyworkflow.context import LocalContext, reset_context, set_context
+
+        storage = InMemoryStorageBackend()
+
+        # Create a workflow run
+        run = WorkflowRun(
+            run_id="coop_cancel_run",
+            workflow_name="test_workflow",
+            status=RunStatus.RUNNING,
+        )
+        await storage.create_run(run)
+
+        ctx = LocalContext(
+            run_id="coop_cancel_run",
+            workflow_name="test_workflow",
+            storage=storage,
+            durable=True,
+        )
+        token = set_context(ctx)
+
+        items_processed = 0
+
+        try:
+            # Set cancellation flag externally (simulating cancel_workflow())
+            await storage.set_cancellation_flag("coop_cancel_run")
+
+            # Simulate a long-running step with cooperative cancellation
+            with pytest.raises(CancellationError):
+                for i in range(100):
+                    await ctx.check_cancellation()
+                    items_processed += 1
+                    await asyncio.sleep(0.001)
+
+            # Should have been cancelled on the first iteration
+            assert items_processed == 0
+        finally:
+            reset_context(token)
+
+    @pytest.mark.asyncio
+    async def test_cooperative_cancellation_mid_loop(self):
+        """Test cancellation detected mid-loop after external flag is set."""
+        from pyworkflow.context import LocalContext, reset_context, set_context
+
+        storage = InMemoryStorageBackend()
+
+        run = WorkflowRun(
+            run_id="coop_mid_run",
+            workflow_name="test_workflow",
+            status=RunStatus.RUNNING,
+        )
+        await storage.create_run(run)
+
+        ctx = LocalContext(
+            run_id="coop_mid_run",
+            workflow_name="test_workflow",
+            storage=storage,
+            durable=True,
+        )
+        token = set_context(ctx)
+
+        items_processed = 0
+
+        try:
+            with pytest.raises(CancellationError):
+                for i in range(100):
+                    # Set cancellation after processing 5 items
+                    if i == 5:
+                        await storage.set_cancellation_flag("coop_mid_run")
+
+                    await ctx.check_cancellation()
+                    items_processed += 1
+
+            # Should have processed exactly 5 items before cancellation
+            assert items_processed == 5
+        finally:
+            reset_context(token)

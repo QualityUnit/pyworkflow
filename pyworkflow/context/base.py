@@ -239,12 +239,15 @@ class WorkflowContext(ABC):
         ...
 
     @abstractmethod
-    def check_cancellation(self) -> None:
+    async def check_cancellation(self) -> None:
         """
         Check for cancellation and raise if requested.
 
         This should be called at interruptible points (before steps,
-        during sleeps, etc.) to allow graceful cancellation.
+        during sleeps, etc.) to allow graceful cancellation. In durable
+        mode, this also checks the storage backend's cancellation flag
+        to detect external cancellation requests (e.g., from
+        ``cancel_workflow()``).
 
         Raises:
             CancellationError: If cancellation was requested and not blocked

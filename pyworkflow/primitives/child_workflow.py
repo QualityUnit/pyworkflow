@@ -98,7 +98,7 @@ async def start_child_workflow(
         )
 
     # Check for cancellation before starting child
-    ctx.check_cancellation()
+    await ctx.check_cancellation()
 
     # Get workflow metadata
     workflow_meta = get_workflow_by_func(workflow_func)

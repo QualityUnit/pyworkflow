@@ -86,7 +86,7 @@ async def batch_processor(offset: int = 0, batch_size: int = 10) -> str:
     print("  [Workflow] Batch complete. Continuing with next batch...")
 
     # Continue with next batch - fresh event history!
-    continue_as_new(offset=offset + batch_size, batch_size=batch_size)
+    await continue_as_new(offset=offset + batch_size, batch_size=batch_size)
 
 
 # --- Example 2: Polling Workflow ---
@@ -116,7 +116,7 @@ async def polling_workflow(cursor: str | None = None, poll_count: int = 0) -> st
 
     # Continue polling with new cursor
     print(f"  [Workflow] Continuing with new cursor: {new_cursor}")
-    continue_as_new(cursor=new_cursor, poll_count=poll_count + 1)
+    await continue_as_new(cursor=new_cursor, poll_count=poll_count + 1)
 
 
 # --- Example 3: Counter Workflow (Simple Demo) ---
@@ -132,7 +132,7 @@ async def countdown_workflow(count: int) -> str:
         return "Countdown complete!"
 
     # Continue with decremented count
-    continue_as_new(count=count - 1)
+    await continue_as_new(count=count - 1)
 
 
 async def example_batch_processing(storage):

@@ -209,7 +209,7 @@ class AWSWorkflowContext(WorkflowContext):
         """Request cancellation (AWS manages this internally)."""
         logger.warning("Cancellation not supported in AWS context")
 
-    def check_cancellation(self) -> None:
+    async def check_cancellation(self) -> None:
         """Check cancellation (AWS manages this internally)."""
         pass  # AWS handles this
 

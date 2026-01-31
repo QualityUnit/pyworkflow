@@ -566,7 +566,7 @@ async def cancel_workflow(
         Cancellation does NOT interrupt a step that is already executing.
         If a step takes a long time, cancellation will only be detected after
         the step completes. For long-running steps that need mid-execution
-        cancellation, call ``ctx.check_cancellation()`` periodically within
+        cancellation, call ``await ctx.check_cancellation()`` periodically within
         the step function.
 
     Args:
@@ -649,9 +649,14 @@ async def cancel_workflow(
         current_status=run.status.value,
     )
 
+    # Always set the cancellation flag in storage so that distributed
+    # components (Celery workers, LangGraph tools, StepContext.check_cancellation())
+    # can detect the cancellation regardless of workflow status.
+    await storage.set_cancellation_flag(run_id)
+
     # Handle based on current status
     if run.status == RunStatus.SUSPENDED:
-        # For suspended workflows, update status to CANCELLED immediately
+        # For suspended workflows, also update status to CANCELLED immediately
         # The workflow will see cancellation when it tries to resume
         cancelled_event = create_workflow_cancelled_event(
             run_id=run_id,
@@ -667,10 +672,6 @@ async def cancel_workflow(
         )
 
     elif run.status in {RunStatus.RUNNING, RunStatus.PENDING}:
-        # For running/pending workflows, set cancellation flag
-        # The workflow will detect this at the next check point
-        await storage.set_cancellation_flag(run_id)
-
         logger.info(
             "Cancellation flag set for running workflow",
             run_id=run_id,

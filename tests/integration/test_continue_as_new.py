@@ -59,7 +59,7 @@ class TestContinueAsNewExecution:
 
         try:
             with pytest.raises(ContinueAsNewSignal) as exc_info:
-                continue_as_new(count=2)
+                await continue_as_new(count=2)
 
             # Check the signal has correct args
             assert exc_info.value.workflow_kwargs == {"count": 2}
@@ -249,7 +249,7 @@ class TestCancellationPreventsContination:
         try:
             # Should raise CancellationError, not ContinueAsNewSignal
             with pytest.raises(CancellationError):
-                continue_as_new("arg1")
+                await continue_as_new("arg1")
         finally:
             set_context(None)
 
@@ -270,7 +270,7 @@ class TestContinueAsNewWithArgs:
 
         try:
             with pytest.raises(ContinueAsNewSignal) as exc_info:
-                continue_as_new("a", "b", "c")
+                await continue_as_new("a", "b", "c")
 
             assert exc_info.value.workflow_args == ("a", "b", "c")
             assert exc_info.value.workflow_kwargs == {}
@@ -290,7 +290,7 @@ class TestContinueAsNewWithArgs:
 
         try:
             with pytest.raises(ContinueAsNewSignal) as exc_info:
-                continue_as_new(cursor="abc", limit=100)
+                await continue_as_new(cursor="abc", limit=100)
 
             assert exc_info.value.workflow_args == ()
             assert exc_info.value.workflow_kwargs == {"cursor": "abc", "limit": 100}
@@ -312,7 +312,7 @@ class TestContinueAsNewWithArgs:
             complex_data = {"items": [1, 2, 3], "metadata": {"key": "value"}}
 
             with pytest.raises(ContinueAsNewSignal) as exc_info:
-                continue_as_new(data=complex_data)
+                await continue_as_new(data=complex_data)
 
             assert exc_info.value.workflow_kwargs["data"] == complex_data
         finally:

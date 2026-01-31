@@ -47,10 +47,16 @@ Usage:
         return {"valid": True}
 """
 
-from contextvars import ContextVar, Token
-from typing import Any, Self
+from __future__ import annotations
 
+from contextvars import ContextVar, Token
+from typing import TYPE_CHECKING, Any, Self
+
+from loguru import logger
 from pydantic import BaseModel, ConfigDict
+
+if TYPE_CHECKING:
+    from pyworkflow.storage.base import StorageBackend
 
 
 class StepContext(BaseModel):
@@ -79,6 +85,61 @@ class StepContext(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+    # Private attributes injected by the framework (not serialized).
+    # These enable check_cancellation() to work even when WorkflowContext
+    # is not available (e.g., on Celery workers, inside LangGraph tools).
+    _cancellation_run_id: str | None = None
+    _cancellation_storage: StorageBackend | None = None
+
+    async def check_cancellation(self) -> None:
+        """
+        Check for cancellation and raise CancellationError if requested.
+
+        This works in all execution contexts:
+        - If a WorkflowContext is available, delegates to it (checks both
+          in-memory flag and storage).
+        - Otherwise, checks the storage cancellation flag directly using
+          the run_id and storage injected by the framework.
+
+        This is especially useful for long-running operations inside steps
+        or tool adapters where WorkflowContext may not be available (e.g.,
+        on Celery workers, inside LangGraph tool execution).
+
+        Raises:
+            CancellationError: If cancellation was requested
+
+        Example:
+            @step()
+            async def long_running_step():
+                ctx = get_step_context()
+                for chunk in chunks:
+                    await ctx.check_cancellation()
+                    await process(chunk)
+        """
+        from pyworkflow.context import has_context, get_context
+        from pyworkflow.core.exceptions import CancellationError
+
+        # Fast path: delegate to WorkflowContext if available
+        if has_context():
+            await get_context().check_cancellation()
+            return
+
+        # Fallback: check storage flag directly
+        if self._cancellation_run_id is not None and self._cancellation_storage is not None:
+            try:
+                if await self._cancellation_storage.check_cancellation_flag(
+                    self._cancellation_run_id
+                ):
+                    raise CancellationError(
+                        message="Workflow was cancelled: detected via storage flag",
+                    )
+            except CancellationError:
+                raise
+            except Exception as e:
+                logger.warning(
+                    f"Failed to check cancellation flag in storage: {e}",
+                )
 
     def with_updates(self: Self, **kwargs: Any) -> Self:
         """
@@ -203,12 +264,21 @@ async def set_step_context(ctx: StepContext) -> None:
     if not isinstance(ctx, StepContext):
         raise TypeError(f"Expected StepContext instance, got {type(ctx).__name__}")
 
+    # Inject cancellation metadata from WorkflowContext if available.
+    # This enables check_cancellation() to work even when WorkflowContext
+    # is not accessible (e.g., on Celery workers, inside LangGraph tools).
+    from pyworkflow.context import get_context, has_context
+
+    if has_context():
+        workflow_ctx = get_context()
+        object.__setattr__(ctx, "_cancellation_run_id", workflow_ctx.run_id)
+        if workflow_ctx.is_durable and workflow_ctx.storage is not None:
+            object.__setattr__(ctx, "_cancellation_storage", workflow_ctx.storage)
+
     # Set the context in the contextvar
     _step_context.set(ctx)
 
     # Persist to storage if we're in a durable workflow
-    from pyworkflow.context import get_context, has_context
-
     if has_context():
         workflow_ctx = get_context()
         if workflow_ctx.is_durable and workflow_ctx.storage is not None:

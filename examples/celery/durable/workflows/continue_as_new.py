@@ -101,7 +101,7 @@ async def batch_processor(offset: int = 0, batch_size: int = 10) -> str:
     print(f"  [Batch] Processed {len(items)} items")
 
     # Continue with next batch
-    continue_as_new(offset=offset + batch_size, batch_size=batch_size)
+    await continue_as_new(offset=offset + batch_size, batch_size=batch_size)
 
 
 # --- Message Consumer Workflow ---
@@ -133,7 +133,7 @@ async def message_consumer(cursor: str | None = None, messages_processed: int = 
     print(f"  [Consumer] Handled {count} messages (total: {total})")
 
     # Continue with new cursor
-    continue_as_new(cursor=new_cursor, messages_processed=total)
+    await continue_as_new(cursor=new_cursor, messages_processed=total)
 
 
 # --- Recurring Task Workflow ---
@@ -159,7 +159,7 @@ async def recurring_report(iteration: int = 1, max_iterations: int = 3) -> str:
         return f"All {max_iterations} reports generated!"
 
     # Continue with next iteration
-    continue_as_new(iteration=iteration + 1, max_iterations=max_iterations)
+    await continue_as_new(iteration=iteration + 1, max_iterations=max_iterations)
 
 
 async def run_examples():

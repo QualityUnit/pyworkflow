@@ -433,7 +433,9 @@ class TestCooperativeCancellationViaStorage:
         from unittest.mock import AsyncMock
 
         storage = AsyncMock()
-        storage.check_cancellation_flag = AsyncMock(side_effect=ConnectionError("Storage unavailable"))
+        storage.check_cancellation_flag = AsyncMock(
+            side_effect=ConnectionError("Storage unavailable")
+        )
 
         ctx = LocalContext(
             run_id="test_run",
@@ -556,9 +558,7 @@ class TestStepContextCheckCancellation:
         from pyworkflow.context.step_context import StepContext
 
         storage = AsyncMock()
-        storage.check_cancellation_flag = AsyncMock(
-            side_effect=ConnectionError("Storage down")
-        )
+        storage.check_cancellation_flag = AsyncMock(side_effect=ConnectionError("Storage down"))
 
         ctx = StepContext()
         object.__setattr__(ctx, "_cancellation_run_id", "test_run")

@@ -158,6 +158,7 @@ const AuthenticatedErrorsErrorRoute =
   } as any)
 
 export interface FileRoutesByFullPath {
+  '/': typeof AuthenticatedIndexRoute
   '/settings': typeof AuthenticatedSettingsRouteRouteWithChildren
   '/forgot-password': typeof authForgotPasswordRoute
   '/otp': typeof authOtpRoute
@@ -169,7 +170,6 @@ export interface FileRoutesByFullPath {
   '/404': typeof errors404Route
   '/500': typeof errors500Route
   '/503': typeof errors503Route
-  '/': typeof AuthenticatedIndexRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/runs/$runId': typeof AuthenticatedRunsRunIdRoute
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
@@ -177,9 +177,9 @@ export interface FileRoutesByFullPath {
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/workflows/$name': typeof AuthenticatedWorkflowsNameRoute
-  '/runs': typeof AuthenticatedRunsIndexRoute
+  '/runs/': typeof AuthenticatedRunsIndexRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
-  '/workflows': typeof AuthenticatedWorkflowsIndexRoute
+  '/workflows/': typeof AuthenticatedWorkflowsIndexRoute
 }
 export interface FileRoutesByTo {
   '/forgot-password': typeof authForgotPasswordRoute
@@ -233,6 +233,7 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
+    | '/'
     | '/settings'
     | '/forgot-password'
     | '/otp'
@@ -244,7 +245,6 @@ export interface FileRouteTypes {
     | '/404'
     | '/500'
     | '/503'
-    | '/'
     | '/errors/$error'
     | '/runs/$runId'
     | '/settings/account'
@@ -252,9 +252,9 @@ export interface FileRouteTypes {
     | '/settings/display'
     | '/settings/notifications'
     | '/workflows/$name'
-    | '/runs'
+    | '/runs/'
     | '/settings/'
-    | '/workflows'
+    | '/workflows/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/forgot-password'
@@ -324,7 +324,7 @@ declare module '@tanstack/react-router' {
     '/_authenticated': {
       id: '/_authenticated'
       path: ''
-      fullPath: ''
+      fullPath: '/'
       preLoaderRoute: typeof AuthenticatedRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
@@ -415,7 +415,7 @@ declare module '@tanstack/react-router' {
     '/_authenticated/workflows/': {
       id: '/_authenticated/workflows/'
       path: '/workflows'
-      fullPath: '/workflows'
+      fullPath: '/workflows/'
       preLoaderRoute: typeof AuthenticatedWorkflowsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
@@ -429,7 +429,7 @@ declare module '@tanstack/react-router' {
     '/_authenticated/runs/': {
       id: '/_authenticated/runs/'
       path: '/runs'
-      fullPath: '/runs'
+      fullPath: '/runs/'
       preLoaderRoute: typeof AuthenticatedRunsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }

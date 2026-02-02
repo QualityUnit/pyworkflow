@@ -2061,7 +2061,7 @@ async def _resume_workflow_on_worker(
     claimed = await storage.try_claim_run(run_id, RunStatus.SUSPENDED, RunStatus.RUNNING)
     if not claimed:
         logger.info(
-            f"Workflow status is not SUSPENDED (already claimed) - skipping duplicate resume",
+            "Workflow status is not SUSPENDED (already claimed) - skipping duplicate resume",
             run_id=run_id,
             workflow_name=run.workflow_name,
         )

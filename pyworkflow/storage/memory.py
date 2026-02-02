@@ -366,6 +366,20 @@ class InMemoryStorageBackend(StorageBackend):
             # Apply pagination
             return hooks[offset : offset + limit]
 
+    # Atomic Status Transition
+
+    async def try_claim_run(
+        self, run_id: str, from_status: RunStatus, to_status: RunStatus
+    ) -> bool:
+        """Atomically transition run status using lock-protected check-and-set."""
+        with self._lock:
+            run = self._runs.get(run_id)
+            if not run or run.status != from_status:
+                return False
+            run.status = to_status
+            run.updated_at = datetime.now(UTC)
+            return True
+
     # Cancellation Flag Operations
 
     async def set_cancellation_flag(self, run_id: str) -> None:

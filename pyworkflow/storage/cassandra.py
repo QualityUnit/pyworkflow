@@ -1209,6 +1209,31 @@ class CassandraStorageBackend(StorageBackend):
         # Apply offset and limit
         return hooks[offset : offset + limit]
 
+    # Atomic Status Transition
+
+    async def try_claim_run(
+        self, run_id: str, from_status: RunStatus, to_status: RunStatus
+    ) -> bool:
+        """Atomically transition run status using lightweight transaction (IF)."""
+        session = self._ensure_connected()
+
+        result = session.execute(
+            SimpleStatement(
+                """
+                UPDATE workflow_runs
+                SET status = %s, updated_at = %s
+                WHERE run_id = %s
+                IF status = %s
+                """,
+                consistency_level=ConsistencyLevel.SERIAL,
+            ),
+            (to_status.value, datetime.now(UTC), run_id, from_status.value),
+        )
+
+        # Cassandra LWT returns [applied] column
+        row = result.one()
+        return row is not None and row[0] is True
+
     # Cancellation Flag Operations
 
     async def set_cancellation_flag(self, run_id: str) -> None:

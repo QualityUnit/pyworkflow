@@ -750,6 +750,26 @@ class SQLiteStorageBackend(StorageBackend):
 
         return [self._row_to_hook(row) for row in rows]
 
+    # Atomic Status Transition
+
+    async def try_claim_run(
+        self, run_id: str, from_status: RunStatus, to_status: RunStatus
+    ) -> bool:
+        """Atomically transition run status using conditional UPDATE."""
+        db = self._ensure_connected()
+
+        cursor = await db.execute(
+            """
+            UPDATE workflow_runs
+            SET status = ?, updated_at = ?
+            WHERE run_id = ? AND status = ?
+            """,
+            (to_status.value, datetime.now(UTC).isoformat(), run_id, from_status.value),
+        )
+        await db.commit()
+
+        return cursor.rowcount > 0
+
     # Cancellation Flag Operations
 
     async def set_cancellation_flag(self, run_id: str) -> None:

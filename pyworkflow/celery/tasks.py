@@ -1154,8 +1154,14 @@ async def _recover_workflow_on_worker(
         recovery_attempt=run.recovery_attempts,
     )
 
-    # Update status to RUNNING (from RUNNING or INTERRUPTED)
-    await storage.update_run_status(run_id=run_id, status=RunStatus.RUNNING)
+    # Atomically claim the run for recovery.
+    # The run may be in INTERRUPTED or RUNNING state after a worker crash.
+    # Try INTERRUPTED -> RUNNING first (most common recovery path).
+    # If the run is already RUNNING, just set it to RUNNING (idempotent).
+    claimed = await storage.try_claim_run(run_id, RunStatus.INTERRUPTED, RunStatus.RUNNING)
+    if not claimed:
+        # May already be RUNNING from a previous partial recovery - update status directly
+        await storage.update_run_status(run_id=run_id, status=RunStatus.RUNNING)
 
     # Load event log for replay
     events = await storage.get_events(run_id)
@@ -2048,14 +2054,14 @@ async def _resume_workflow_on_worker(
         )
         return None
 
-    # Prevent duplicate resume execution
+    # Atomically claim the run: SUSPENDED -> RUNNING
     # Multiple resume tasks can be scheduled for the same workflow (e.g., race
-    # condition between step completion and suspension handler). Only proceed
-    # if the workflow is actually SUSPENDED. If status is RUNNING, another
-    # resume task got there first.
-    if run.status != RunStatus.SUSPENDED:
+    # condition between step completion and suspension handler). Only one
+    # succeeds; duplicates see the claim fail and return.
+    claimed = await storage.try_claim_run(run_id, RunStatus.SUSPENDED, RunStatus.RUNNING)
+    if not claimed:
         logger.info(
-            f"Workflow status is {run.status.value}, not SUSPENDED - skipping duplicate resume",
+            f"Workflow status is not SUSPENDED (already claimed) - skipping duplicate resume",
             run_id=run_id,
             workflow_name=run.workflow_name,
         )
@@ -2075,6 +2081,8 @@ async def _resume_workflow_on_worker(
                 workflow_name=run.workflow_name,
                 triggered_by_hook_id=triggered_by_hook_id,
             )
+            # Revert status back to SUSPENDED since we won't actually resume
+            await storage.update_run_status(run_id=run_id, status=RunStatus.SUSPENDED)
             return None
 
     # Check for cancellation flag
@@ -2084,7 +2092,7 @@ async def _resume_workflow_on_worker(
         f"Resuming workflow execution on worker: {run.workflow_name}",
         run_id=run_id,
         workflow_name=run.workflow_name,
-        current_status=run.status.value,
+        current_status="running",
         cancellation_requested=cancellation_requested,
     )
 
@@ -2102,9 +2110,6 @@ async def _resume_workflow_on_worker(
     # Deserialize arguments
     args = deserialize_args(run.input_args)
     kwargs = deserialize_kwargs(run.input_kwargs)
-
-    # Update status to running
-    await storage.update_run_status(run_id=run_id, status=RunStatus.RUNNING)
 
     # Execute workflow with event replay
     try:

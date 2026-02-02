@@ -889,6 +889,37 @@ class DynamoDBStorageBackend(StorageBackend):
 
             return [self._item_to_hook(self._item_to_dict(item)) for item in items]
 
+    # Atomic Status Transition
+
+    async def try_claim_run(
+        self, run_id: str, from_status: RunStatus, to_status: RunStatus
+    ) -> bool:
+        """Atomically transition run status using conditional update."""
+        async with self._get_client() as client:
+            try:
+                now = datetime.now(UTC).isoformat()
+                await client.update_item(
+                    TableName=self.table_name,
+                    Key={
+                        "PK": {"S": f"RUN#{run_id}"},
+                        "SK": {"S": "#METADATA"},
+                    },
+                    UpdateExpression="SET #status = :new_status, updated_at = :now, GSI1SK = :gsi1sk",
+                    ConditionExpression="#status = :expected_status",
+                    ExpressionAttributeNames={"#status": "status"},
+                    ExpressionAttributeValues={
+                        ":new_status": {"S": to_status.value},
+                        ":expected_status": {"S": from_status.value},
+                        ":now": {"S": now},
+                        ":gsi1sk": {"S": f"{to_status.value}#{now}"},
+                    },
+                )
+                return True
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                    return False
+                raise
+
     # Cancellation Flag Operations
 
     async def set_cancellation_flag(self, run_id: str) -> None:

@@ -767,6 +767,26 @@ class MySQLStorageBackend(StorageBackend):
 
         return [self._row_to_hook(row) for row in rows]
 
+    # Atomic Status Transition
+
+    async def try_claim_run(
+        self, run_id: str, from_status: RunStatus, to_status: RunStatus
+    ) -> bool:
+        """Atomically transition run status using conditional UPDATE."""
+        pool = self._ensure_connected()
+
+        async with pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE workflow_runs
+                SET status = %s, updated_at = %s
+                WHERE run_id = %s AND status = %s
+                """,
+                (to_status.value, datetime.now(UTC), run_id, from_status.value),
+            )
+
+            return cur.rowcount > 0
+
     # Cancellation Flag Operations
 
     async def set_cancellation_flag(self, run_id: str) -> None:

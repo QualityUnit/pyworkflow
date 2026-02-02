@@ -595,12 +595,33 @@ async def _dispatch_step_to_celery(
     """
     from pyworkflow.celery.tasks import execute_step_task
     from pyworkflow.core.exceptions import SuspensionSignal
+    from pyworkflow.engine.events import EventType
 
     logger.info(
         f"Dispatching step to Celery worker: {step_name}",
         run_id=ctx.run_id,
         step_id=step_id,
     )
+
+    # Defense-in-depth: check if STEP_STARTED was already recorded for this step.
+    # This guards against duplicate dispatch when two resume tasks race and both
+    # replay past the same step. If already started, re-suspend to wait.
+    events = await ctx.storage.get_events(ctx.run_id)
+    already_started = any(
+        evt.type == EventType.STEP_STARTED and evt.data.get("step_id") == step_id
+        for evt in events
+    )
+    if already_started:
+        logger.info(
+            f"Step {step_name} already has STEP_STARTED event, re-suspending",
+            run_id=ctx.run_id,
+            step_id=step_id,
+        )
+        raise SuspensionSignal(
+            reason=f"step_dispatch:{step_id}",
+            step_id=step_id,
+            step_name=step_name,
+        )
 
     # Validate event limits before recording step event
     await ctx.validate_event_limits()

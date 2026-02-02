@@ -592,6 +592,34 @@ class FileStorageBackend(StorageBackend):
         hook_data_list = await asyncio.to_thread(_list)
         return [Hook.from_dict(data) for data in hook_data_list]
 
+    # Atomic Status Transition
+
+    async def try_claim_run(
+        self, run_id: str, from_status: RunStatus, to_status: RunStatus
+    ) -> bool:
+        """Atomically transition run status using file lock."""
+        run_file = self.runs_dir / f"{run_id}.json"
+
+        if not run_file.exists():
+            return False
+
+        lock_file = self.locks_dir / f"{run_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _try_claim() -> bool:
+            with lock:
+                if not run_file.exists():
+                    return False
+                data = json.loads(run_file.read_text())
+                if data.get("status") != from_status.value:
+                    return False
+                data["status"] = to_status.value
+                data["updated_at"] = datetime.now(UTC).isoformat()
+                run_file.write_text(json.dumps(data, indent=2))
+                return True
+
+        return await asyncio.to_thread(_try_claim)
+
     # Cancellation Flag Operations
 
     async def set_cancellation_flag(self, run_id: str) -> None:

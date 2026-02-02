@@ -862,6 +862,30 @@ class PostgresStorageBackend(StorageBackend):
 
         return [self._row_to_hook(row) for row in rows]
 
+    # Atomic Status Transition
+
+    async def try_claim_run(
+        self, run_id: str, from_status: RunStatus, to_status: RunStatus
+    ) -> bool:
+        """Atomically transition run status using conditional UPDATE."""
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE workflow_runs
+                SET status = $1, updated_at = $2
+                WHERE run_id = $3 AND status = $4
+                """,
+                to_status.value,
+                datetime.now(UTC),
+                run_id,
+                from_status.value,
+            )
+
+        # asyncpg returns 'UPDATE N' where N is rows affected
+        return result == "UPDATE 1"
+
     # Cancellation Flag Operations
 
     async def set_cancellation_flag(self, run_id: str) -> None:

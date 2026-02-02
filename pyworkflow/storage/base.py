@@ -358,6 +358,35 @@ class StorageBackend(ABC):
         """
         pass
 
+    # Atomic Status Transition
+
+    async def try_claim_run(
+        self, run_id: str, from_status: RunStatus, to_status: RunStatus
+    ) -> bool:
+        """
+        Atomically transition run status if the current status matches.
+
+        This is a compare-and-swap operation: the status is only updated
+        if the current status equals `from_status`. Returns True if the
+        transition was applied, False if the current status did not match
+        (meaning another task already claimed this run).
+
+        Args:
+            run_id: Workflow run identifier
+            from_status: Expected current status
+            to_status: New status to set
+
+        Returns:
+            True if the transition succeeded, False otherwise
+        """
+        # Default implementation using get_run + update_run_status.
+        # Backends should override with truly atomic implementations.
+        run = await self.get_run(run_id)
+        if not run or run.status != from_status:
+            return False
+        await self.update_run_status(run_id, to_status)
+        return True
+
     # Cancellation Flag Operations
 
     @abstractmethod

@@ -608,8 +608,7 @@ async def _dispatch_step_to_celery(
     # replay past the same step. If already started, re-suspend to wait.
     events = await ctx.storage.get_events(ctx.run_id)
     already_started = any(
-        evt.type == EventType.STEP_STARTED and evt.data.get("step_id") == step_id
-        for evt in events
+        evt.type == EventType.STEP_STARTED and evt.data.get("step_id") == step_id for evt in events
     )
     if already_started:
         logger.info(

@@ -46,13 +46,6 @@ def worker() -> None:
     help="Only process scheduled resumption tasks (pyworkflow.schedules queue)",
 )
 @click.option(
-    "--concurrency",
-    "-c",
-    type=int,
-    default=1,
-    help="Number of worker processes (default: 1)",
-)
-@click.option(
     "--loglevel",
     "-l",
     type=click.Choice(["debug", "info", "warning", "error"], case_sensitive=False),
@@ -116,7 +109,6 @@ def run_worker(
     queue_workflow: bool,
     queue_step: bool,
     queue_schedule: bool,
-    concurrency: int | None,
     loglevel: str,
     hostname: str | None,
     beat: bool,
@@ -143,9 +135,6 @@ def run_worker(
 
         # Start a workflow orchestration worker only
         pyworkflow worker run --workflow
-
-        # Start a step execution worker (for heavy computation)
-        pyworkflow worker run --step --concurrency 4
 
         # Start a schedule worker (for sleep resumption)
         pyworkflow worker run --schedule
@@ -229,7 +218,8 @@ def run_worker(
     if broker_url.startswith("sentinel://") or broker_url.startswith("sentinel+ssl://"):
         print_info(f"Sentinel master: {sentinel_master_name or 'mymaster'}")
     print_info(f"Queues: {', '.join(queues)}")
-    print_info(f"Concurrency: {concurrency}")
+    if autoscale:
+        print_info(f"Autoscale: {autoscale} (min,max)")
     print_info(f"Pool: {pool}")
     if extra_args:
         print_info(f"Extra args: {' '.join(extra_args)}")
@@ -283,7 +273,6 @@ def run_worker(
         worker_args = [
             "worker",
             f"--loglevel={loglevel.upper()}",
-            f"--concurrency={concurrency}",  # Always set (default: 1)
             f"--pool={pool}",  # Always set (default: prefork)
         ]
 

@@ -70,13 +70,13 @@ docker run -d -p 6379:6379 redis:7-alpine
 celery -A pyworkflow.celery.app worker \
     --loglevel=info \
     --queues=pyworkflow.steps \
-    --concurrency=4
+    --autoscale=10,2
 
 # Terminal 2: Start worker for workflow orchestration
 celery -A pyworkflow.celery.app worker \
     --loglevel=info \
     --queues=pyworkflow.workflows \
-    --concurrency=2
+    --autoscale=4,1
 
 # Terminal 3: Start Celery Beat for scheduled tasks (sleep resumption)
 celery -A pyworkflow.celery.app beat --loglevel=info
@@ -273,13 +273,13 @@ celery-exporter --broker-url=redis://localhost:6379/0
 
 ```bash
 # CPU-bound tasks
-celery -A pyworkflow.celery.app worker --concurrency=8 --pool=prefork
+celery -A pyworkflow.celery.app worker --autoscale=8,2 --pool=prefork
 
 # I/O-bound tasks
-celery -A pyworkflow.celery.app worker --concurrency=100 --pool=gevent
+celery -A pyworkflow.celery.app worker --autoscale=100,10 --pool=gevent
 
 # Mixed workload
-celery -A pyworkflow.celery.app worker --concurrency=16 --pool=eventlet
+celery -A pyworkflow.celery.app worker --autoscale=16,4 --pool=eventlet
 ```
 
 ### Queue Priorities

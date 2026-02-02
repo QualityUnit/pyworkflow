@@ -401,7 +401,7 @@ task_routes = {
 celery -A pyworkflow.celery.tasks worker -Q workflows -n workflow@%h
 
 # Step worker (scalable)
-celery -A pyworkflow.celery.tasks worker -Q steps -n step@%h --concurrency=4
+celery -A pyworkflow.celery.tasks worker -Q steps -n step@%h --autoscale=10,2
 ```
 
 ### Logging with Loguru
@@ -604,9 +604,9 @@ result["modified"] = True
 - **Production (medium)**: Redis (fast, in-memory)
 - **Production (large)**: PostgreSQL (scalable, full SQL)
 
-### Celery Concurrency
-- Workflow workers: Low concurrency (lightweight orchestration)
-- Step workers: High concurrency (actual work)
+### Celery Autoscaling
+- Workflow workers: Low autoscale range (lightweight orchestration), e.g. `--autoscale=4,1`
+- Step workers: High autoscale range (actual work), e.g. `--autoscale=10,2`
 - Scale step workers horizontally as needed
 
 ## References

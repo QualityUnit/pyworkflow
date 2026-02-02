@@ -416,7 +416,6 @@ pyworkflow worker run
 | `--workflow` | Only process workflow orchestration tasks |
 | `--step` | Only process step execution tasks |
 | `--schedule` | Only process scheduled resumption tasks |
-| `--concurrency N` | Number of worker processes (default: 1) |
 | `--loglevel LEVEL` | Log level: `debug`, `info`, `warning`, `error` |
 | `--hostname NAME` | Custom worker hostname |
 | `--beat` | Also start Celery Beat scheduler |
@@ -439,7 +438,7 @@ pyworkflow worker run
     pyworkflow worker run --workflow
 
     # Terminal 2: Step execution (scale this for heavy work)
-    pyworkflow worker run --step --concurrency 4
+    pyworkflow worker run --step --autoscale 10,2
 
     # Terminal 3: Scheduled tasks
     pyworkflow worker run --schedule

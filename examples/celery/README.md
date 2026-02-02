@@ -147,13 +147,13 @@ For production, run separate workers for each queue type:
 
 ```bash
 # Terminal 1: Workflow orchestration (lightweight)
-pyworkflow --module examples.celery.durable worker run --workflow --concurrency 2
+pyworkflow --module examples.celery.durable worker run --workflow --autoscale 4,1
 
 # Terminal 2+: Step execution (scale for heavy work)
-pyworkflow --module examples.celery.durable worker run --step --concurrency 8
+pyworkflow --module examples.celery.durable worker run --step --autoscale 10,2
 
 # Terminal N: Schedule handling (for sleep resumption)
-pyworkflow --module examples.celery.durable worker run --schedule --concurrency 2
+pyworkflow --module examples.celery.durable worker run --schedule --autoscale 4,1
 ```
 
 ### Check Worker Status

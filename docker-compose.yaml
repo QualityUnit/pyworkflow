@@ -112,7 +112,7 @@ services:
     platform: linux/amd64
     container_name: pyworkflow-step-worker
     working_dir: /app/project
-    command: celery -A pyworkflow.celery.tasks worker -Q steps -n step@%h --loglevel=info --concurrency=4
+    command: celery -A pyworkflow.celery.tasks worker -Q steps -n step@%h --loglevel=info --autoscale=10,2
     environment:
       - PYWORKFLOW_STORAGE_TYPE=postgres
       - PYWORKFLOW_POSTGRES_HOST=postgres

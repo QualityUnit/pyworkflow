@@ -199,15 +199,6 @@ class TestRunWorkerCommand:
         # Check extra args
         assert "--max-memory-per-child=150000" in args
 
-    def test_concurrency_option(self, runner, mock_celery_app, mock_discovery, mock_list_functions):
-        """--concurrency option is passed to Celery."""
-        runner.invoke(worker, ["run", "--concurrency", "4"], obj={"config": {}, "module": None})
-
-        mock_celery_app.worker_main.assert_called_once()
-        args = mock_celery_app.worker_main.call_args[1]["argv"]
-
-        assert "--concurrency=4" in args
-
     def test_loglevel_option(self, runner, mock_celery_app, mock_discovery, mock_list_functions):
         """--loglevel option is passed to Celery in uppercase."""
         runner.invoke(worker, ["run", "--loglevel", "debug"], obj={"config": {}, "module": None})

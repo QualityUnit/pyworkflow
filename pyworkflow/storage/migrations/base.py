@@ -98,11 +98,7 @@ class MigrationRegistry:
         Returns:
             List of migrations with version > current_version, sorted ascending
         """
-        return [
-            self._migrations[v]
-            for v in sorted(self._migrations.keys())
-            if v > current_version
-        ]
+        return [self._migrations[v] for v in sorted(self._migrations.keys()) if v > current_version]
 
     def get_latest_version(self) -> int:
         """

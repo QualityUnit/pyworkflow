@@ -53,9 +53,7 @@ class MySQLMigrationRunner(MigrationRunner):
     async def get_current_version(self) -> int:
         """Get the highest applied migration version."""
         async with self._pool.acquire() as conn, conn.cursor() as cur:
-            await cur.execute(
-                "SELECT COALESCE(MAX(version), 0) as version FROM schema_versions"
-            )
+            await cur.execute("SELECT COALESCE(MAX(version), 0) as version FROM schema_versions")
             row = await cur.fetchone()
             return row[0] if row else 0
 

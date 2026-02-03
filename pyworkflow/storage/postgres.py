@@ -230,6 +230,9 @@ class PostgresStorageBackend(StorageBackend):
                 max_size=self.max_pool_size,
                 max_inactive_connection_lifetime=self.max_inactive_connection_lifetime,
                 command_timeout=self.command_timeout,
+                # Disable statement caching to avoid InvalidCachedStatementError
+                # after schema migrations
+                statement_cache_size=0,
             )
             self._pool_loop_id = current_loop_id
 

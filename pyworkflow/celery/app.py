@@ -202,11 +202,16 @@ def create_celery_app(
     """
     # Priority: parameter > environment variable > hardcoded default
     broker_url = broker_url or os.getenv("PYWORKFLOW_CELERY_BROKER") or "redis://localhost:6379/0"
-    result_backend = (
-        result_backend
-        or os.getenv("PYWORKFLOW_CELERY_RESULT_BACKEND")
-        or "redis://localhost:6379/1"
-    )
+
+    # Result backend defaults to None (disabled) unless explicitly set
+    if result_backend is None and "PYWORKFLOW_CELERY_RESULT_BACKEND" not in os.environ:
+        result_backend = None  # Disabled by default
+    else:
+        result_backend = (
+            result_backend
+            or os.getenv("PYWORKFLOW_CELERY_RESULT_BACKEND")
+            or "redis://localhost:6379/1"
+        )
 
     # Worker memory limits (KB) - prevents memory leaks from accumulating
     # Priority: parameter > env var > None (no limit by default)
@@ -218,7 +223,7 @@ def create_celery_app(
 
     # Detect broker and backend types
     is_sentinel_broker = is_sentinel_url(broker_url)
-    is_sentinel_backend = is_sentinel_url(result_backend)
+    is_sentinel_backend = is_sentinel_url(result_backend) if result_backend else False
     is_redis_broker = broker_url.startswith("redis://") or broker_url.startswith("rediss://")
 
     # Get Sentinel master name from param, env, or default
@@ -264,25 +269,24 @@ def create_celery_app(
         ],
     )
 
-    # Configure Celery
-    app.conf.update(
+    # Build configuration dict
+    config_dict = {
         # Task execution settings
-        task_serializer="json",
-        result_serializer="json",
-        accept_content=["json"],
-        timezone="UTC",
-        enable_utc=True,
+        "task_serializer": "json",
+        "result_serializer": "json",
+        "accept_content": ["json"],
+        "timezone": "UTC",
+        "enable_utc": True,
         # Broker transport options - prevent task redelivery
         # See: https://github.com/celery/celery/issues/5935
-        broker_transport_options=final_broker_opts,
-        result_backend_transport_options=final_backend_opts,
+        "broker_transport_options": final_broker_opts,
         # Task routing
-        task_default_queue="pyworkflow.default",
-        task_default_exchange="pyworkflow",
-        task_default_exchange_type="topic",
-        task_default_routing_key="workflow.default",
+        "task_default_queue": "pyworkflow.default",
+        "task_default_exchange": "pyworkflow",
+        "task_default_exchange_type": "topic",
+        "task_default_routing_key": "workflow.default",
         # Task queues
-        task_queues=(
+        "task_queues": (
             Queue(
                 "pyworkflow.default",
                 Exchange("pyworkflow", type="topic"),
@@ -304,42 +308,54 @@ def create_celery_app(
                 routing_key="workflow.schedule.#",
             ),
         ),
-        # Result backend settings
-        result_expires=3600,  # 1 hour
-        result_persistent=True,
         # Task execution
-        task_acks_late=True,
-        task_reject_on_worker_lost=True,
-        worker_prefetch_multiplier=1,  # Fair task distribution
+        "task_acks_late": True,
+        "task_reject_on_worker_lost": True,
+        "worker_prefetch_multiplier": 1,  # Fair task distribution
         # Retry settings
-        task_autoretry_for=(),
-        task_retry_backoff=True,
-        task_retry_backoff_max=600,  # 10 minutes max
-        task_retry_jitter=True,
+        "task_autoretry_for": (),
+        "task_retry_backoff": True,
+        "task_retry_backoff_max": 600,  # 10 minutes max
+        "task_retry_jitter": True,
         # Monitoring
-        worker_send_task_events=True,
-        task_send_sent_event=True,
+        "worker_send_task_events": True,
+        "task_send_sent_event": True,
         # Beat scheduler (for sleep resumption)
-        beat_schedule={},
+        "beat_schedule": {},
         # Logging
-        worker_log_format="[%(asctime)s: %(levelname)s/%(processName)s] %(message)s",
-        worker_task_log_format="[%(asctime)s: %(levelname)s/%(processName)s] [%(task_name)s(%(task_id)s)] %(message)s",
+        "worker_log_format": "[%(asctime)s: %(levelname)s/%(processName)s] %(message)s",
+        "worker_task_log_format": "[%(asctime)s: %(levelname)s/%(processName)s] [%(task_name)s(%(task_id)s)] %(message)s",
         # Worker memory management - prevents memory leaks from accumulating
         # When set, workers are recycled after exceeding these limits
-        worker_max_memory_per_child=max_memory,  # KB, None = no limit
-        worker_max_tasks_per_child=max_tasks,  # None = no limit
-    )
+        "worker_max_memory_per_child": max_memory,  # KB, None = no limit
+        "worker_max_tasks_per_child": max_tasks,  # None = no limit
+    }
+
+    # Only add result backend settings if enabled
+    if result_backend is not None:
+        config_dict.update(
+            {
+                "result_backend_transport_options": final_backend_opts,
+                "result_expires": 3600,  # 1 hour
+                "result_persistent": True,
+            }
+        )
+
+    # Configure Celery
+    app.conf.update(config_dict)
 
     # Configure singleton locking for Redis or Sentinel brokers
     # This enables distributed locking to prevent duplicate task execution
+    # Uses broker URL since result backend may be disabled
     if is_redis_broker or is_sentinel_broker:
-        app.conf.update(
-            singleton_backend_url=broker_url,
-            singleton_backend_is_sentinel=is_sentinel_broker,
-            singleton_sentinel_master=master_name if is_sentinel_broker else None,
-            singleton_key_prefix="pyworkflow:lock:",
-            singleton_lock_expiry=3600,  # 1 hour TTL (safety net)
-        )
+        singleton_config = {
+            "singleton_backend_url": broker_url,  # Use broker, not result backend
+            "singleton_backend_is_sentinel": is_sentinel_broker,
+            "singleton_sentinel_master": master_name if is_sentinel_broker else None,
+            "singleton_key_prefix": "pyworkflow:lock:",
+            "singleton_lock_expiry": 3600,  # 1 hour TTL (safety net)
+        }
+        app.conf.update(singleton_config)
 
     # Note: Logging is configured via Celery signals (worker_init, worker_process_init)
     # to ensure proper initialization AFTER process forking.

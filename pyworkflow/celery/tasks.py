@@ -418,8 +418,7 @@ async def _record_step_completion_and_resume(
 
     for _attempt in range(max_wait_attempts):
         has_suspended = any(
-            evt.type == EventType.WORKFLOW_SUSPENDED
-            and evt.data.get("step_id") == step_id
+            evt.type == EventType.WORKFLOW_SUSPENDED and evt.data.get("step_id") == step_id
             for evt in events
         )
         if has_suspended:
@@ -531,8 +530,7 @@ async def _record_step_failure_and_resume(
 
     for _attempt in range(max_wait_attempts):
         has_suspended = any(
-            evt.type == EventType.WORKFLOW_SUSPENDED
-            and evt.data.get("step_id") == step_id
+            evt.type == EventType.WORKFLOW_SUSPENDED and evt.data.get("step_id") == step_id
             for evt in events
         )
         if has_suspended:

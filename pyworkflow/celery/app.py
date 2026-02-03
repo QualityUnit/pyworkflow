@@ -151,6 +151,8 @@ def create_celery_app(
     sentinel_master_name: str | None = None,
     broker_transport_options: dict[str, Any] | None = None,
     result_backend_transport_options: dict[str, Any] | None = None,
+    worker_max_memory_per_child: int | None = None,
+    worker_max_tasks_per_child: int | None = None,
 ) -> Celery:
     """
     Create and configure a Celery application for PyWorkflow.
@@ -162,6 +164,8 @@ def create_celery_app(
         sentinel_master_name: Redis Sentinel master name. Priority: parameter > PYWORKFLOW_CELERY_SENTINEL_MASTER env var > "mymaster"
         broker_transport_options: Additional transport options for the broker (merged with defaults)
         result_backend_transport_options: Additional transport options for the result backend (merged with defaults)
+        worker_max_memory_per_child: Max memory per worker child process (KB). Priority: parameter > PYWORKFLOW_WORKER_MAX_MEMORY env var > None (no limit)
+        worker_max_tasks_per_child: Max tasks per worker child before recycling. Priority: parameter > PYWORKFLOW_WORKER_MAX_TASKS env var > None (no limit)
 
     Returns:
         Configured Celery application
@@ -170,6 +174,8 @@ def create_celery_app(
         PYWORKFLOW_CELERY_BROKER: Celery broker URL (used if broker_url param not provided)
         PYWORKFLOW_CELERY_RESULT_BACKEND: Result backend URL (used if result_backend param not provided)
         PYWORKFLOW_CELERY_SENTINEL_MASTER: Sentinel master name (used if sentinel_master_name param not provided)
+        PYWORKFLOW_WORKER_MAX_MEMORY: Max memory per worker child (KB) (used if worker_max_memory_per_child param not provided)
+        PYWORKFLOW_WORKER_MAX_TASKS: Max tasks per worker child (used if worker_max_tasks_per_child param not provided)
 
     Examples:
         # Default configuration (uses env vars if set, otherwise localhost Redis)
@@ -201,6 +207,14 @@ def create_celery_app(
         or os.getenv("PYWORKFLOW_CELERY_RESULT_BACKEND")
         or "redis://localhost:6379/1"
     )
+
+    # Worker memory limits (KB) - prevents memory leaks from accumulating
+    # Priority: parameter > env var > None (no limit by default)
+    max_memory_env = os.getenv("PYWORKFLOW_WORKER_MAX_MEMORY")
+    max_memory = worker_max_memory_per_child or (int(max_memory_env) if max_memory_env else None)
+
+    max_tasks_env = os.getenv("PYWORKFLOW_WORKER_MAX_TASKS")
+    max_tasks = worker_max_tasks_per_child or (int(max_tasks_env) if max_tasks_env else None)
 
     # Detect broker and backend types
     is_sentinel_broker = is_sentinel_url(broker_url)
@@ -310,6 +324,10 @@ def create_celery_app(
         # Logging
         worker_log_format="[%(asctime)s: %(levelname)s/%(processName)s] %(message)s",
         worker_task_log_format="[%(asctime)s: %(levelname)s/%(processName)s] [%(task_name)s(%(task_id)s)] %(message)s",
+        # Worker memory management - prevents memory leaks from accumulating
+        # When set, workers are recycled after exceeding these limits
+        worker_max_memory_per_child=max_memory,  # KB, None = no limit
+        worker_max_tasks_per_child=max_tasks,  # None = no limit
     )
 
     # Configure singleton locking for Redis or Sentinel brokers

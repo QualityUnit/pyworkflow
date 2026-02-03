@@ -250,6 +250,43 @@ class InMemoryStorageBackend(StorageBackend):
             # Return event with highest sequence
             return max(events, key=lambda e: e.sequence or 0)
 
+    async def has_event(
+        self,
+        run_id: str,
+        event_type: str,
+        **filters: str,
+    ) -> bool:
+        """
+        Check if an event exists by loading events of the specific type and filtering.
+
+        This approach:
+        1. Uses the event_types filter to load only events of the target type
+        2. Filters in Python on the loaded data
+        3. Significantly reduces memory vs loading ALL events
+
+        Args:
+            run_id: Workflow run identifier
+            event_type: Event type to check for
+            **filters: Additional filters for event data fields
+
+        Returns:
+            True if a matching event exists, False otherwise
+        """
+        # Load only events of the specific type
+        events = await self.get_events(run_id, event_types=[event_type])
+
+        # Filter in Python
+        for event in events:
+            match = True
+            for key, value in filters.items():
+                if str(event.data.get(key)) != str(value):
+                    match = False
+                    break
+            if match:
+                return True
+
+        return False
+
     # Step Operations
 
     async def create_step(self, step: StepExecution) -> None:

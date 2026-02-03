@@ -373,6 +373,58 @@ class FileStorageBackend(StorageBackend):
         events = await self.get_events(run_id, event_types=[event_type] if event_type else None)
         return events[-1] if events else None
 
+    async def has_event(
+        self,
+        run_id: str,
+        event_type: str,
+        **filters: str,
+    ) -> bool:
+        """
+        Check if an event exists using file-based iteration with early termination.
+
+        Reads the events file line by line and returns as soon as a match is found,
+        avoiding loading the entire event log into memory.
+
+        Args:
+            run_id: Workflow run identifier
+            event_type: Event type to check for
+            **filters: Additional filters for event data fields
+
+        Returns:
+            True if a matching event exists, False otherwise
+        """
+        events_file = self.events_dir / f"{run_id}.jsonl"
+
+        if not events_file.exists():
+            return False
+
+        def _check() -> bool:
+            with events_file.open("r") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+
+                    data = json.loads(line)
+
+                    # Check event type
+                    if data["type"] != event_type:
+                        continue
+
+                    # Check all data filters
+                    match = True
+                    event_data = data.get("data", {})
+                    for key, value in filters.items():
+                        if str(event_data.get(key)) != str(value):
+                            match = False
+                            break
+
+                    if match:
+                        return True
+
+            return False
+
+        return await asyncio.to_thread(_check)
+
     # Step Operations
 
     async def create_step(self, step: StepExecution) -> None:

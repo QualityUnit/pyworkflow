@@ -18,6 +18,7 @@ import aiosqlite
 
 from pyworkflow.engine.events import Event, EventType
 from pyworkflow.storage.base import StorageBackend
+from pyworkflow.storage.migrations import Migration, MigrationRegistry, MigrationRunner
 from pyworkflow.storage.schemas import (
     Hook,
     HookStatus,
@@ -29,6 +30,103 @@ from pyworkflow.storage.schemas import (
     StepExecution,
     WorkflowRun,
 )
+
+
+class SQLiteMigrationRunner(MigrationRunner):
+    """SQLite-specific migration runner."""
+
+    def __init__(self, db: aiosqlite.Connection, registry: MigrationRegistry | None = None) -> None:
+        super().__init__(registry)
+        self._db = db
+
+    async def ensure_schema_versions_table(self) -> None:
+        """Create schema_versions table if it doesn't exist."""
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS schema_versions (
+                version INTEGER PRIMARY KEY,
+                applied_at TIMESTAMP NOT NULL,
+                description TEXT
+            )
+        """)
+        await self._db.commit()
+
+    async def get_current_version(self) -> int:
+        """Get the highest applied migration version."""
+        async with self._db.execute(
+            "SELECT COALESCE(MAX(version), 0) as version FROM schema_versions"
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+    async def detect_existing_schema(self) -> bool:
+        """Check if the events table exists (pre-versioning database)."""
+        async with self._db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='events'"
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row is not None
+
+    async def record_baseline_version(self, version: int, description: str) -> None:
+        """Record a baseline version without running migrations."""
+        await self._db.execute(
+            """
+            INSERT OR IGNORE INTO schema_versions (version, applied_at, description)
+            VALUES (?, ?, ?)
+            """,
+            (version, datetime.now(UTC).isoformat(), description),
+        )
+        await self._db.commit()
+
+    async def apply_migration(self, migration: Migration) -> None:
+        """Apply a migration with SQLite-specific handling."""
+        if migration.version == 2:
+            # V2: Add step_id column to events table
+            # First check if events table exists (fresh databases won't have it yet)
+            async with self._db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='events'"
+            ) as cursor:
+                table_exists = await cursor.fetchone() is not None
+
+            if table_exists:
+                # SQLite doesn't have IF NOT EXISTS for columns, so check first
+                async with self._db.execute("PRAGMA table_info(events)") as cursor:
+                    columns = await cursor.fetchall()
+                    column_names = [col[1] for col in columns]
+
+                if "step_id" not in column_names:
+                    await self._db.execute("ALTER TABLE events ADD COLUMN step_id TEXT")
+
+                # Create index for optimized has_event() queries
+                await self._db.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_events_run_id_step_id_type
+                    ON events(run_id, step_id, type)
+                """)
+
+                # Backfill step_id from JSON data using json_extract
+                await self._db.execute("""
+                    UPDATE events
+                    SET step_id = json_extract(data, '$.step_id')
+                    WHERE step_id IS NULL
+                      AND json_extract(data, '$.step_id') IS NOT NULL
+                """)
+
+                await self._db.commit()
+            # If table doesn't exist, schema will be created with step_id column
+        elif migration.up_func:
+            await migration.up_func(self._db)
+        elif migration.up_sql and migration.up_sql != "SELECT 1":
+            await self._db.execute(migration.up_sql)
+            await self._db.commit()
+
+        # Record the migration
+        await self._db.execute(
+            """
+            INSERT INTO schema_versions (version, applied_at, description)
+            VALUES (?, ?, ?)
+            """,
+            (migration.version, datetime.now(UTC).isoformat(), migration.description),
+        )
+        await self._db.commit()
 
 
 class SQLiteStorageBackend(StorageBackend):
@@ -72,13 +170,17 @@ class SQLiteStorageBackend(StorageBackend):
             self._initialized = False
 
     async def _initialize_schema(self) -> None:
-        """Create database tables if they don't exist."""
+        """Create database tables if they don't exist and run migrations."""
         if not self._db:
             await self.connect()
 
         # At this point self._db is guaranteed to be set
         assert self._db is not None
         db = self._db
+
+        # Run migrations first (handles schema versioning)
+        runner = SQLiteMigrationRunner(db)
+        await runner.run_migrations()
 
         # Workflow runs table
         await db.execute("""
@@ -123,7 +225,7 @@ class SQLiteStorageBackend(StorageBackend):
             "CREATE INDEX IF NOT EXISTS idx_runs_parent_run_id ON workflow_runs(parent_run_id)"
         )
 
-        # Events table
+        # Events table (includes step_id column added in V2 migration)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS events (
                 event_id TEXT PRIMARY KEY,
@@ -132,6 +234,7 @@ class SQLiteStorageBackend(StorageBackend):
                 type TEXT NOT NULL,
                 timestamp TIMESTAMP NOT NULL,
                 data TEXT NOT NULL DEFAULT '{}',
+                step_id TEXT,
                 FOREIGN KEY (run_id) REFERENCES workflow_runs(run_id) ON DELETE CASCADE
             )
         """)
@@ -140,7 +243,14 @@ class SQLiteStorageBackend(StorageBackend):
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_run_id_sequence ON events(run_id, sequence)"
         )
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)")
+        # Composite index for get_events() with type filter
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_run_id_type ON events(run_id, type)"
+        )
+        # Optimized index for has_event() with step_id filter (V2 migration)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_run_id_step_id_type ON events(run_id, step_id, type)"
+        )
 
         # Steps table
         await db.execute("""
@@ -447,6 +557,9 @@ class SQLiteStorageBackend(StorageBackend):
         """Record an event to the append-only event log."""
         db = self._ensure_connected()
 
+        # Extract step_id from event data for indexed column
+        step_id = event.data.get("step_id") if event.data else None
+
         # Get next sequence number
         async with db.execute(
             "SELECT COALESCE(MAX(sequence), -1) + 1 FROM events WHERE run_id = ?",
@@ -457,8 +570,8 @@ class SQLiteStorageBackend(StorageBackend):
 
         await db.execute(
             """
-            INSERT INTO events (event_id, run_id, sequence, type, timestamp, data)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO events (event_id, run_id, sequence, type, timestamp, data, step_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 event.event_id,
@@ -467,6 +580,7 @@ class SQLiteStorageBackend(StorageBackend):
                 event.type.value,
                 event.timestamp.isoformat(),
                 json.dumps(event.data),
+                step_id,
             ),
         )
         await db.commit()
@@ -528,6 +642,56 @@ class SQLiteStorageBackend(StorageBackend):
             return None
 
         return self._row_to_event(row)
+
+    async def has_event(
+        self,
+        run_id: str,
+        event_type: str,
+        **filters: str,
+    ) -> bool:
+        """
+        Check if an event exists using optimized indexed queries.
+
+        When step_id is the only filter, uses a direct indexed query (O(1) lookup).
+        For other filters, falls back to loading events of the type and filtering in Python.
+
+        Args:
+            run_id: Workflow run identifier
+            event_type: Event type to check for
+            **filters: Additional filters for event data fields
+
+        Returns:
+            True if a matching event exists, False otherwise
+        """
+        db = self._ensure_connected()
+
+        # Optimized path: if only filtering by step_id, use indexed column directly
+        if filters.keys() == {"step_id"}:
+            step_id = str(filters["step_id"])
+            async with db.execute(
+                """
+                SELECT 1 FROM events
+                WHERE run_id = ? AND type = ? AND step_id = ?
+                LIMIT 1
+                """,
+                (run_id, event_type, step_id),
+            ) as cursor:
+                row = await cursor.fetchone()
+            return row is not None
+
+        # Fallback: load events of type and filter in Python
+        events = await self.get_events(run_id, event_types=[event_type])
+
+        for event in events:
+            match = True
+            for key, value in filters.items():
+                if str(event.data.get(key)) != str(value):
+                    match = False
+                    break
+            if match:
+                return True
+
+        return False
 
     # Step Operations
 
@@ -1119,6 +1283,7 @@ class SQLiteStorageBackend(StorageBackend):
 
     def _row_to_event(self, row: Any) -> Event:
         """Convert database row to Event object."""
+        # Column order: event_id[0], run_id[1], sequence[2], type[3], timestamp[4], data[5], step_id[6]
         return Event(
             event_id=row[0],
             run_id=row[1],
@@ -1126,6 +1291,7 @@ class SQLiteStorageBackend(StorageBackend):
             type=EventType(row[3]),
             timestamp=datetime.fromisoformat(row[4]),
             data=json.loads(row[5]) if row[5] else {},
+            # step_id is in row[6] but not used in Event object (it's denormalized for query optimization)
         )
 
     def _row_to_step_execution(self, row: Any) -> StepExecution:

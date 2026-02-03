@@ -896,6 +896,40 @@ class CassandraStorageBackend(StorageBackend):
 
         return None
 
+    async def has_event(
+        self,
+        run_id: str,
+        event_type: str,
+        **filters: str,
+    ) -> bool:
+        """
+        Check if an event exists matching the criteria.
+
+        Loads events of the specified type and filters in Python for efficiency.
+
+        Args:
+            run_id: Workflow run identifier
+            event_type: Event type to check for
+            **filters: Additional filters for event data fields
+
+        Returns:
+            True if a matching event exists, False otherwise
+        """
+        # Load only events of the specific type
+        events = await self.get_events(run_id, event_types=[event_type])
+
+        # Filter in Python
+        for event in events:
+            match = True
+            for key, value in filters.items():
+                if str(event.data.get(key)) != str(value):
+                    match = False
+                    break
+            if match:
+                return True
+
+        return False
+
     # Step Operations
 
     async def create_step(self, step: StepExecution) -> None:

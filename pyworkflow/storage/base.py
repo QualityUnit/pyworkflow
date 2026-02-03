@@ -204,6 +204,42 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
+    async def has_event(
+        self,
+        run_id: str,
+        event_type: str,
+        **filters: str,
+    ) -> bool:
+        """
+        Check if an event exists matching the criteria.
+
+        This is a memory-efficient alternative to get_events() when you only
+        need to check for existence. Uses SQL EXISTS queries in SQL backends
+        for O(1) memory usage instead of loading all events.
+
+        Args:
+            run_id: Workflow run identifier
+            event_type: Event type to check for (e.g., "step_completed")
+            **filters: Additional filters to match against event data fields.
+                       For example, step_id="abc" will check data->>'step_id' = 'abc'
+
+        Returns:
+            True if a matching event exists, False otherwise
+
+        Example:
+            # Check if step completed
+            exists = await storage.has_event(
+                run_id, "step_completed", step_id="step_123"
+            )
+
+            # Check if workflow suspended for a specific step
+            exists = await storage.has_event(
+                run_id, "workflow_suspended", step_id="step_123"
+            )
+        """
+        pass
+
+    @abstractmethod
     async def get_latest_event(
         self,
         run_id: str,

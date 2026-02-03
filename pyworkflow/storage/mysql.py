@@ -17,6 +17,7 @@ import aiomysql
 
 from pyworkflow.engine.events import Event, EventType
 from pyworkflow.storage.base import StorageBackend
+from pyworkflow.storage.migrations import Migration, MigrationRegistry, MigrationRunner
 from pyworkflow.storage.schemas import (
     Hook,
     HookStatus,
@@ -29,6 +30,124 @@ from pyworkflow.storage.schemas import (
     StepStatus,
     WorkflowRun,
 )
+
+
+class MySQLMigrationRunner(MigrationRunner):
+    """MySQL-specific migration runner."""
+
+    def __init__(self, pool: aiomysql.Pool, registry: MigrationRegistry | None = None) -> None:
+        super().__init__(registry)
+        self._pool = pool
+
+    async def ensure_schema_versions_table(self) -> None:
+        """Create schema_versions table if it doesn't exist."""
+        async with self._pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS schema_versions (
+                    version INT PRIMARY KEY,
+                    applied_at DATETIME(6) NOT NULL,
+                    description TEXT
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """)
+
+    async def get_current_version(self) -> int:
+        """Get the highest applied migration version."""
+        async with self._pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute("SELECT COALESCE(MAX(version), 0) as version FROM schema_versions")
+            row = await cur.fetchone()
+            return row[0] if row else 0
+
+    async def detect_existing_schema(self) -> bool:
+        """Check if the events table exists (pre-versioning database)."""
+        async with self._pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute("""
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema = DATABASE() AND table_name = 'events'
+            """)
+            row = await cur.fetchone()
+            return row[0] > 0 if row else False
+
+    async def record_baseline_version(self, version: int, description: str) -> None:
+        """Record a baseline version without running migrations."""
+        async with self._pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT IGNORE INTO schema_versions (version, applied_at, description)
+                VALUES (%s, %s, %s)
+                """,
+                (version, datetime.now(UTC), description),
+            )
+
+    async def apply_migration(self, migration: Migration) -> None:
+        """Apply a migration with MySQL-specific handling."""
+        async with self._pool.acquire() as conn:
+            await conn.begin()
+            try:
+                async with conn.cursor() as cur:
+                    if migration.version == 2:
+                        # V2: Add step_id column to events table
+                        # First check if events table exists (fresh databases won't have it yet)
+                        await cur.execute("""
+                            SELECT COUNT(*) FROM information_schema.tables
+                            WHERE table_schema = DATABASE() AND table_name = 'events'
+                        """)
+                        row = await cur.fetchone()
+                        table_exists = row[0] > 0 if row else False
+
+                        if table_exists:
+                            # Check if column exists first
+                            await cur.execute("""
+                                SELECT COUNT(*) FROM information_schema.columns
+                                WHERE table_schema = DATABASE()
+                                  AND table_name = 'events'
+                                  AND column_name = 'step_id'
+                            """)
+                            row = await cur.fetchone()
+                            if row[0] == 0:
+                                await cur.execute(
+                                    "ALTER TABLE events ADD COLUMN step_id VARCHAR(255)"
+                                )
+
+                            # Create index for optimized has_event() queries
+                            # Check if index exists first
+                            await cur.execute("""
+                                SELECT COUNT(*) FROM information_schema.statistics
+                                WHERE table_schema = DATABASE()
+                                  AND table_name = 'events'
+                                  AND index_name = 'idx_events_run_id_step_id_type'
+                            """)
+                            row = await cur.fetchone()
+                            if row[0] == 0:
+                                await cur.execute("""
+                                    CREATE INDEX idx_events_run_id_step_id_type
+                                    ON events(run_id, step_id, type)
+                                """)
+
+                            # Backfill step_id from JSON data
+                            await cur.execute("""
+                                UPDATE events
+                                SET step_id = JSON_UNQUOTE(JSON_EXTRACT(data, '$.step_id'))
+                                WHERE step_id IS NULL
+                                  AND JSON_EXTRACT(data, '$.step_id') IS NOT NULL
+                            """)
+                        # If table doesn't exist, schema will be created with step_id column
+                    elif migration.up_func:
+                        await migration.up_func(conn)
+                    elif migration.up_sql and migration.up_sql != "SELECT 1":
+                        await cur.execute(migration.up_sql)
+
+                    # Record the migration
+                    await cur.execute(
+                        """
+                        INSERT INTO schema_versions (version, applied_at, description)
+                        VALUES (%s, %s, %s)
+                        """,
+                        (migration.version, datetime.now(UTC), migration.description),
+                    )
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
 
 
 class MySQLStorageBackend(StorageBackend):
@@ -101,11 +220,16 @@ class MySQLStorageBackend(StorageBackend):
             self._initialized = False
 
     async def _initialize_schema(self) -> None:
-        """Create database tables if they don't exist."""
+        """Create database tables if they don't exist and run migrations."""
         if not self._pool:
             await self.connect()
 
         pool = self._ensure_connected()
+
+        # Run migrations first (handles schema versioning)
+        runner = MySQLMigrationRunner(pool)
+        await runner.run_migrations()
+
         async with pool.acquire() as conn, conn.cursor() as cur:
             # Workflow runs table
             await cur.execute("""
@@ -140,7 +264,7 @@ class MySQLStorageBackend(StorageBackend):
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """)
 
-            # Events table
+            # Events table (includes step_id column added in V2 migration)
             await cur.execute("""
                     CREATE TABLE IF NOT EXISTS events (
                         event_id VARCHAR(255) PRIMARY KEY,
@@ -149,8 +273,10 @@ class MySQLStorageBackend(StorageBackend):
                         type VARCHAR(100) NOT NULL,
                         timestamp DATETIME(6) NOT NULL,
                         data LONGTEXT NOT NULL DEFAULT '{}',
+                        step_id VARCHAR(255),
                         INDEX idx_events_run_id_sequence (run_id, sequence),
-                        INDEX idx_events_type (type),
+                        INDEX idx_events_run_id_type (run_id, type),
+                        INDEX idx_events_run_id_step_id_type (run_id, step_id, type),
                         FOREIGN KEY (run_id) REFERENCES workflow_runs(run_id) ON DELETE CASCADE
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """)
@@ -449,6 +575,9 @@ class MySQLStorageBackend(StorageBackend):
         """Record an event to the append-only event log."""
         pool = self._ensure_connected()
 
+        # Extract step_id from event data for indexed column
+        step_id = event.data.get("step_id") if event.data else None
+
         async with pool.acquire() as conn:
             # Use transaction for atomic sequence assignment
             await conn.begin()
@@ -464,8 +593,8 @@ class MySQLStorageBackend(StorageBackend):
 
                     await cur.execute(
                         """
-                        INSERT INTO events (event_id, run_id, sequence, type, timestamp, data)
-                        VALUES (%s, %s, %s, %s, %s, %s)
+                        INSERT INTO events (event_id, run_id, sequence, type, timestamp, data, step_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
                             event.event_id,
@@ -474,6 +603,7 @@ class MySQLStorageBackend(StorageBackend):
                             event.type.value,
                             event.timestamp,
                             json.dumps(event.data),
+                            step_id,
                         ),
                     )
                 await conn.commit()
@@ -544,6 +674,57 @@ class MySQLStorageBackend(StorageBackend):
             return None
 
         return self._row_to_event(row)
+
+    async def has_event(
+        self,
+        run_id: str,
+        event_type: str,
+        **filters: str,
+    ) -> bool:
+        """
+        Check if an event exists using optimized indexed queries.
+
+        When step_id is the only filter, uses a direct indexed query (O(1) lookup).
+        For other filters, falls back to loading events of the type and filtering in Python.
+
+        Args:
+            run_id: Workflow run identifier
+            event_type: Event type to check for
+            **filters: Additional filters for event data fields
+
+        Returns:
+            True if a matching event exists, False otherwise
+        """
+        pool = self._ensure_connected()
+
+        # Optimized path: if only filtering by step_id, use indexed column directly
+        if filters.keys() == {"step_id"}:
+            step_id = str(filters["step_id"])
+            async with pool.acquire() as conn, conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT 1 FROM events
+                    WHERE run_id = %s AND type = %s AND step_id = %s
+                    LIMIT 1
+                    """,
+                    (run_id, event_type, step_id),
+                )
+                row = await cur.fetchone()
+            return row is not None
+
+        # Fallback: load events of type and filter in Python
+        events = await self.get_events(run_id, event_types=[event_type])
+
+        for event in events:
+            match = True
+            for key, value in filters.items():
+                if str(event.data.get(key)) != str(value):
+                    match = False
+                    break
+            if match:
+                return True
+
+        return False
 
     # Step Operations
 

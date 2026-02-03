@@ -171,10 +171,9 @@ def execute_step_task(
         raise FatalError(f"Step '{step_name}' not found in registry")
 
     # Ignore processing step if already completed (idempotency)
-    events = run_async(storage.get_events(run_id))
-    already_completed = any(
-        evt.type == EventType.STEP_COMPLETED and evt.data.get("step_id") == step_id
-        for evt in events
+    # Use has_event() for efficient EXISTS check instead of loading all events
+    already_completed = run_async(
+        storage.has_event(run_id, EventType.STEP_COMPLETED.value, step_id=step_id)
     )
     if already_completed:
         logger.warning(
@@ -397,10 +396,9 @@ async def _record_step_completion_and_resume(
         await storage.connect()
 
     # Idempotency check: skip if step already completed
-    events = await storage.get_events(run_id)
-    already_completed = any(
-        evt.type == EventType.STEP_COMPLETED and evt.data.get("step_id") == step_id
-        for evt in events
+    # Use has_event() for efficient EXISTS check instead of loading all events
+    already_completed = await storage.has_event(
+        run_id, EventType.STEP_COMPLETED.value, step_id=step_id
     )
     if already_completed:
         logger.info(
@@ -413,25 +411,23 @@ async def _record_step_completion_and_resume(
 
     # Wait for WORKFLOW_SUSPENDED event before recording STEP_COMPLETED
     # This prevents race conditions where both events get the same sequence number
+    # Use has_event() for memory-efficient polling instead of loading all events
     max_wait_attempts = 50  # 50 * 10ms = 500ms max wait
     wait_interval = 0.01  # 10ms between checks
 
     for _attempt in range(max_wait_attempts):
-        has_suspended = any(
-            evt.type == EventType.WORKFLOW_SUSPENDED and evt.data.get("step_id") == step_id
-            for evt in events
+        has_suspended = await storage.has_event(
+            run_id, EventType.WORKFLOW_SUSPENDED.value, step_id=step_id
         )
         if has_suspended:
             break
 
-        # Wait and refresh events
+        # Wait and check again
         await asyncio.sleep(wait_interval)
-        events = await storage.get_events(run_id)
 
         # Also check if step was already completed by another task during wait
-        already_completed = any(
-            evt.type == EventType.STEP_COMPLETED and evt.data.get("step_id") == step_id
-            for evt in events
+        already_completed = await storage.has_event(
+            run_id, EventType.STEP_COMPLETED.value, step_id=step_id
         )
         if already_completed:
             logger.info(
@@ -504,17 +500,18 @@ async def _record_step_failure_and_resume(
         await storage.connect()
 
     # Idempotency check: skip if step already completed or terminally failed
-    events = await storage.get_events(run_id)
-    already_handled = any(
-        (evt.type == EventType.STEP_COMPLETED and evt.data.get("step_id") == step_id)
-        or (
-            evt.type == EventType.STEP_FAILED
-            and evt.data.get("step_id") == step_id
-            and not evt.data.get("is_retryable", True)
-        )
-        for evt in events
+    # Use has_event() for efficient EXISTS check instead of loading all events
+    # Note: For STEP_FAILED with is_retryable check, we use has_event for STEP_COMPLETED
+    # and separately check STEP_FAILED (non-retryable failures are rare, so this is still efficient)
+    already_completed = await storage.has_event(
+        run_id, EventType.STEP_COMPLETED.value, step_id=step_id
     )
-    if already_handled:
+    # For terminal failures, we check separately (is_retryable=false in data)
+    # This is less common, so checking completion first is the fast path
+    already_failed_terminal = await storage.has_event(
+        run_id, EventType.STEP_FAILED.value, step_id=step_id, is_retryable="False"
+    )
+    if already_completed or already_failed_terminal:
         logger.info(
             "Step already completed/failed by another task, skipping",
             run_id=run_id,
@@ -525,32 +522,28 @@ async def _record_step_failure_and_resume(
 
     # Wait for WORKFLOW_SUSPENDED event before recording STEP_FAILED
     # This prevents race conditions where both events get the same sequence number
+    # Use has_event() for memory-efficient polling instead of loading all events
     max_wait_attempts = 50  # 50 * 10ms = 500ms max wait
     wait_interval = 0.01  # 10ms between checks
 
     for _attempt in range(max_wait_attempts):
-        has_suspended = any(
-            evt.type == EventType.WORKFLOW_SUSPENDED and evt.data.get("step_id") == step_id
-            for evt in events
+        has_suspended = await storage.has_event(
+            run_id, EventType.WORKFLOW_SUSPENDED.value, step_id=step_id
         )
         if has_suspended:
             break
 
-        # Wait and refresh events
+        # Wait and check again
         await asyncio.sleep(wait_interval)
-        events = await storage.get_events(run_id)
 
         # Also check if step was already handled by another task during wait
-        already_handled = any(
-            (evt.type == EventType.STEP_COMPLETED and evt.data.get("step_id") == step_id)
-            or (
-                evt.type == EventType.STEP_FAILED
-                and evt.data.get("step_id") == step_id
-                and not evt.data.get("is_retryable", True)
-            )
-            for evt in events
+        already_completed = await storage.has_event(
+            run_id, EventType.STEP_COMPLETED.value, step_id=step_id
         )
-        if already_handled:
+        already_failed_terminal = await storage.has_event(
+            run_id, EventType.STEP_FAILED.value, step_id=step_id, is_retryable="False"
+        )
+        if already_completed or already_failed_terminal:
             logger.info(
                 "Step already completed/failed by another task during wait, skipping",
                 run_id=run_id,
@@ -888,13 +881,13 @@ async def _execute_child_workflow_on_worker(
 
         # For step dispatch suspensions, check if step already completed/failed
         if step_id and e.reason.startswith("step_dispatch:"):
-            events = await storage.get_events(child_run_id)
-            step_finished = any(
-                evt.type in (EventType.STEP_COMPLETED, EventType.STEP_FAILED)
-                and evt.data.get("step_id") == step_id
-                for evt in events
+            step_completed = await storage.has_event(
+                child_run_id, EventType.STEP_COMPLETED.value, step_id=step_id
             )
-            if step_finished:
+            step_failed = await storage.has_event(
+                child_run_id, EventType.STEP_FAILED.value, step_id=step_id
+            )
+            if step_completed or step_failed:
                 logger.info(
                     "Child step finished before suspension completed, scheduling resume",
                     child_run_id=child_run_id,
@@ -1141,8 +1134,8 @@ async def _handle_workflow_recovery(
         return False
 
     # Get last event sequence
-    events = await storage.get_events(run.run_id)
-    last_event_sequence = max((e.sequence or 0 for e in events), default=0) if events else None
+    latest_event = await storage.get_latest_event(run.run_id)
+    last_event_sequence = latest_event.sequence if latest_event else None
 
     # Record interruption event
     interrupted_event = create_workflow_interrupted_event(
@@ -1284,13 +1277,13 @@ async def _recover_workflow_on_worker(
 
         # For step dispatch suspensions, check if step already completed/failed
         if step_id and e.reason.startswith("step_dispatch:"):
-            events = await storage.get_events(run_id)
-            step_finished = any(
-                evt.type in (EventType.STEP_COMPLETED, EventType.STEP_FAILED)
-                and evt.data.get("step_id") == step_id
-                for evt in events
+            step_completed = await storage.has_event(
+                run_id, EventType.STEP_COMPLETED.value, step_id=step_id
             )
-            if step_finished:
+            step_failed = await storage.has_event(
+                run_id, EventType.STEP_FAILED.value, step_id=step_id
+            )
+            if step_completed or step_failed:
                 logger.info(
                     "Step finished before recovery suspension completed, scheduling resume",
                     run_id=run_id,
@@ -1676,13 +1669,13 @@ async def _start_workflow_on_worker(
         # For step dispatch suspensions, check if step already completed/failed (race condition)
         # If so, schedule resume immediately
         if step_id and e.reason.startswith("step_dispatch:"):
-            events = await storage.get_events(run_id)
-            step_finished = any(
-                evt.type in (EventType.STEP_COMPLETED, EventType.STEP_FAILED)
-                and evt.data.get("step_id") == step_id
-                for evt in events
+            step_completed = await storage.has_event(
+                run_id, EventType.STEP_COMPLETED.value, step_id=step_id
             )
-            if step_finished:
+            step_failed = await storage.has_event(
+                run_id, EventType.STEP_FAILED.value, step_id=step_id
+            )
+            if step_completed or step_failed:
                 logger.info(
                     "Step finished before suspension completed, scheduling resume",
                     run_id=run_id,
@@ -2266,13 +2259,13 @@ async def _resume_workflow_on_worker(
 
         # For step dispatch suspensions, check if step already completed/failed
         if step_id and e.reason.startswith("step_dispatch:"):
-            events = await storage.get_events(run_id)
-            step_finished = any(
-                evt.type in (EventType.STEP_COMPLETED, EventType.STEP_FAILED)
-                and evt.data.get("step_id") == step_id
-                for evt in events
+            step_completed = await storage.has_event(
+                run_id, EventType.STEP_COMPLETED.value, step_id=step_id
             )
-            if step_finished:
+            step_failed = await storage.has_event(
+                run_id, EventType.STEP_FAILED.value, step_id=step_id
+            )
+            if step_completed or step_failed:
                 logger.info(
                     "Step finished before resume suspension completed, scheduling resume",
                     run_id=run_id,

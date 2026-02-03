@@ -23,6 +23,7 @@ import asyncpg
 
 from pyworkflow.engine.events import Event, EventType
 from pyworkflow.storage.base import StorageBackend
+from pyworkflow.storage.migrations import Migration, MigrationRegistry, MigrationRunner
 from pyworkflow.storage.schemas import (
     Hook,
     HookStatus,
@@ -35,6 +36,115 @@ from pyworkflow.storage.schemas import (
     StepStatus,
     WorkflowRun,
 )
+
+
+class PostgresMigrationRunner(MigrationRunner):
+    """PostgreSQL-specific migration runner."""
+
+    def __init__(self, pool: asyncpg.Pool, registry: MigrationRegistry | None = None) -> None:
+        super().__init__(registry)
+        self._pool = pool
+
+    async def ensure_schema_versions_table(self) -> None:
+        """Create schema_versions table if it doesn't exist."""
+        async with self._pool.acquire() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS schema_versions (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TIMESTAMPTZ NOT NULL,
+                    description TEXT
+                )
+            """)
+
+    async def get_current_version(self) -> int:
+        """Get the highest applied migration version."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT COALESCE(MAX(version), 0) as version FROM schema_versions"
+            )
+            return row["version"] if row else 0
+
+    async def detect_existing_schema(self) -> bool:
+        """Check if the events table exists (pre-versioning database)."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'events'
+                ) as exists
+            """)
+            return row["exists"] if row else False
+
+    async def record_baseline_version(self, version: int, description: str) -> None:
+        """Record a baseline version without running migrations."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO schema_versions (version, applied_at, description)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (version) DO NOTHING
+                """,
+                version,
+                datetime.now(UTC),
+                description,
+            )
+
+    async def apply_migration(self, migration: Migration) -> None:
+        """Apply a migration with PostgreSQL-specific handling."""
+        async with self._pool.acquire() as conn, conn.transaction():
+            if migration.version == 2:
+                # V2: Add step_id column to events table
+                # First check if events table exists (fresh databases won't have it yet)
+                table_exists = await conn.fetchrow("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables
+                        WHERE table_name = 'events'
+                    ) as exists
+                """)
+
+                if table_exists and table_exists["exists"]:
+                    # Use IF NOT EXISTS for idempotency
+                    await conn.execute("""
+                        DO $$
+                        BEGIN
+                            IF NOT EXISTS (
+                                SELECT 1 FROM information_schema.columns
+                                WHERE table_name = 'events' AND column_name = 'step_id'
+                            ) THEN
+                                ALTER TABLE events ADD COLUMN step_id TEXT;
+                            END IF;
+                        END $$
+                    """)
+
+                    # Create index for optimized has_event() queries
+                    await conn.execute("""
+                        CREATE INDEX IF NOT EXISTS idx_events_run_id_step_id_type
+                        ON events(run_id, step_id, type)
+                    """)
+
+                    # Backfill step_id from JSON data
+                    await conn.execute("""
+                        UPDATE events
+                        SET step_id = (data::jsonb)->>'step_id'
+                        WHERE step_id IS NULL
+                          AND (data::jsonb)->>'step_id' IS NOT NULL
+                    """)
+                # If table doesn't exist, schema will be created with step_id column
+            elif migration.up_func:
+                await migration.up_func(conn)
+            elif migration.up_sql and migration.up_sql != "SELECT 1":
+                await conn.execute(migration.up_sql)
+
+            # Record the migration
+            await conn.execute(
+                """
+                INSERT INTO schema_versions (version, applied_at, description)
+                VALUES ($1, $2, $3)
+                """,
+                migration.version,
+                datetime.now(UTC),
+                migration.description,
+            )
 
 
 class PostgresStorageBackend(StorageBackend):
@@ -55,6 +165,8 @@ class PostgresStorageBackend(StorageBackend):
         database: str = "pyworkflow",
         min_pool_size: int = 1,
         max_pool_size: int = 10,
+        max_inactive_connection_lifetime: float = 1800.0,
+        command_timeout: float | None = 60.0,
     ):
         """
         Initialize PostgreSQL storage backend.
@@ -68,6 +180,9 @@ class PostgresStorageBackend(StorageBackend):
             database: Database name (used if dsn not provided)
             min_pool_size: Minimum connections in pool
             max_pool_size: Maximum connections in pool
+            max_inactive_connection_lifetime: How long (seconds) an idle connection can
+                                              stay in the pool before being closed. Default 1800s (30 min).
+            command_timeout: Default timeout (seconds) for queries. None for no timeout. Default 60s.
         """
         self.dsn = dsn
         self.host = host
@@ -77,6 +192,8 @@ class PostgresStorageBackend(StorageBackend):
         self.database = database
         self.min_pool_size = min_pool_size
         self.max_pool_size = max_pool_size
+        self.max_inactive_connection_lifetime = max_inactive_connection_lifetime
+        self.command_timeout = command_timeout
         self._pool: asyncpg.Pool | None = None
         self._pool_loop_id: int | None = None  # Track which loop the pool was created on
         self._initialized = False
@@ -111,6 +228,8 @@ class PostgresStorageBackend(StorageBackend):
                 dsn=self.dsn or self._build_dsn(),
                 min_size=self.min_pool_size,
                 max_size=self.max_pool_size,
+                max_inactive_connection_lifetime=self.max_inactive_connection_lifetime,
+                command_timeout=self.command_timeout,
             )
             self._pool_loop_id = current_loop_id
 
@@ -127,11 +246,16 @@ class PostgresStorageBackend(StorageBackend):
             self._initialized = False
 
     async def _initialize_schema(self) -> None:
-        """Create database tables if they don't exist."""
+        """Create database tables if they don't exist and run migrations."""
         if not self._pool:
             await self.connect()
 
         pool = await self._get_pool()
+
+        # Run migrations first (handles schema versioning)
+        runner = PostgresMigrationRunner(pool)
+        await runner.run_migrations()
+
         async with pool.acquire() as conn:
             # Workflow runs table
             await conn.execute("""
@@ -177,7 +301,7 @@ class PostgresStorageBackend(StorageBackend):
                 "CREATE INDEX IF NOT EXISTS idx_runs_parent_run_id ON workflow_runs(parent_run_id)"
             )
 
-            # Events table
+            # Events table (includes step_id column added in V2 migration)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS events (
                     event_id TEXT PRIMARY KEY,
@@ -185,7 +309,8 @@ class PostgresStorageBackend(StorageBackend):
                     sequence INTEGER NOT NULL,
                     type TEXT NOT NULL,
                     timestamp TIMESTAMPTZ NOT NULL,
-                    data TEXT NOT NULL DEFAULT '{}'
+                    data TEXT NOT NULL DEFAULT '{}',
+                    step_id TEXT
                 )
             """)
 
@@ -193,7 +318,14 @@ class PostgresStorageBackend(StorageBackend):
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_events_run_id_sequence ON events(run_id, sequence)"
             )
-            await conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)")
+            # Composite index for get_events() with type filter
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_events_run_id_type ON events(run_id, type)"
+            )
+            # Optimized index for has_event() with step_id filter (V2 migration)
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_events_run_id_step_id_type ON events(run_id, step_id, type)"
+            )
 
             # Steps table
             await conn.execute("""
@@ -554,6 +686,9 @@ class PostgresStorageBackend(StorageBackend):
         """Record an event to the append-only event log."""
         pool = await self._get_pool()
 
+        # Extract step_id from event data for indexed column
+        step_id = event.data.get("step_id") if event.data else None
+
         async with pool.acquire() as conn, conn.transaction():
             # Get next sequence number and insert in a transaction
             row = await conn.fetchrow(
@@ -564,8 +699,8 @@ class PostgresStorageBackend(StorageBackend):
 
             await conn.execute(
                 """
-                INSERT INTO events (event_id, run_id, sequence, type, timestamp, data)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                INSERT INTO events (event_id, run_id, sequence, type, timestamp, data, step_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 """,
                 event.event_id,
                 event.run_id,
@@ -573,6 +708,7 @@ class PostgresStorageBackend(StorageBackend):
                 event.type.value,
                 event.timestamp,
                 json.dumps(event.data),
+                step_id,
             )
 
     async def get_events(
@@ -637,6 +773,58 @@ class PostgresStorageBackend(StorageBackend):
             return None
 
         return self._row_to_event(row)
+
+    async def has_event(
+        self,
+        run_id: str,
+        event_type: str,
+        **filters: str,
+    ) -> bool:
+        """
+        Check if an event exists using optimized indexed queries.
+
+        When step_id is the only filter, uses a direct indexed query (O(1) lookup).
+        For other filters, falls back to loading events of the type and filtering in Python.
+
+        Args:
+            run_id: Workflow run identifier
+            event_type: Event type to check for
+            **filters: Additional filters for event data fields
+
+        Returns:
+            True if a matching event exists, False otherwise
+        """
+        pool = await self._get_pool()
+
+        # Optimized path: if only filtering by step_id, use indexed column directly
+        if filters.keys() == {"step_id"}:
+            step_id = str(filters["step_id"])
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT 1 FROM events
+                    WHERE run_id = $1 AND type = $2 AND step_id = $3
+                    LIMIT 1
+                    """,
+                    run_id,
+                    event_type,
+                    step_id,
+                )
+            return row is not None
+
+        # Fallback: load events of type and filter in Python
+        events = await self.get_events(run_id, event_types=[event_type])
+
+        for event in events:
+            match = True
+            for key, value in filters.items():
+                if str(event.data.get(key)) != str(value):
+                    match = False
+                    break
+            if match:
+                return True
+
+        return False
 
     # Step Operations
 

@@ -11,7 +11,6 @@ These tasks enable:
 
 import asyncio
 import random
-import traceback
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -417,7 +416,7 @@ async def _record_step_completion_and_resume(
     max_wait_attempts = 50  # 50 * 10ms = 500ms max wait
     wait_interval = 0.01  # 10ms between checks
 
-    for attempt in range(max_wait_attempts):
+    for _attempt in range(max_wait_attempts):
         has_suspended = any(
             evt.type == EventType.WORKFLOW_SUSPENDED
             and evt.data.get("step_id") == step_id
@@ -530,7 +529,7 @@ async def _record_step_failure_and_resume(
     max_wait_attempts = 50  # 50 * 10ms = 500ms max wait
     wait_interval = 0.01  # 10ms between checks
 
-    for attempt in range(max_wait_attempts):
+    for _attempt in range(max_wait_attempts):
         has_suspended = any(
             evt.type == EventType.WORKFLOW_SUSPENDED
             and evt.data.get("step_id") == step_id

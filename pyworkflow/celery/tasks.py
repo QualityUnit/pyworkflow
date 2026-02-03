@@ -11,6 +11,7 @@ These tasks enable:
 
 import asyncio
 import random
+import traceback
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -379,9 +380,9 @@ async def _record_step_completion_and_resume(
 
     Called by execute_step_task after successful step execution.
 
-    Only schedules resume if WORKFLOW_SUSPENDED event exists, indicating
-    the workflow has fully suspended. This prevents race conditions where
-    a step completes before the workflow has suspended.
+    IMPORTANT: This function waits for WORKFLOW_SUSPENDED event before recording
+    STEP_COMPLETED to prevent race conditions where both events get the same
+    sequence number. The workflow must fully suspend before we record completion.
 
     Idempotency: If STEP_COMPLETED already exists for this step_id, skip
     recording and resume scheduling (another task already handled it).
@@ -411,6 +412,47 @@ async def _record_step_completion_and_resume(
         )
         return
 
+    # Wait for WORKFLOW_SUSPENDED event before recording STEP_COMPLETED
+    # This prevents race conditions where both events get the same sequence number
+    max_wait_attempts = 50  # 50 * 10ms = 500ms max wait
+    wait_interval = 0.01  # 10ms between checks
+
+    for attempt in range(max_wait_attempts):
+        has_suspended = any(
+            evt.type == EventType.WORKFLOW_SUSPENDED
+            and evt.data.get("step_id") == step_id
+            for evt in events
+        )
+        if has_suspended:
+            break
+
+        # Wait and refresh events
+        await asyncio.sleep(wait_interval)
+        events = await storage.get_events(run_id)
+
+        # Also check if step was already completed by another task during wait
+        already_completed = any(
+            evt.type == EventType.STEP_COMPLETED and evt.data.get("step_id") == step_id
+            for evt in events
+        )
+        if already_completed:
+            logger.info(
+                "Step already completed by another task during wait, skipping",
+                run_id=run_id,
+                step_id=step_id,
+                step_name=step_name,
+            )
+            return
+    else:
+        # Timeout waiting for suspension - log warning but proceed anyway
+        # This handles edge cases where the workflow completes without suspending
+        logger.warning(
+            "Timeout waiting for WORKFLOW_SUSPENDED event, proceeding with completion",
+            run_id=run_id,
+            step_id=step_id,
+            step_name=step_name,
+        )
+
     # Record STEP_COMPLETED event
     completion_event = create_step_completed_event(
         run_id=run_id,
@@ -420,33 +462,16 @@ async def _record_step_completion_and_resume(
     )
     await storage.record_event(completion_event)
 
-    # Refresh events to include the one we just recorded
-    events = await storage.get_events(run_id)
-
-    # Check if workflow has suspended (WORKFLOW_SUSPENDED event exists)
-    # Only schedule resume if workflow has properly suspended
-    has_suspended = any(evt.type == EventType.WORKFLOW_SUSPENDED for evt in events)
-
-    if has_suspended:
-        # Workflow has suspended, safe to schedule resume
-        schedule_workflow_resumption(
-            run_id, datetime.now(UTC), storage_config, triggered_by="step_completed"
-        )
-        logger.info(
-            "Step completed and workflow resumption scheduled",
-            run_id=run_id,
-            step_id=step_id,
-            step_name=step_name,
-        )
-    else:
-        # Workflow hasn't suspended yet - don't schedule resume
-        # The suspension handler will check for step completion and schedule resume
-        logger.info(
-            "Step completed but workflow not yet suspended, skipping resume scheduling",
-            run_id=run_id,
-            step_id=step_id,
-            step_name=step_name,
-        )
+    # Schedule workflow resumption
+    schedule_workflow_resumption(
+        run_id, datetime.now(UTC), storage_config, triggered_by="step_completed"
+    )
+    logger.info(
+        "Step completed and workflow resumption scheduled",
+        run_id=run_id,
+        step_id=step_id,
+        step_name=step_name,
+    )
 
 
 async def _record_step_failure_and_resume(
@@ -464,9 +489,9 @@ async def _record_step_failure_and_resume(
     Called by execute_step_task after step failure (when retries are exhausted).
     The workflow will fail when it replays and sees the failure event.
 
-    Only schedules resume if WORKFLOW_SUSPENDED event exists, indicating
-    the workflow has fully suspended. This prevents race conditions where
-    a step fails before the workflow has suspended.
+    IMPORTANT: This function waits for WORKFLOW_SUSPENDED event before recording
+    STEP_FAILED to prevent race conditions where both events get the same
+    sequence number. The workflow must fully suspend before we record failure.
 
     Idempotency: If STEP_COMPLETED or terminal STEP_FAILED already exists
     for this step_id, skip recording and resume scheduling.
@@ -500,6 +525,51 @@ async def _record_step_failure_and_resume(
         )
         return
 
+    # Wait for WORKFLOW_SUSPENDED event before recording STEP_FAILED
+    # This prevents race conditions where both events get the same sequence number
+    max_wait_attempts = 50  # 50 * 10ms = 500ms max wait
+    wait_interval = 0.01  # 10ms between checks
+
+    for attempt in range(max_wait_attempts):
+        has_suspended = any(
+            evt.type == EventType.WORKFLOW_SUSPENDED
+            and evt.data.get("step_id") == step_id
+            for evt in events
+        )
+        if has_suspended:
+            break
+
+        # Wait and refresh events
+        await asyncio.sleep(wait_interval)
+        events = await storage.get_events(run_id)
+
+        # Also check if step was already handled by another task during wait
+        already_handled = any(
+            (evt.type == EventType.STEP_COMPLETED and evt.data.get("step_id") == step_id)
+            or (
+                evt.type == EventType.STEP_FAILED
+                and evt.data.get("step_id") == step_id
+                and not evt.data.get("is_retryable", True)
+            )
+            for evt in events
+        )
+        if already_handled:
+            logger.info(
+                "Step already completed/failed by another task during wait, skipping",
+                run_id=run_id,
+                step_id=step_id,
+                step_name=step_name,
+            )
+            return
+    else:
+        # Timeout waiting for suspension - log warning but proceed anyway
+        logger.warning(
+            "Timeout waiting for WORKFLOW_SUSPENDED event, proceeding with failure",
+            run_id=run_id,
+            step_id=step_id,
+            step_name=step_name,
+        )
+
     # Record STEP_FAILED event
     failure_event = create_step_failed_event(
         run_id=run_id,
@@ -511,35 +581,17 @@ async def _record_step_failure_and_resume(
     )
     await storage.record_event(failure_event)
 
-    # Refresh events to include the one we just recorded
-    events = await storage.get_events(run_id)
-
-    # Check if workflow has suspended (WORKFLOW_SUSPENDED event exists)
-    # Only schedule resume if workflow has properly suspended
-    has_suspended = any(evt.type == EventType.WORKFLOW_SUSPENDED for evt in events)
-
-    if has_suspended:
-        # Workflow has suspended, safe to schedule resume
-        schedule_workflow_resumption(
-            run_id, datetime.now(UTC), storage_config, triggered_by="step_failed"
-        )
-        logger.info(
-            "Step failed and workflow resumption scheduled",
-            run_id=run_id,
-            step_id=step_id,
-            step_name=step_name,
-            error=error,
-        )
-    else:
-        # Workflow hasn't suspended yet - don't schedule resume
-        # The suspension handler will check for step failure and schedule resume
-        logger.info(
-            "Step failed but workflow not yet suspended, skipping resume scheduling",
-            run_id=run_id,
-            step_id=step_id,
-            step_name=step_name,
-            error=error,
-        )
+    # Schedule workflow resumption
+    schedule_workflow_resumption(
+        run_id, datetime.now(UTC), storage_config, triggered_by="step_failed"
+    )
+    logger.info(
+        "Step failed and workflow resumption scheduled",
+        run_id=run_id,
+        step_id=step_id,
+        step_name=step_name,
+        error=error,
+    )
 
 
 async def _get_workflow_run_safe(

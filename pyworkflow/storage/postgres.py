@@ -16,6 +16,7 @@ the pool is automatically recreated when a loop change is detected.
 import asyncio
 import contextlib
 import json
+import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -163,10 +164,10 @@ class PostgresStorageBackend(StorageBackend):
         user: str = "pyworkflow",
         password: str = "",
         database: str = "pyworkflow",
-        min_pool_size: int = 1,
-        max_pool_size: int = 10,
-        max_inactive_connection_lifetime: float = 1800.0,
-        command_timeout: float | None = 60.0,
+        min_pool_size: int | None = None,
+        max_pool_size: int | None = None,
+        max_inactive_connection_lifetime: float | None = None,
+        command_timeout: float | None = None,
     ):
         """
         Initialize PostgreSQL storage backend.
@@ -178,11 +179,13 @@ class PostgresStorageBackend(StorageBackend):
             user: Database user (used if dsn not provided)
             password: Database password (used if dsn not provided)
             database: Database name (used if dsn not provided)
-            min_pool_size: Minimum connections in pool
-            max_pool_size: Maximum connections in pool
+            min_pool_size: Minimum connections in pool (defaults to env var PYWORKFLOW_POSTGRES_MIN_POOL_SIZE or 1)
+            max_pool_size: Maximum connections in pool (defaults to env var PYWORKFLOW_POSTGRES_MAX_POOL_SIZE or 10)
             max_inactive_connection_lifetime: How long (seconds) an idle connection can
-                                              stay in the pool before being closed. Default 1800s (30 min).
-            command_timeout: Default timeout (seconds) for queries. None for no timeout. Default 60s.
+                                              stay in the pool before being closed.
+                                              Defaults to env var PYWORKFLOW_POSTGRES_MAX_INACTIVE_LIFETIME or 1800s (30 min).
+            command_timeout: Default timeout (seconds) for queries. None for no timeout.
+                            Defaults to env var PYWORKFLOW_POSTGRES_COMMAND_TIMEOUT or 60s.
         """
         self.dsn = dsn
         self.host = host
@@ -190,10 +193,27 @@ class PostgresStorageBackend(StorageBackend):
         self.user = user
         self.password = password
         self.database = database
-        self.min_pool_size = min_pool_size
-        self.max_pool_size = max_pool_size
-        self.max_inactive_connection_lifetime = max_inactive_connection_lifetime
-        self.command_timeout = command_timeout
+
+        # Read from env vars if not provided
+        self.min_pool_size = min_pool_size or int(
+            os.getenv("PYWORKFLOW_POSTGRES_MIN_POOL_SIZE", "1")
+        )
+        self.max_pool_size = max_pool_size or int(
+            os.getenv("PYWORKFLOW_POSTGRES_MAX_POOL_SIZE", "10")
+        )
+        self.max_inactive_connection_lifetime = max_inactive_connection_lifetime or float(
+            os.getenv("PYWORKFLOW_POSTGRES_MAX_INACTIVE_LIFETIME", "1800.0")
+        )
+        self.command_timeout = (
+            command_timeout
+            if command_timeout is not None
+            else (
+                float(os.getenv("PYWORKFLOW_POSTGRES_COMMAND_TIMEOUT", "60.0"))
+                if os.getenv("PYWORKFLOW_POSTGRES_COMMAND_TIMEOUT")
+                else 60.0
+            )
+        )
+
         self._pool: asyncpg.Pool | None = None
         self._pool_loop_id: int | None = None  # Track which loop the pool was created on
         self._initialized = False

@@ -260,14 +260,25 @@ def create_celery_app(
             **(result_backend_transport_options or {}),
         }
 
-    app = Celery(
-        app_name,
-        broker=broker_url,
-        backend=result_backend,
-        include=[
-            "pyworkflow.celery.tasks",
-        ],
-    )
+    # Create Celery app - only set backend if result_backend is enabled
+    if result_backend is not None:
+        app = Celery(
+            app_name,
+            broker=broker_url,
+            backend=result_backend,
+            include=[
+                "pyworkflow.celery.tasks",
+            ],
+        )
+    else:
+        # No result backend - Celery will not store task results
+        app = Celery(
+            app_name,
+            broker=broker_url,
+            include=[
+                "pyworkflow.celery.tasks",
+            ],
+        )
 
     # Build configuration dict
     config_dict = {
@@ -338,6 +349,14 @@ def create_celery_app(
                 "result_backend_transport_options": final_backend_opts,
                 "result_expires": 3600,  # 1 hour
                 "result_persistent": True,
+            }
+        )
+    else:
+        # Disable task result storage when no backend configured
+        config_dict.update(
+            {
+                "task_ignore_result": True,  # Don't try to store task results
+                "task_store_errors_even_if_ignored": False,  # Don't store errors either
             }
         )
 

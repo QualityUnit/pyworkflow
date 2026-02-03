@@ -6,9 +6,10 @@ and MigrationRunner abstract base class for backend-specific implementations.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Callable
+from typing import Any
 
 
 @dataclass

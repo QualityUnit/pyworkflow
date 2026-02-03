@@ -5,9 +5,7 @@ Tests that migrations work correctly with real databases and that
 the step_id optimization is properly applied.
 """
 
-import tempfile
 from datetime import UTC, datetime
-from pathlib import Path
 
 import pytest
 

@@ -5,7 +5,6 @@ Tests for Migration dataclass, MigrationRegistry, and MigrationRunner base class
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
 
 import pytest
 

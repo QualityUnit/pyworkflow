@@ -204,14 +204,13 @@ def create_celery_app(
     broker_url = broker_url or os.getenv("PYWORKFLOW_CELERY_BROKER") or "redis://localhost:6379/0"
 
     # Result backend defaults to None (disabled) unless explicitly set
-    if result_backend is None and "PYWORKFLOW_CELERY_RESULT_BACKEND" not in os.environ:
-        result_backend = None  # Disabled by default
-    else:
-        result_backend = (
-            result_backend
-            or os.getenv("PYWORKFLOW_CELERY_RESULT_BACKEND")
-            or "redis://localhost:6379/1"
-        )
+    # Priority: parameter > non-empty environment variable > None (disabled)
+    if result_backend is None:
+        env_backend = os.getenv("PYWORKFLOW_CELERY_RESULT_BACKEND")
+        # Only use env var if it's set AND non-empty
+        if env_backend:
+            result_backend = env_backend
+        # Otherwise result_backend stays None (disabled)
 
     # Worker memory limits (KB) - prevents memory leaks from accumulating
     # Priority: parameter > env var > None (no limit by default)
@@ -260,25 +259,17 @@ def create_celery_app(
             **(result_backend_transport_options or {}),
         }
 
-    # Create Celery app - only set backend if result_backend is enabled
-    if result_backend is not None:
-        app = Celery(
-            app_name,
-            broker=broker_url,
-            backend=result_backend,
-            include=[
-                "pyworkflow.celery.tasks",
-            ],
-        )
-    else:
-        # No result backend - Celery will not store task results
-        app = Celery(
-            app_name,
-            broker=broker_url,
-            include=[
-                "pyworkflow.celery.tasks",
-            ],
-        )
+    # Create Celery app
+    # When result_backend is None, explicitly use 'disabled' to prevent Celery
+    # from trying to store results (which would fail if no backend is available)
+    app = Celery(
+        app_name,
+        broker=broker_url,
+        backend=result_backend if result_backend is not None else "disabled",
+        include=[
+            "pyworkflow.celery.tasks",
+        ],
+    )
 
     # Build configuration dict
     config_dict = {

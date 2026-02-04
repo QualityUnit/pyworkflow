@@ -94,6 +94,11 @@ def step(
 
         @functools.wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            # Extract reserved 'step_id' kwarg if provided (for stable caching)
+            # This allows callers to specify a stable step_id when arguments contain
+            # dynamic values (e.g., timestamps) that would otherwise break replay.
+            step_id_override = kwargs.pop("step_id", None)
+
             # Check if running in AWS Durable Lambda context
             aws_ctx = _get_aws_context()
             if aws_ctx is not None:
@@ -126,8 +131,8 @@ def step(
                 )
 
             # Durable mode: use event sourcing
-            # Generate step ID (deterministic based on name + args)
-            step_id = _generate_step_id(step_name, args, kwargs)
+            # Use provided step_id or generate from name + args
+            step_id = _get_or_generate_step_id(step_name, args, kwargs, step_id_override)
 
             # Check if step has already failed (must check BEFORE cached result check)
             # A failed step has no cached result, so should_execute_step would return True
@@ -524,6 +529,35 @@ def _get_retry_delay(retry_delay: str | int | list[int], attempt: int) -> float:
     else:
         # Default to 1 second
         return 1
+
+
+def _get_or_generate_step_id(
+    step_name: str, args: tuple, kwargs: dict, step_id_override: str | None = None
+) -> str:
+    """
+    Get step ID from override parameter or generate from arguments.
+
+    If step_id_override is provided (via reserved 'step_id' kwarg), use that
+    for stable caching. Otherwise, fall back to deterministic argument-based
+    generation.
+
+    This is useful when step arguments contain dynamic values (e.g., timestamps,
+    current date) that would otherwise cause the step_id to change on each
+    execution, breaking event replay.
+
+    Args:
+        step_name: Step name
+        args: Positional arguments
+        kwargs: Keyword arguments
+        step_id_override: Optional step ID override from reserved 'step_id' kwarg
+
+    Returns:
+        Step ID (either from override or generated from arguments)
+    """
+    if step_id_override:
+        return f"step_{step_name}_{step_id_override}"
+
+    return _generate_step_id(step_name, args, kwargs)
 
 
 def _generate_step_id(step_name: str, args: tuple, kwargs: dict) -> str:

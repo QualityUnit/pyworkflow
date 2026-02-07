@@ -388,9 +388,7 @@ class TestChildWorkflowParentRunIdIntegration:
         async def parent_workflow():
             from pyworkflow import start_child_workflow
 
-            handle = await start_child_workflow(
-                child_workflow, wait_for_completion=False
-            )
+            handle = await start_child_workflow(child_workflow, wait_for_completion=False)
             return handle.child_run_id
 
         parent_run_id = await start(parent_workflow)

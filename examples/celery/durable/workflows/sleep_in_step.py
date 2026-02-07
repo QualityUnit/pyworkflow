@@ -174,23 +174,29 @@ async def main() -> None:
 
     demos = []
     if args.demo in ("rate_limit", "all"):
-        demos.append((
-            "Rate-Limited API Calls",
-            rate_limited_workflow,
-            {"endpoint": "https://api.example.com/data"},
-        ))
+        demos.append(
+            (
+                "Rate-Limited API Calls",
+                rate_limited_workflow,
+                {"endpoint": "https://api.example.com/data"},
+            )
+        )
     if args.demo in ("poll", "all"):
-        demos.append((
-            "Polling with Exponential Backoff",
-            polling_workflow,
-            {"job_id": "job-abc-123"},
-        ))
+        demos.append(
+            (
+                "Polling with Exponential Backoff",
+                polling_workflow,
+                {"job_id": "job-abc-123"},
+            )
+        )
     if args.demo in ("batch", "all"):
-        demos.append((
-            "Batch Processing with Pauses",
-            batch_workflow,
-            {},
-        ))
+        demos.append(
+            (
+                "Batch Processing with Pauses",
+                batch_workflow,
+                {},
+            )
+        )
 
     for demo_name, workflow_func, kwargs in demos:
         print(f"\n{'=' * 50}")

@@ -99,7 +99,9 @@ class TestSleepFromStepWorker:
         set_context(ctx)
 
         try:
-            with patch("pyworkflow.primitives.sleep.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            with patch(
+                "pyworkflow.primitives.sleep.asyncio.sleep", new_callable=AsyncMock
+            ) as mock_sleep:
                 await sleep(1)
                 mock_sleep.assert_awaited_once_with(1)
         finally:
@@ -173,7 +175,9 @@ class TestSleepFromStepWorker:
         set_context(ctx)
 
         try:
-            with patch("pyworkflow.primitives.sleep.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            with patch(
+                "pyworkflow.primitives.sleep.asyncio.sleep", new_callable=AsyncMock
+            ) as mock_sleep:
                 await sleep("5s")
                 mock_sleep.assert_awaited_once_with(5)
         finally:
@@ -312,8 +316,13 @@ class TestStartChildWorkflowFromStepWorker:
         set_context(ctx)
 
         try:
-            with patch("pyworkflow.runtime.get_runtime") as mock_get_runtime, \
-                 patch("pyworkflow.primitives.child_workflow._poll_child_completion", new_callable=AsyncMock) as mock_poll:
+            with (
+                patch("pyworkflow.runtime.get_runtime") as mock_get_runtime,
+                patch(
+                    "pyworkflow.primitives.child_workflow._poll_child_completion",
+                    new_callable=AsyncMock,
+                ) as mock_poll,
+            ):
                 mock_rt = AsyncMock()
                 mock_get_runtime.return_value = mock_rt
                 mock_poll.return_value = {"done": True}
@@ -354,8 +363,13 @@ class TestStartChildWorkflowFromStepWorker:
         set_context(ctx)
 
         try:
-            with patch("pyworkflow.runtime.get_runtime") as mock_get_runtime, \
-                 patch("pyworkflow.primitives.child_workflow._poll_child_completion", new_callable=AsyncMock) as mock_poll:
+            with (
+                patch("pyworkflow.runtime.get_runtime") as mock_get_runtime,
+                patch(
+                    "pyworkflow.primitives.child_workflow._poll_child_completion",
+                    new_callable=AsyncMock,
+                ) as mock_poll,
+            ):
                 mock_rt = AsyncMock()
                 mock_get_runtime.return_value = mock_rt
                 mock_poll.return_value = 42
@@ -583,7 +597,9 @@ class TestPollChildCompletion:
                 )
             await original_sleep(0)  # Don't actually wait
 
-        with patch("pyworkflow.primitives.child_workflow.asyncio.sleep", side_effect=tracking_sleep):
+        with patch(
+            "pyworkflow.primitives.child_workflow.asyncio.sleep", side_effect=tracking_sleep
+        ):
             result = await _poll_child_completion(
                 storage=storage,
                 child_run_id="child_run_5",
@@ -762,7 +778,9 @@ class TestBackwardsCompatibility:
     @pytest.mark.asyncio
     async def test_sleep_outside_context_uses_asyncio(self):
         """Test that sleep() outside any context falls back to asyncio.sleep."""
-        with patch("pyworkflow.primitives.sleep.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        with patch(
+            "pyworkflow.primitives.sleep.asyncio.sleep", new_callable=AsyncMock
+        ) as mock_sleep:
             await sleep(1)
             mock_sleep.assert_awaited_once_with(1)
 
@@ -806,7 +824,9 @@ class TestTransientModeFromStepWorker:
         set_context(ctx)
 
         try:
-            with patch("pyworkflow.primitives.sleep.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            with patch(
+                "pyworkflow.primitives.sleep.asyncio.sleep", new_callable=AsyncMock
+            ) as mock_sleep:
                 await sleep(2)
                 mock_sleep.assert_awaited_once_with(2)
         finally:
@@ -986,8 +1006,13 @@ class TestErrorMessages:
         set_context(ctx)
 
         try:
-            with patch("pyworkflow.runtime.get_runtime") as mock_get_runtime, \
-                 patch("pyworkflow.primitives.child_workflow._poll_child_completion", new_callable=AsyncMock) as mock_poll:
+            with (
+                patch("pyworkflow.runtime.get_runtime") as mock_get_runtime,
+                patch(
+                    "pyworkflow.primitives.child_workflow._poll_child_completion",
+                    new_callable=AsyncMock,
+                ) as mock_poll,
+            ):
                 mock_rt = AsyncMock()
                 mock_get_runtime.return_value = mock_rt
                 mock_poll.return_value = {"done": True}

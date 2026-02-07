@@ -242,6 +242,11 @@ def execute_step_task(
             step_workflow_ctx._runtime = "celery"
             step_workflow_ctx._storage_config = storage_config
             step_workflow_ctx._is_step_worker = True
+
+            # Set parent_run_id if this workflow is a child
+            wf_run = run_async(storage.get_run(run_id))
+            if wf_run and wf_run.parent_run_id:
+                step_workflow_ctx._parent_run_id = wf_run.parent_run_id
             workflow_context_token = set_context(step_workflow_ctx)
         except Exception as e:
             logger.warning(
@@ -890,6 +895,7 @@ async def _execute_child_workflow_on_worker(
             event_log=None,  # Fresh execution
             runtime="celery",
             storage_config=storage_config,
+            parent_run_id=parent_run_id,
         )
 
         # Update status to COMPLETED
@@ -1292,6 +1298,7 @@ async def _recover_workflow_on_worker(
             event_log=events,
             runtime="celery",
             storage_config=storage_config,
+            parent_run_id=run.parent_run_id,
         )
 
         # Update run status to completed
@@ -2231,6 +2238,7 @@ async def _resume_workflow_on_worker(
             cancellation_requested=cancellation_requested,
             runtime="celery",
             storage_config=storage_config,
+            parent_run_id=run.parent_run_id,
         )
 
         # Update run status to completed

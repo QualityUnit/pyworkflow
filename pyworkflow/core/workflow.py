@@ -160,6 +160,7 @@ async def execute_workflow_with_context(
     cancellation_requested: bool = False,
     runtime: str | None = None,
     storage_config: dict | None = None,
+    parent_run_id: str | None = None,
 ) -> Any:
     """
     Execute workflow function with proper context setup.
@@ -207,6 +208,7 @@ async def execute_workflow_with_context(
     # Set runtime environment for distributed step dispatch
     ctx._runtime = runtime
     ctx._storage_config = storage_config
+    ctx._parent_run_id = parent_run_id
 
     # Set cancellation state if requested before execution
     if cancellation_requested:

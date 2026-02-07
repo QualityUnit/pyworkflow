@@ -100,6 +100,7 @@ class LocalContext(WorkflowContext):
         # Runtime environment (e.g., "celery", "temporal", None for local)
         self._runtime: str | None = None
         self._storage_config: dict[str, Any] | None = None
+        self._is_step_worker: bool = False
 
         # Step failure tracking (for handling failures during replay)
         self._step_failures: dict[str, dict[str, Any]] = {}
@@ -297,6 +298,11 @@ class LocalContext(WorkflowContext):
         This is passed to step workers so they can connect to the same storage.
         """
         return self._storage_config
+
+    @property
+    def is_step_worker(self) -> bool:
+        """Check if context is running on a step worker (not orchestrating a workflow)."""
+        return self._is_step_worker
 
     # =========================================================================
     # Step result caching (for @step decorator compatibility)

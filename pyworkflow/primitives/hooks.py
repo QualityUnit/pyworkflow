@@ -71,6 +71,14 @@ async def hook(
 
     ctx = get_context()
 
+    # Hooks require workflow suspension, which is not possible from step workers.
+    if ctx.is_step_worker:
+        raise RuntimeError(
+            "hook() cannot be called from within a step. "
+            "Hooks require workflow suspension which is not supported during step execution. "
+            "Move the hook() call to workflow-level code instead."
+        )
+
     # Parse timeout to seconds
     timeout_seconds: int | None = None
     if timeout is not None:

@@ -65,9 +65,9 @@ def worker() -> None:
 )
 @click.option(
     "--pool",
-    type=click.Choice(["prefork", "solo", "eventlet", "gevent"], case_sensitive=False),
+    type=click.Choice(["prefork", "threads", "solo", "eventlet", "gevent"], case_sensitive=False),
     default="prefork",
-    help="Worker pool type (default: prefork). Use 'solo' for debugging with breakpoints",
+    help="Worker pool type (default: prefork). Use 'threads' for I/O-bound tasks, 'solo' for debugging",
 )
 @click.option(
     "--sentinel-master",

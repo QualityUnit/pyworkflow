@@ -285,6 +285,11 @@ class WorkflowContext(ABC):
         return None
 
     @property
+    def is_step_worker(self) -> bool:
+        """Check if context is running on a step worker (not orchestrating a workflow)."""
+        return False
+
+    @property
     def runtime(self) -> str | None:
         """
         Get the runtime environment slug.

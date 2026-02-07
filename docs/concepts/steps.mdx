@@ -259,6 +259,83 @@ async def load_dashboard(user_id: str):
     }
 ```
 
+## Calling Primitives from Steps
+
+Steps running within a durable workflow can call certain workflow primitives. When a step executes on a Celery worker, the worker automatically sets up a workflow context with the parent workflow's metadata, enabling primitives to function.
+
+### Supported Primitives
+
+| Primitive | Supported | Behavior |
+|-----------|-----------|----------|
+| `start_child_workflow()` | Yes | Both `wait_for_completion=True` (polling) and `False` (fire-and-forget) |
+| `sleep()` | Yes | Falls back to `asyncio.sleep` (non-durable) |
+| `hook()` / `define_hook()` | No | Requires workflow suspension |
+
+### Starting Child Workflows from Steps
+
+You can start child workflows from within a step using `start_child_workflow()`. Both `wait_for_completion=True` and `wait_for_completion=False` are supported:
+
+```python
+from pyworkflow import step, start_child_workflow, workflow
+
+@workflow(durable=True)
+async def payment_workflow(order_id: str, amount: float):
+    await process_payment(order_id, amount)
+    return {"paid": True, "amount": amount}
+
+@step()
+async def process_order(order_id: str):
+    # Wait for child workflow result (uses polling on step workers)
+    result = await start_child_workflow(
+        payment_workflow,
+        order_id,
+        99.99,
+        wait_for_completion=True,
+    )
+    return {"order_id": order_id, "payment": result}
+
+@step()
+async def process_order_async(order_id: str):
+    # Fire-and-forget: returns ChildWorkflowHandle immediately
+    handle = await start_child_workflow(
+        payment_workflow,
+        order_id,
+        99.99,
+        wait_for_completion=False,
+    )
+    return {"order_id": order_id, "payment_run_id": handle.child_run_id}
+```
+
+<Warning>
+  **Steps cannot suspend.** When `wait_for_completion=True` is used from a step, the step worker **blocks and polls** storage for the child workflow's completion (with exponential backoff from 1s up to 10s). The worker remains occupied for the entire duration of the child workflow. If the child takes 10 minutes, the step worker is busy for 10 minutes.
+
+  At workflow level, `wait_for_completion=True` suspends the workflow and frees the worker immediately. From a step, this is not possible -- the worker must wait. Keep this in mind for capacity planning, and prefer `wait_for_completion=False` with a `ChildWorkflowHandle` if the child may be long-running.
+</Warning>
+
+### Sleeping within Steps
+
+`sleep()` works within steps but uses `asyncio.sleep` instead of durable suspension:
+
+```python
+from pyworkflow import step, sleep
+
+@step()
+async def rate_limited_api_call(url: str):
+    response = await httpx.get(url)
+    if response.status_code == 429:
+        await sleep("30s")  # Non-durable: uses asyncio.sleep on the worker
+        response = await httpx.get(url)
+    return response.json()
+```
+
+<Note>
+  Unlike workflow-level sleep which frees the worker, `sleep()` within a step holds the worker for the duration. If the worker crashes during the sleep, the state is lost. For long delays, prefer workflow-level sleep.
+</Note>
+
+### Hooks are Not Supported from Steps
+
+`hook()` and `define_hook()` cannot be called from within steps. Hooks require workflow suspension to wait for external events, which is not possible during step execution. Move hook calls to workflow-level code instead.
+
 ## Best Practices
 
 <AccordionGroup>

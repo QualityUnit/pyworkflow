@@ -92,6 +92,7 @@ def execute_step_task(
     storage_config: dict[str, Any] | None = None,
     context_data: dict[str, Any] | None = None,
     context_class_name: str | None = None,
+    workflow_name: str | None = None,
 ) -> Any:
     """
     Execute a workflow step on a Celery worker.
@@ -219,6 +220,36 @@ def execute_step_task(
                 step_id=step_id,
             )
 
+    # Set up a WorkflowContext so primitives (child_workflow, hook, sleep)
+    # can access storage and workflow metadata when called from within steps.
+    # This enables steps to call start_child_workflow(), hook(), and sleep().
+    workflow_context_token = None
+    if storage_config is not None:
+        try:
+            from pyworkflow.context.base import set_context
+            from pyworkflow.context.local import LocalContext
+
+            # Load existing events for proper replay (idempotency on retries)
+            events = run_async(storage.get_events(run_id))
+
+            step_workflow_ctx = LocalContext(
+                run_id=run_id,
+                workflow_name=workflow_name or "unknown",
+                storage=storage,
+                durable=True,
+                event_log=events,
+            )
+            step_workflow_ctx._runtime = "celery"
+            step_workflow_ctx._storage_config = storage_config
+            step_workflow_ctx._is_step_worker = True
+            workflow_context_token = set_context(step_workflow_ctx)
+        except Exception as e:
+            logger.warning(
+                f"Failed to set up workflow context for step: {e}",
+                run_id=run_id,
+                step_id=step_id,
+            )
+
     # Execute step function
     try:
         # Get the original function (unwrapped from decorator)
@@ -277,6 +308,35 @@ def execute_step_task(
             )
         )
         raise
+
+    except SuspensionSignal as e:
+        # A primitive (sleep, hook, child_workflow) raised SuspensionSignal.
+        # This should not normally happen because primitives detect step worker
+        # context and adjust behavior. Treat as a fatal error rather than
+        # silently retrying, which would re-execute the step from scratch.
+        logger.error(
+            f"Step raised SuspensionSignal (unsupported from steps): {step_name}",
+            run_id=run_id,
+            step_id=step_id,
+            reason=e.reason,
+        )
+        run_async(
+            _record_step_failure_and_resume(
+                storage_config=storage_config,
+                run_id=run_id,
+                step_id=step_id,
+                step_name=step_name,
+                error=f"Step attempted workflow suspension ({e.reason}), "
+                f"which is not supported from within steps",
+                error_type="SuspensionSignal",
+                is_retryable=False,
+            )
+        )
+        raise FatalError(
+            f"Step '{step_name}' attempted workflow suspension ({e.reason}). "
+            f"Primitives that require suspension (durable sleep, hooks, "
+            f"wait_for_completion=True child workflows) cannot be called from steps."
+        ) from e
 
     except RetryableError as e:
         # Check if we have retries left
@@ -355,6 +415,11 @@ def execute_step_task(
             raise FatalError(f"Step '{step_name}' failed after retries: {str(e)}") from e
 
     finally:
+        # Clean up workflow context (must be reset before step context)
+        if workflow_context_token is not None:
+            from pyworkflow.context.base import reset_context
+
+            reset_context(workflow_context_token)
         # Clean up step context
         if readonly_token is not None:
             from pyworkflow.context.step_context import _reset_step_context_readonly

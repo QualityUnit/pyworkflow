@@ -6,6 +6,7 @@ to their parent for lifecycle management. When parent completes/fails/cancels,
 all running children are automatically cancelled (TERMINATE policy).
 """
 
+import asyncio
 import hashlib
 import uuid
 from collections.abc import Callable
@@ -84,10 +85,16 @@ async def start_child_workflow(
     if not has_context():
         raise RuntimeError(
             "start_child_workflow() must be called within a workflow context. "
-            "Make sure you're using the @workflow decorator."
+            "Make sure you're using the @workflow decorator or calling from a step "
+            "within a durable workflow."
         )
 
     ctx = get_context()
+
+    # When called from a step worker with wait_for_completion=True,
+    # we can't use SuspensionSignal (steps can't suspend). Instead, we
+    # dispatch the child workflow and poll storage until it completes.
+    _is_step_worker = ctx.is_step_worker
 
     # Validate storage is available (required for child workflows)
     storage = ctx.storage
@@ -228,6 +235,14 @@ async def start_child_workflow(
                         _storage=storage,
                     )
 
+                if _is_step_worker:
+                    # Poll for existing child completion (steps can't suspend)
+                    return await _poll_child_completion(
+                        storage=storage,
+                        child_run_id=existing_child_run_id,
+                        child_workflow_name=child_workflow_name,
+                    )
+
                 # Suspend to wait for the existing child
                 raise SuspensionSignal(
                     reason=f"child_workflow:{child_id}",
@@ -263,7 +278,7 @@ async def start_child_workflow(
             _storage=storage,
         )
 
-    # Wait for completion: suspend parent
+    # Wait for completion
     logger.info(
         f"Started child workflow (waiting): {child_workflow_name}",
         parent_run_id=ctx.run_id,
@@ -271,7 +286,15 @@ async def start_child_workflow(
         child_id=child_id,
     )
 
-    # Raise suspension to wait for child
+    if _is_step_worker:
+        # Poll for child completion (steps can't suspend)
+        return await _poll_child_completion(
+            storage=storage,
+            child_run_id=child_run_id,
+            child_workflow_name=child_workflow_name,
+        )
+
+    # Suspend parent workflow to wait for child
     raise SuspensionSignal(
         reason=f"child_workflow:{child_id}",
         child_id=child_id,
@@ -370,3 +393,88 @@ async def _start_child_on_worker(
     )
 
     return child_run_id
+
+
+async def _poll_child_completion(
+    storage: Any,
+    child_run_id: str,
+    child_workflow_name: str,
+    poll_interval: float = 1.0,
+    max_poll_interval: float = 10.0,
+    timeout: float | None = None,
+) -> Any:
+    """
+    Poll storage for child workflow completion.
+
+    Used when a step calls start_child_workflow(wait_for_completion=True).
+    Steps cannot suspend via SuspensionSignal, so we poll instead.
+
+    The polling uses exponential backoff starting at poll_interval seconds,
+    capped at max_poll_interval seconds.
+
+    Args:
+        storage: Storage backend to query
+        child_run_id: The child workflow's run ID
+        child_workflow_name: Name of the child workflow (for error messages)
+        poll_interval: Initial polling interval in seconds
+        max_poll_interval: Maximum polling interval in seconds
+        timeout: Maximum time to wait in seconds (None = no timeout)
+
+    Returns:
+        The child workflow's result
+
+    Raises:
+        ChildWorkflowFailedError: If the child workflow fails
+        TimeoutError: If timeout is exceeded
+    """
+    loop = asyncio.get_event_loop()
+    start_time = loop.time()
+    interval = poll_interval
+
+    logger.debug(
+        f"Polling for child workflow completion: {child_run_id}",
+        child_run_id=child_run_id,
+        child_workflow_name=child_workflow_name,
+    )
+
+    while True:
+        run = await storage.get_run(child_run_id)
+        if run and run.status in (
+            RunStatus.COMPLETED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+        ):
+            if run.status == RunStatus.COMPLETED:
+                from pyworkflow.serialization.decoder import deserialize
+
+                result = deserialize(run.result) if run.result else None
+                logger.info(
+                    f"Child workflow completed: {child_run_id}",
+                    child_run_id=child_run_id,
+                    child_workflow_name=child_workflow_name,
+                )
+                return result
+            elif run.status == RunStatus.FAILED:
+                raise ChildWorkflowFailedError(
+                    child_run_id=child_run_id,
+                    child_workflow_name=child_workflow_name,
+                    error=run.error or "Unknown error",
+                    error_type="ChildWorkflowError",
+                )
+            else:
+                # Cancelled
+                raise ChildWorkflowFailedError(
+                    child_run_id=child_run_id,
+                    child_workflow_name=child_workflow_name,
+                    error="Child workflow was cancelled",
+                    error_type="CancellationError",
+                )
+
+        if timeout is not None and (loop.time() - start_time) > timeout:
+            raise TimeoutError(
+                f"Child workflow {child_run_id} ({child_workflow_name}) "
+                f"did not complete within {timeout}s timeout"
+            )
+
+        await asyncio.sleep(interval)
+        interval = min(interval * 1.5, max_poll_interval)

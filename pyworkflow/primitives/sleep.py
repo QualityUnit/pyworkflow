@@ -57,6 +57,16 @@ async def sleep(
         ctx = get_context()
         duration_seconds = _calculate_delay_seconds(duration)
 
+        # On step workers, use asyncio.sleep instead of durable suspension.
+        # Steps are atomic units of work and cannot suspend/resume.
+        if ctx.is_step_worker:
+            logger.debug(
+                f"Sleep {duration_seconds}s via asyncio.sleep (step worker)",
+                run_id=ctx.run_id,
+            )
+            await asyncio.sleep(duration_seconds)
+            return
+
         logger.debug(
             f"Sleep {duration_seconds}s via {ctx.__class__.__name__}",
             run_id=ctx.run_id,

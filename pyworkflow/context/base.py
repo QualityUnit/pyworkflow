@@ -285,6 +285,21 @@ class WorkflowContext(ABC):
         return None
 
     @property
+    def parent_run_id(self) -> str | None:
+        """Get the parent workflow run ID, if this is a child workflow."""
+        return None
+
+    @property
+    def is_child_workflow(self) -> bool:
+        """Check if this workflow was started as a child of another workflow."""
+        return self.parent_run_id is not None
+
+    @property
+    def is_step_worker(self) -> bool:
+        """Check if context is running on a step worker (not orchestrating a workflow)."""
+        return False
+
+    @property
     def runtime(self) -> str | None:
         """
         Get the runtime environment slug.

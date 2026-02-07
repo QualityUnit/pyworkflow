@@ -383,6 +383,7 @@ class LocalRuntime(Runtime):
                 kwargs=kwargs,
                 event_log=events,
                 durable=True,  # Resume is always durable
+                parent_run_id=run.parent_run_id,
             )
 
             # Update run status to completed
@@ -632,6 +633,7 @@ class LocalRuntime(Runtime):
                 storage=storage,
                 durable=True,
                 event_log=None,  # Fresh execution
+                parent_run_id=parent_run_id,
             )
 
             # Update status to COMPLETED

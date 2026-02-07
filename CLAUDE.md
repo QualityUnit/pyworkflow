@@ -187,6 +187,101 @@ async def replay_events(ctx, events):
             ctx.hook_results[event.data["hook_id"]] = event.data["payload"]
 ```
 
+### 6. Primitives from Steps
+
+Steps can call certain workflow primitives when running within a durable workflow.
+When a step executes on a Celery worker, the worker automatically sets up a
+`WorkflowContext` with the parent workflow's `run_id`, `storage`, and metadata,
+enabling primitives to function.
+
+**Supported primitives from steps:**
+
+| Primitive | Supported from Step | Notes |
+|-----------|-------------------|-------|
+| `start_child_workflow()` | Yes | Both `wait_for_completion=True` (polling) and `False` (fire-and-forget) |
+| `sleep()` | Yes (non-durable) | Falls back to `asyncio.sleep` |
+| `hook()` | No | Requires workflow suspension |
+| `define_hook()` | No | Requires workflow suspension |
+
+**How it works:**
+- `execute_step_task()` in `celery/tasks.py` creates a `LocalContext` with the
+  parent's `run_id`, `workflow_name`, `storage`, and existing events
+- The context is marked with `is_step_worker=True` so primitives can detect
+  they are running on a step worker and adjust behavior accordingly
+- `start_child_workflow()` supports both modes from steps:
+  - `wait_for_completion=False`: returns `ChildWorkflowHandle` immediately
+  - `wait_for_completion=True`: polls storage for child completion instead of
+    using `SuspensionSignal` (exponential backoff from 1s up to 10s)
+- `sleep()` uses `asyncio.sleep` instead of durable suspension (step workers
+  cannot raise `SuspensionSignal`)
+- `hook()` raises `RuntimeError` since hooks require workflow suspension
+
+**Example: Starting a child workflow from a step (wait for result):**
+
+```python
+from pyworkflow import step, start_child_workflow, workflow
+
+@workflow(durable=True)
+async def payment_workflow(order_id: str, amount: float):
+    await process_payment(order_id, amount)
+    return {"paid": True, "amount": amount}
+
+@step()
+async def process_order(order_id: str):
+    # Wait for child workflow result (uses polling on step workers)
+    result = await start_child_workflow(
+        payment_workflow,
+        order_id,
+        99.99,
+        wait_for_completion=True,  # Polls storage until child completes
+    )
+    return {"order_id": order_id, "payment": result}
+```
+
+**Example: Fire-and-forget child workflow from a step:**
+
+```python
+@step()
+async def process_order_with_notification(order_id: str):
+    # Fire-and-forget: start a child workflow without waiting
+    handle = await start_child_workflow(
+        notification_workflow,
+        "user_123",
+        f"Order {order_id} processed",
+        wait_for_completion=False,
+    )
+    return {"order_id": order_id, "notification_run_id": handle.child_run_id}
+```
+
+**Example: Sleeping within a step:**
+
+```python
+@step()
+async def rate_limited_api_call(url: str):
+    response = await httpx.get(url)
+    if response.status_code == 429:
+        # Non-durable sleep - blocks the worker during the delay
+        await sleep("30s")
+        response = await httpx.get(url)
+    return response.json()
+```
+
+**Important: Steps cannot suspend.** Unlike workflow-level code, steps cannot
+free the worker while waiting. When `start_child_workflow(wait_for_completion=True)`
+is called from a step, the step worker **blocks and polls** storage until the
+child completes. If the child takes 10 minutes, the step worker is occupied for
+10 minutes. For long-running children, prefer `wait_for_completion=False` and
+handle the result at the workflow level.
+
+**Limitations:**
+- Only works in **durable mode** (the workflow must have a storage backend)
+- `start_child_workflow(wait_for_completion=True)` from a step uses **polling**
+  (exponential backoff 1s to 10s), blocking the step worker for the duration
+- `sleep()` from a step is **non-durable**: uses `asyncio.sleep`, holds the
+  worker, and state is lost if the worker crashes
+- `hook()` and `define_hook()` **cannot** be called from steps (they require
+  workflow suspension)
+
 ## Common Development Tasks
 
 ### Adding a New Event Type
@@ -589,6 +684,35 @@ result["modified"] = True  # Mutates cached data!
 ```python
 result = copy.deepcopy(ctx.step_results["step_1"])
 result["modified"] = True
+```
+
+### 5. Using Suspension Primitives from Steps
+**Wrong:**
+```python
+@step()
+async def my_step():
+    # hook() requires workflow suspension - raises RuntimeError!
+    payload = await hook("approval", timeout="24h")
+```
+
+**Right:**
+```python
+@step()
+async def my_step():
+    # Child workflows work from steps (both modes)
+    result = await start_child_workflow(child_wf, arg, wait_for_completion=True)
+    handle = await start_child_workflow(child_wf, arg, wait_for_completion=False)
+
+    # sleep() works but is non-durable (uses asyncio.sleep)
+    await sleep("5s")
+
+    return {"result": result, "handle_run_id": handle.child_run_id}
+
+@workflow()
+async def my_workflow():
+    # Hooks belong at workflow level only
+    result = await my_step()
+    approval = await hook("approval", timeout="24h")
 ```
 
 ## Performance Considerations

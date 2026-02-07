@@ -32,6 +32,10 @@ async def approval_workflow(order_id: str):
         return await cancel_order(order, approval.comments)
 ```
 
+<Note>
+  Hooks can only be called from **workflow-level code**, not from within `@step` functions. Steps cannot suspend to wait for external events. If you need hook behavior triggered by a step, move the `hook()` call to the workflow and pass the result to the step.
+</Note>
+
 ## How It Works
 
 ```

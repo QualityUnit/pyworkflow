@@ -138,6 +138,24 @@ async def efficient_sleep():
   With 100 workflows each sleeping for 1 day, traditional sleep would need 100 workers blocked for 24 hours. PyWorkflow needs 0 workers during the sleep period.
 </Note>
 
+### Sleep within Steps
+
+`sleep()` can also be called from within `@step` functions. However, when called from a step, it uses `asyncio.sleep` instead of durable suspension, since steps cannot suspend and resume:
+
+```python
+@step()
+async def rate_limited_call(url: str):
+    response = await httpx.get(url)
+    if response.status_code == 429:
+        await sleep("30s")  # Uses asyncio.sleep on the worker
+        response = await httpx.get(url)
+    return response.json()
+```
+
+<Warning>
+  Sleep within steps is **not durable**: the worker is held during the sleep, and if the worker crashes, the sleep state is lost. For long delays, use workflow-level sleep instead.
+</Warning>
+
 ## Use Cases
 
 ### Scheduled Reminders

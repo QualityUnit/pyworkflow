@@ -698,6 +698,7 @@ async def _dispatch_step_to_celery(
         storage_config=ctx.storage_config,
         context_data=context_data,
         context_class_name=context_class_name,
+        workflow_name=ctx.workflow_name,
     )
 
     logger.info(

@@ -18,7 +18,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from pyworkflow.context import LocalContext, MockContext, get_context, has_context, set_context
-from pyworkflow.context.base import WorkflowContext
 from pyworkflow.core.exceptions import ChildWorkflowFailedError
 from pyworkflow.core.step import step
 from pyworkflow.primitives.child_workflow import (
@@ -30,7 +29,6 @@ from pyworkflow.primitives.sleep import sleep
 from pyworkflow.serialization.encoder import serialize
 from pyworkflow.storage.memory import InMemoryStorageBackend
 from pyworkflow.storage.schemas import RunStatus, WorkflowRun
-
 
 # =========================================================================
 # Test: is_step_worker property
@@ -329,7 +327,6 @@ class TestStartChildWorkflowFromStepWorker:
     @pytest.mark.asyncio
     async def test_wait_for_completion_does_not_suspend_on_step_worker(self):
         """Test that wait_for_completion=True does NOT raise SuspensionSignal on step workers."""
-        from pyworkflow.core.exceptions import SuspensionSignal
         from pyworkflow.core.workflow import workflow
 
         @workflow(durable=True)
@@ -1101,6 +1098,6 @@ class TestStepDispatchPassesWorkflowName:
                     assert call_kwargs.kwargs.get("workflow_name") == "my_workflow"
                 else:
                     # All args passed as keyword args via delay()
-                    assert False, f"Expected keyword args, got positional: {call_kwargs}"
+                    raise AssertionError(f"Expected keyword args, got positional: {call_kwargs}")
         finally:
             set_context(None)

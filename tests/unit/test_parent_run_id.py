@@ -14,15 +14,12 @@ Tests cover:
 
 import asyncio
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from pyworkflow.context import LocalContext, MockContext, get_context, has_context, set_context
-from pyworkflow.context.base import WorkflowContext
+from pyworkflow.context import LocalContext, MockContext, get_context, set_context
 from pyworkflow.storage.memory import InMemoryStorageBackend
 from pyworkflow.storage.schemas import RunStatus, WorkflowRun
-
 
 # =========================================================================
 # Test: Base property defaults

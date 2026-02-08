@@ -19,7 +19,6 @@ from pyworkflow.context.step_context import (
     StepContext,
     _reset_step_context,
     _set_step_context_internal,
-    has_step_context,
 )
 from pyworkflow.core.exceptions import SuspensionSignal
 from pyworkflow.core.registry import _registry
@@ -123,13 +122,15 @@ class TestForceLocalCeleryDispatch:
         try:
             # Patch _dispatch_step_to_celery to avoid needing actual Celery infrastructure.
             # The function always raises SuspensionSignal, so we replicate that.
-            with patch(
-                "pyworkflow.core.step._dispatch_step_to_celery",
-                new_callable=AsyncMock,
-                side_effect=SuspensionSignal(reason="step_dispatch:test", step_id="test"),
+            with (
+                patch(
+                    "pyworkflow.core.step._dispatch_step_to_celery",
+                    new_callable=AsyncMock,
+                    side_effect=SuspensionSignal(reason="step_dispatch:test", step_id="test"),
+                ),
+                pytest.raises(SuspensionSignal),
             ):
-                with pytest.raises(SuspensionSignal):
-                    await remote_step()
+                await remote_step()
         finally:
             set_context(None)
 

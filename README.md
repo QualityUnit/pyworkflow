@@ -198,6 +198,36 @@ async def call_external_api(url: str):
         raise RetryableError("Network error")
 ```
 
+### Force Local Steps
+
+By default, steps in a Celery runtime are dispatched to worker processes via the message broker. For lightweight steps where the broker round-trip overhead is undesirable, use `force_local=True` to execute the step inline in the orchestrator process:
+
+```python
+from pyworkflow import step
+
+@step(force_local=True)
+async def quick_transform(data: dict):
+    """Runs inline even when runtime is Celery."""
+    return {k: v.upper() for k, v in data.items()}
+
+@step()
+async def heavy_computation(data: dict):
+    """Dispatched to a Celery worker as usual."""
+    # ... expensive work ...
+    return result
+```
+
+Force-local steps still benefit from full durability: events (`STEP_STARTED`, `STEP_COMPLETED`) are recorded, results are cached for replay, and retry/timeout behavior is preserved. The only difference is that execution happens in the orchestrator process instead of a remote worker.
+
+**When to use `force_local`:**
+- Lightweight data transformations that finish in milliseconds
+- Steps that merely combine results from previous steps
+- Steps where broker serialization overhead exceeds the actual computation time
+
+**When NOT to use `force_local`:**
+- CPU-intensive or I/O-heavy steps (these benefit from worker distribution)
+- Steps that should scale independently from the orchestrator
+
 ### Sleep and Delays
 
 Workflows can sleep for any duration. During sleep, the workflow suspends and consumes zero resources.

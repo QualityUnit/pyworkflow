@@ -43,6 +43,7 @@ class StepMetadata:
     retry_delay: str = "exponential"
     timeout: int | None = None
     metadata: dict[str, Any] | None = None
+    force_local: bool = False
 
     def __post_init__(self) -> None:
         if self.metadata is None:
@@ -158,6 +159,7 @@ class WorkflowRegistry:
         retry_delay: str = "exponential",
         timeout: int | None = None,
         metadata: dict[str, Any] | None = None,
+        force_local: bool = False,
     ) -> None:
         """
         Register a step.
@@ -170,6 +172,7 @@ class WorkflowRegistry:
             retry_delay: Retry delay strategy
             timeout: Optional timeout in seconds
             metadata: Optional metadata dict
+            force_local: If True, always execute inline even in distributed runtimes
         """
         if name in self._steps:
             existing = self._steps[name]
@@ -186,6 +189,7 @@ class WorkflowRegistry:
             retry_delay=retry_delay,
             timeout=timeout,
             metadata=metadata or {},
+            force_local=force_local,
         )
 
         self._steps[name] = step_meta
@@ -288,9 +292,12 @@ def register_step(
     retry_delay: str = "exponential",
     timeout: int | None = None,
     metadata: dict[str, Any] | None = None,
+    force_local: bool = False,
 ) -> None:
     """Register a step in the global registry."""
-    _registry.register_step(name, func, original_func, max_retries, retry_delay, timeout, metadata)
+    _registry.register_step(
+        name, func, original_func, max_retries, retry_delay, timeout, metadata, force_local
+    )
 
 
 def get_step(name: str) -> StepMetadata | None:

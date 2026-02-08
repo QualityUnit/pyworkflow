@@ -53,6 +53,7 @@ def step(
     retry_delay: str | int | list[int] = "exponential",
     timeout: int | None = None,
     metadata: dict[str, Any] | None = None,
+    force_local: bool = False,
 ) -> Callable:
     """
     Decorator to mark functions as workflow steps.
@@ -69,6 +70,9 @@ def step(
             - List[int]: Custom delays for each retry
         timeout: Optional timeout in seconds
         metadata: Optional metadata dictionary
+        force_local: If True, always execute inline even in distributed
+            runtimes (e.g., Celery). Useful for lightweight steps where
+            the overhead of message broker dispatch is undesirable.
 
     Returns:
         Decorated step function
@@ -87,6 +91,11 @@ def step(
         async def custom_retry_step():
             # Retries: after 5s, then 30s, then 300s
             pass
+
+        @step(force_local=True)
+        async def quick_transform(data: dict):
+            # Executes inline even when runtime is Celery
+            return {k: v.upper() for k, v in data.items()}
     """
 
     def decorator(func: Callable) -> Callable:
@@ -179,7 +188,13 @@ def step(
             # ========== Distributed Step Dispatch ==========
             # When running in a distributed runtime (e.g., Celery), dispatch steps
             # to step workers instead of executing inline.
-            if ctx.runtime == "celery":
+            # Steps marked with force_local=True skip dispatch and execute inline,
+            # while still recording proper events for durability.
+            # Also check metadata dict for force_local (allows passing via
+            # metadata={"force_local": True} when the dedicated parameter
+            # is not yet available in the installed version).
+            _is_force_local = force_local or (metadata or {}).get("force_local", False)
+            if ctx.runtime == "celery" and not _is_force_local:
                 # Validate parameters before dispatching to Celery
                 validate_step_parameters(func, args, kwargs, step_name)
                 return await _dispatch_step_to_celery(
@@ -428,6 +443,7 @@ def step(
             retry_delay=str(retry_delay),
             timeout=timeout,
             metadata=metadata,
+            force_local=force_local,
         )
 
         # Store metadata on wrapper
@@ -437,6 +453,7 @@ def step(
         wrapper.__step_retry_delay__ = retry_delay  # type: ignore[attr-defined]
         wrapper.__step_timeout__ = timeout  # type: ignore[attr-defined]
         wrapper.__step_metadata__ = metadata or {}  # type: ignore[attr-defined]
+        wrapper.__step_force_local__ = force_local  # type: ignore[attr-defined]
 
         return wrapper
 

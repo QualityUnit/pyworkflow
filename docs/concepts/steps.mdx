@@ -100,6 +100,7 @@ async def send_email(to: str, subject: str, body: str):
 | `max_retries` | `int` | `3` | Maximum retry attempts |
 | `retry_delay` | `str` | `"fixed"` | Retry strategy: `"fixed"`, `"exponential"`, or duration |
 | `timeout` | `str` | `"60s"` | Maximum step execution time |
+| `force_local` | `bool` | `False` | Execute inline in orchestrator instead of dispatching to Celery |
 
 ## Retry Strategies
 
@@ -335,6 +336,35 @@ async def rate_limited_api_call(url: str):
 ### Hooks are Not Supported from Steps
 
 `hook()` and `define_hook()` cannot be called from within steps. Hooks require workflow suspension to wait for external events, which is not possible during step execution. Move hook calls to workflow-level code instead.
+
+## Force Local Execution
+
+By default, steps in a Celery runtime are dispatched to worker processes via the message broker. For lightweight steps where the broker round-trip adds unnecessary latency, use `force_local=True` to execute the step inline in the orchestrator process:
+
+```python
+from pyworkflow import step
+
+@step(force_local=True)
+async def merge_results(user: dict, orders: list):
+    """Runs inline - no Celery dispatch overhead."""
+    return {
+        "user": user,
+        "total_orders": len(orders),
+        "latest_order": orders[0] if orders else None,
+    }
+```
+
+Force-local steps retain all durability guarantees:
+- `STEP_STARTED` and `STEP_COMPLETED` events are recorded
+- Results are cached for replay during workflow resumption
+- Retry policies (`max_retries`, `retry_delay`) are respected
+- Cancellation checks still apply
+
+The only difference is that execution happens in the orchestrator process rather than being dispatched to a remote Celery worker.
+
+<Note>
+  Use `force_local` for steps that are fast and lightweight (data merging, formatting, simple transformations). CPU-intensive or I/O-heavy steps should use the default distributed execution so they benefit from worker scaling.
+</Note>
 
 ## Best Practices
 

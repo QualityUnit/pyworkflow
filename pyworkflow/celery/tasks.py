@@ -185,6 +185,29 @@ def execute_step_task(
         )
         return None
 
+    # Execution-time guard: prevent duplicate step execution on concurrent workers.
+    # The singleton lock (unique_on=["run_id", "step_id"]) prevents duplicate queueing,
+    # but broker-level re-delivery or race conditions can still result in two workers
+    # executing the same step. This Redis lock ensures only one proceeds.
+    _exec_lock_key = f"pyworkflow:step_exec:{run_id}:{step_id}"
+    _exec_lock_backend = self.singleton_backend
+    _exec_lock_acquired = False
+    if _exec_lock_backend is not None:
+        _exec_lock_acquired = _exec_lock_backend.lock(
+            _exec_lock_key, self.request.id or "unknown", expiry=self._lock_expiry
+        )
+        if not _exec_lock_acquired:
+            logger.warning(
+                "Step already being executed by another worker, skipping duplicate",
+                run_id=run_id,
+                step_id=step_id,
+                step_name=step_name,
+                existing_worker_task=_exec_lock_backend.get(_exec_lock_key),
+            )
+            return None
+    else:
+        _exec_lock_acquired = True  # No Redis = no locking
+
     # Deserialize arguments
     args = deserialize_args(args_json)
     kwargs = deserialize_kwargs(kwargs_json)
@@ -420,6 +443,13 @@ def execute_step_task(
             raise FatalError(f"Step '{step_name}' failed after retries: {str(e)}") from e
 
     finally:
+        # Release execution lock so retries or other tasks can proceed.
+        if _exec_lock_acquired and _exec_lock_backend is not None:
+            try:
+                _exec_lock_backend.unlock(_exec_lock_key)
+            except Exception:
+                pass  # Best effort - lock will expire via TTL
+
         # Clean up workflow context (must be reset before step context)
         if workflow_context_token is not None:
             from pyworkflow.context.base import reset_context
@@ -700,10 +730,12 @@ def _resolve_context_class(class_name: str) -> type["StepContext"] | None:
 @celery_app.task(
     name="pyworkflow.start_workflow",
     base=SingletonWorkflowTask,
+    bind=True,
     queue="pyworkflow.workflows",
     unique_on=["run_id"],
 )
 def start_workflow_task(
+    self: SingletonWorkflowTask,
     workflow_name: str,
     args_json: str,
     kwargs_json: str,
@@ -736,36 +768,67 @@ def start_workflow_task(
         f"START_WORKFLOW_TASK ENTRY: {workflow_name}",
         run_id=run_id,
         idempotency_key=idempotency_key,
-        celery_task_id=start_workflow_task.request.id,
+        celery_task_id=self.request.id,
     )
 
-    # Get workflow metadata
-    workflow_meta = get_workflow(workflow_name)
-    if not workflow_meta:
-        raise ValueError(f"Workflow '{workflow_name}' not found in registry")
-
-    # Deserialize arguments
-    args = deserialize_args(args_json)
-    kwargs = deserialize_kwargs(kwargs_json)
-
-    # Get storage backend
-    storage = _get_storage_backend(storage_config)
-
-    # Execute workflow directly on worker
-    result_run_id = run_async(
-        _start_workflow_on_worker(
-            workflow_meta=workflow_meta,
-            args=args,
-            kwargs=kwargs,
-            storage=storage,
-            storage_config=storage_config,
-            idempotency_key=idempotency_key,
-            run_id=run_id,
+    # Execution-time guard: prevent duplicate workflow start on concurrent workers.
+    # The singleton lock (unique_on=["run_id"]) prevents duplicate queueing, but
+    # broker-level re-delivery or race conditions can still result in two workers
+    # executing the same start task. This Redis lock ensures only one proceeds.
+    _exec_lock_key = f"pyworkflow:wf_start:{run_id}"
+    _exec_lock_backend = self.singleton_backend
+    _exec_lock_acquired = False
+    if _exec_lock_backend is not None:
+        _exec_lock_acquired = _exec_lock_backend.lock(
+            _exec_lock_key, self.request.id or "unknown", expiry=self._lock_expiry
         )
-    )
+        if not _exec_lock_acquired:
+            logger.warning(
+                "Workflow start already being executed by another worker, skipping duplicate",
+                run_id=run_id,
+                workflow_name=workflow_name,
+                existing_worker_task=_exec_lock_backend.get(_exec_lock_key),
+            )
+            return run_id
+    else:
+        _exec_lock_acquired = True  # No Redis = no locking
 
-    logger.info(f"Workflow execution initiated: {workflow_name}", run_id=result_run_id)
-    return result_run_id
+    try:
+        # Get workflow metadata
+        workflow_meta = get_workflow(workflow_name)
+        if not workflow_meta:
+            raise ValueError(f"Workflow '{workflow_name}' not found in registry")
+
+        # Deserialize arguments
+        args = deserialize_args(args_json)
+        kwargs = deserialize_kwargs(kwargs_json)
+
+        # Get storage backend
+        storage = _get_storage_backend(storage_config)
+
+        # Execute workflow directly on worker
+        result_run_id = run_async(
+            _start_workflow_on_worker(
+                workflow_meta=workflow_meta,
+                args=args,
+                kwargs=kwargs,
+                storage=storage,
+                storage_config=storage_config,
+                idempotency_key=idempotency_key,
+                run_id=run_id,
+            )
+        )
+
+        logger.info(f"Workflow execution initiated: {workflow_name}", run_id=result_run_id)
+        return result_run_id
+
+    finally:
+        # Release execution lock so retries or re-dispatches can proceed.
+        if _exec_lock_acquired and _exec_lock_backend is not None:
+            try:
+                _exec_lock_backend.unlock(_exec_lock_key)
+            except Exception:
+                pass  # Best effort - lock will expire via TTL
 
 
 @celery_app.task(

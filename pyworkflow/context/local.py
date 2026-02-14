@@ -110,6 +110,10 @@ class LocalContext(WorkflowContext):
         # Used to prevent re-dispatch during resume
         self._steps_in_progress: set[str] = set()
 
+        # Agent state caches (for agent event replay)
+        self._agent_llm_cache: dict[str, dict[str, Any]] = {}
+        self._agent_tool_cache: dict[str, Any] = {}
+
         # Replay state if resuming
         if event_log:
             self._is_replaying = True
@@ -253,6 +257,32 @@ class LocalContext(WorkflowContext):
                         "__failed__": True,
                     }
                     self._pending_children.pop(child_id, None)
+
+            elif event.type == EventType.AGENT_LLM_RESPONSE:
+                # Cache LLM response for replay (key: agent_id:iteration)
+                agent_id = event.data.get("agent_id")
+                iteration = event.data.get("iteration")
+                if agent_id is not None and iteration is not None:
+                    self._agent_llm_cache[f"{agent_id}:{iteration}"] = {
+                        "response_content": event.data.get("response_content"),
+                        "tool_calls": event.data.get("tool_calls"),
+                        "token_usage": event.data.get("token_usage"),
+                        "model": event.data.get("model"),
+                    }
+
+            elif event.type == EventType.AGENT_TOOL_RESULT:
+                # Cache tool result for replay (key: agent_id:iteration:tool_call_id)
+                agent_id = event.data.get("agent_id")
+                iteration = event.data.get("iteration")
+                tool_call_id = event.data.get("tool_call_id")
+                if agent_id is not None and iteration is not None and tool_call_id:
+                    key = f"{agent_id}:{iteration}:{tool_call_id}"
+                    self._agent_tool_cache[key] = {
+                        "result": event.data.get("result"),
+                        "is_error": event.data.get("is_error", False),
+                        "tool_name": event.data.get("tool_name", ""),
+                        "duration_ms": event.data.get("duration_ms", 0),
+                    }
 
     @property
     def is_durable(self) -> bool:
@@ -519,6 +549,64 @@ class LocalContext(WorkflowContext):
     def add_pending_child(self, child_id: str, child_run_id: str) -> None:
         """Add a pending child workflow."""
         self._pending_children[child_id] = child_run_id
+
+    # =========================================================================
+    # Agent state caching (for agent event replay)
+    # =========================================================================
+
+    @property
+    def agent_llm_cache(self) -> dict[str, dict[str, Any]]:
+        """Get the agent LLM response cache."""
+        return self._agent_llm_cache
+
+    @property
+    def agent_tool_cache(self) -> dict[str, Any]:
+        """Get the agent tool result cache."""
+        return self._agent_tool_cache
+
+    def cache_agent_llm_response(self, agent_id: str, iteration: int, response: dict[str, Any]) -> None:
+        """Cache an LLM response for agent replay."""
+        key = f"{agent_id}:{iteration}"
+        self._agent_llm_cache[key] = response
+
+    def get_cached_agent_llm_response(self, agent_id: str, iteration: int) -> dict[str, Any] | None:
+        """Get a cached LLM response for agent replay."""
+        key = f"{agent_id}:{iteration}"
+        return self._agent_llm_cache.get(key)
+
+    def cache_agent_tool_result(
+        self,
+        agent_id: str,
+        iteration: int,
+        tool_call_id: str,
+        result: Any,
+        *,
+        is_error: bool = False,
+        tool_name: str = "",
+        duration_ms: float = 0,
+    ) -> None:
+        """Cache a tool result for agent replay."""
+        key = f"{agent_id}:{iteration}:{tool_call_id}"
+        self._agent_tool_cache[key] = {
+            "result": result,
+            "is_error": is_error,
+            "tool_name": tool_name,
+            "duration_ms": duration_ms,
+        }
+
+    def get_cached_agent_tool_result(self, agent_id: str, iteration: int, tool_call_id: str) -> dict[str, Any] | None:
+        """Get a cached tool result for agent replay.
+
+        Returns:
+            Dict with 'result', 'is_error', 'tool_name', 'duration_ms' or None.
+        """
+        key = f"{agent_id}:{iteration}:{tool_call_id}"
+        return self._agent_tool_cache.get(key)
+
+    def has_cached_agent_tool_result(self, agent_id: str, iteration: int, tool_call_id: str) -> bool:
+        """Check if a tool result is cached for agent replay."""
+        key = f"{agent_id}:{iteration}:{tool_call_id}"
+        return key in self._agent_tool_cache
 
     # =========================================================================
     # Event log access (for EventReplayer compatibility)

@@ -63,6 +63,24 @@ class EventType(Enum):
     SCHEDULE_BACKFILL_STARTED = "schedule.backfill_started"
     SCHEDULE_BACKFILL_COMPLETED = "schedule.backfill_completed"
 
+    # Agent lifecycle events
+    AGENT_STARTED = "agent.started"
+    AGENT_LLM_CALL = "agent.llm_call"
+    AGENT_LLM_RESPONSE = "agent.llm_response"
+    AGENT_TOOL_CALL = "agent.tool_call"
+    AGENT_TOOL_RESULT = "agent.tool_result"
+    AGENT_RESPONSE = "agent.response"
+    AGENT_COMPLETED = "agent.completed"
+    AGENT_ERROR = "agent.error"
+
+    # Multi-agent events (future)
+    AGENT_HANDOFF = "agent.handoff"
+
+    # Memory events (future)
+    MEMORY_STORED = "memory.stored"
+    MEMORY_RETRIEVED = "memory.retrieved"
+    MEMORY_COMPACTED = "memory.compacted"
+
 
 @dataclass
 class Event:
@@ -919,5 +937,316 @@ def create_schedule_backfill_completed_event(
             "runs_created": runs_created,
             "run_ids": run_ids,
             "completed_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+# Agent event creation helpers
+
+
+def create_agent_started_event(
+    run_id: str,
+    agent_id: str,
+    agent_name: str,
+    model: str,
+    tools: list[str],
+    system_prompt: str,
+    input_text: str,
+) -> Event:
+    """
+    Create an agent started event.
+
+    This event is recorded when an agent begins execution within a workflow.
+
+    Args:
+        run_id: The workflow run ID
+        agent_id: Unique identifier for this agent invocation
+        agent_name: Name of the agent
+        model: LLM model being used
+        tools: List of tool names available to the agent
+        system_prompt: The system prompt for the agent
+        input_text: The input text/prompt for the agent
+
+    Returns:
+        Event: The agent started event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.AGENT_STARTED,
+        data={
+            "agent_id": agent_id,
+            "agent_name": agent_name,
+            "model": model,
+            "tools": tools,
+            "system_prompt": system_prompt,
+            "input_text": input_text,
+            "started_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_agent_llm_call_event(
+    run_id: str,
+    agent_id: str,
+    iteration: int,
+    messages: list[dict[str, Any]],
+    model: str,
+    tools: list[str],
+) -> Event:
+    """
+    Create an agent LLM call event.
+
+    This event is recorded when an agent sends a request to the LLM.
+
+    Args:
+        run_id: The workflow run ID
+        agent_id: Unique identifier for this agent invocation
+        iteration: The iteration number within the agent loop
+        messages: The messages being sent to the LLM
+        model: The LLM model being called
+        tools: List of tool names available for this call
+
+    Returns:
+        Event: The agent LLM call event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.AGENT_LLM_CALL,
+        data={
+            "agent_id": agent_id,
+            "iteration": iteration,
+            "messages": messages,
+            "model": model,
+            "tools": tools,
+        },
+    )
+
+
+def create_agent_llm_response_event(
+    run_id: str,
+    agent_id: str,
+    iteration: int,
+    response_content: str,
+    tool_calls: list[dict[str, Any]] | None,
+    token_usage: dict[str, Any] | None,
+    model: str,
+) -> Event:
+    """
+    Create an agent LLM response event.
+
+    This event is recorded when the LLM returns a response.
+
+    Args:
+        run_id: The workflow run ID
+        agent_id: Unique identifier for this agent invocation
+        iteration: The iteration number within the agent loop
+        response_content: The text content of the LLM response
+        tool_calls: List of tool calls requested by the LLM (if any)
+        token_usage: Token usage dict (from TokenUsage.to_dict())
+        model: The LLM model that responded
+
+    Returns:
+        Event: The agent LLM response event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.AGENT_LLM_RESPONSE,
+        data={
+            "agent_id": agent_id,
+            "iteration": iteration,
+            "response_content": response_content,
+            "tool_calls": tool_calls,
+            "token_usage": token_usage,
+            "model": model,
+        },
+    )
+
+
+def create_agent_tool_call_event(
+    run_id: str,
+    agent_id: str,
+    iteration: int,
+    tool_call_id: str,
+    tool_name: str,
+    tool_args: dict[str, Any],
+) -> Event:
+    """
+    Create an agent tool call event.
+
+    This event is recorded when the agent invokes a tool.
+
+    Args:
+        run_id: The workflow run ID
+        agent_id: Unique identifier for this agent invocation
+        iteration: The iteration number within the agent loop
+        tool_call_id: Unique identifier for this tool call
+        tool_name: Name of the tool being called
+        tool_args: Arguments passed to the tool
+
+    Returns:
+        Event: The agent tool call event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.AGENT_TOOL_CALL,
+        data={
+            "agent_id": agent_id,
+            "iteration": iteration,
+            "tool_call_id": tool_call_id,
+            "tool_name": tool_name,
+            "tool_args": tool_args,
+        },
+    )
+
+
+def create_agent_tool_result_event(
+    run_id: str,
+    agent_id: str,
+    iteration: int,
+    tool_call_id: str,
+    tool_name: str,
+    result: Any,
+    is_error: bool,
+    duration_ms: float,
+) -> Event:
+    """
+    Create an agent tool result event.
+
+    This event is recorded when a tool execution completes.
+
+    Args:
+        run_id: The workflow run ID
+        agent_id: Unique identifier for this agent invocation
+        iteration: The iteration number within the agent loop
+        tool_call_id: Unique identifier for the tool call
+        tool_name: Name of the tool that was called
+        result: The result returned by the tool
+        is_error: Whether the tool execution resulted in an error
+        duration_ms: Tool execution duration in milliseconds
+
+    Returns:
+        Event: The agent tool result event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.AGENT_TOOL_RESULT,
+        data={
+            "agent_id": agent_id,
+            "iteration": iteration,
+            "tool_call_id": tool_call_id,
+            "tool_name": tool_name,
+            "result": result,
+            "is_error": is_error,
+            "duration_ms": duration_ms,
+        },
+    )
+
+
+def create_agent_response_event(
+    run_id: str,
+    agent_id: str,
+    iteration: int,
+    content: str,
+) -> Event:
+    """
+    Create an agent response event.
+
+    This event is recorded when the agent produces a final text response
+    from an iteration without tool calls.
+
+    Args:
+        run_id: The workflow run ID
+        agent_id: Unique identifier for this agent invocation
+        iteration: The iteration number within the agent loop
+        content: The text content of the response
+
+    Returns:
+        Event: The agent response event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.AGENT_RESPONSE,
+        data={
+            "agent_id": agent_id,
+            "iteration": iteration,
+            "content": content,
+        },
+    )
+
+
+def create_agent_completed_event(
+    run_id: str,
+    agent_id: str,
+    result_content: str,
+    total_iterations: int,
+    total_tool_calls: int,
+    token_usage: dict[str, Any] | None,
+    finish_reason: str,
+) -> Event:
+    """
+    Create an agent completed event.
+
+    This event is recorded when the agent finishes execution successfully.
+
+    Args:
+        run_id: The workflow run ID
+        agent_id: Unique identifier for this agent invocation
+        result_content: The final result content from the agent
+        total_iterations: Total number of agent loop iterations
+        total_tool_calls: Total number of tool calls made
+        token_usage: Aggregate token usage dict (from TokenUsage.to_dict())
+        finish_reason: Reason for completion (e.g., "stop", "max_iterations")
+
+    Returns:
+        Event: The agent completed event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.AGENT_COMPLETED,
+        data={
+            "agent_id": agent_id,
+            "result_content": result_content,
+            "total_iterations": total_iterations,
+            "total_tool_calls": total_tool_calls,
+            "token_usage": token_usage,
+            "finish_reason": finish_reason,
+            "completed_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_agent_error_event(
+    run_id: str,
+    agent_id: str,
+    error: str,
+    error_type: str,
+    iteration: int,
+    traceback: str | None = None,
+) -> Event:
+    """
+    Create an agent error event.
+
+    This event is recorded when the agent encounters an error.
+
+    Args:
+        run_id: The workflow run ID
+        agent_id: Unique identifier for this agent invocation
+        error: Error message
+        error_type: The exception type that caused the error
+        iteration: The iteration number when the error occurred
+        traceback: Optional traceback string
+
+    Returns:
+        Event: The agent error event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.AGENT_ERROR,
+        data={
+            "agent_id": agent_id,
+            "error": error,
+            "error_type": error_type,
+            "iteration": iteration,
+            "traceback": traceback,
         },
     )

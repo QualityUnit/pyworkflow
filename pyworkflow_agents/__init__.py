@@ -48,5 +48,44 @@ try:
         "TokenUsage",
         "TokenUsageTracker",
     ]
+
+    from pyworkflow_agents.tools import (
+        ToolDefinition,
+        ToolRegistry,
+        ToolResult,
+        get_global_registry,
+        tool,
+    )
+
+    __all__ += [
+        # Tools
+        "tool",
+        "ToolRegistry",
+        "ToolDefinition",
+        "ToolResult",
+        "get_global_registry",
+    ]
+
+    from pyworkflow_agents.agent import (
+        DEFAULT_SYSTEM_PROMPT,
+        Agent,
+        AgentResult,
+        agent,
+        run_agent_loop,
+        run_tool_calling_loop,
+        tool_calling_agent,
+    )
+
+    __all__ += [
+        # Agent (explicit names)
+        "DEFAULT_SYSTEM_PROMPT",
+        "tool_calling_agent",
+        "run_tool_calling_loop",
+        "Agent",
+        "AgentResult",
+        # Agent (backward compatibility aliases)
+        "agent",
+        "run_agent_loop",
+    ]
 except ImportError:
     pass

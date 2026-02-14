@@ -93,6 +93,12 @@ class EventReplayer:
         elif event.type == EventType.CANCELLATION_REQUESTED:
             await self._apply_cancellation_requested(ctx, event)
 
+        elif event.type == EventType.AGENT_LLM_RESPONSE:
+            await self._apply_agent_llm_response(ctx, event)
+
+        elif event.type == EventType.AGENT_TOOL_RESULT:
+            await self._apply_agent_tool_result(ctx, event)
+
         # Other event types don't affect replay state
         # (workflow_started, step_started, step_failed, etc. are informational)
 
@@ -254,6 +260,51 @@ class EventReplayer:
             reason=reason,
             requested_by=requested_by,
         )
+
+    async def _apply_agent_llm_response(self, ctx: LocalContext, event: Event) -> None:
+        """Apply agent_llm_response event - cache the LLM response for replay."""
+        agent_id = event.data.get("agent_id")
+        iteration = event.data.get("iteration")
+
+        if agent_id is not None and iteration is not None:
+            response_data = {
+                "response_content": event.data.get("response_content"),
+                "tool_calls": event.data.get("tool_calls"),
+                "token_usage": event.data.get("token_usage"),
+                "model": event.data.get("model"),
+            }
+            ctx.cache_agent_llm_response(agent_id, iteration, response_data)
+            logger.debug(
+                f"Cached agent LLM response: {agent_id}:{iteration}",
+                run_id=ctx.run_id,
+                agent_id=agent_id,
+                iteration=iteration,
+            )
+
+    async def _apply_agent_tool_result(self, ctx: LocalContext, event: Event) -> None:
+        """Apply agent_tool_result event - cache the tool result for replay."""
+        agent_id = event.data.get("agent_id")
+        iteration = event.data.get("iteration")
+        tool_call_id = event.data.get("tool_call_id")
+
+        if agent_id is not None and iteration is not None and tool_call_id:
+            result = event.data.get("result")
+            ctx.cache_agent_tool_result(
+                agent_id,
+                iteration,
+                tool_call_id,
+                result,
+                is_error=event.data.get("is_error", False),
+                tool_name=event.data.get("tool_name", ""),
+                duration_ms=event.data.get("duration_ms", 0),
+            )
+            logger.debug(
+                f"Cached agent tool result: {agent_id}:{iteration}:{tool_call_id}",
+                run_id=ctx.run_id,
+                agent_id=agent_id,
+                iteration=iteration,
+                tool_call_id=tool_call_id,
+            )
 
 
 # Singleton instance

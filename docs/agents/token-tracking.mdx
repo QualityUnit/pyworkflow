@@ -1,0 +1,176 @@
+---
+title: 'Token Tracking'
+description: 'Track and accumulate token usage across LLM calls'
+---
+
+## Overview
+
+When running LLM-powered workflows, tracking token usage is essential for cost monitoring and debugging. PyWorkflow Agents provides two primitives for this:
+
+- **`TokenUsage`** — A dataclass that holds token counts and supports arithmetic accumulation
+- **`TokenUsageTracker`** — A LangChain callback handler that automatically extracts usage from LLM responses
+
+## TokenUsage
+
+The `TokenUsage` dataclass tracks input tokens, output tokens, total tokens, and optionally the model name.
+
+```python
+from pyworkflow_agents import TokenUsage
+
+usage = TokenUsage(
+    input_tokens=100,
+    output_tokens=50,
+    total_tokens=150,
+    model="claude-sonnet-4-20250514"
+)
+```
+
+### Accumulating Usage
+
+`TokenUsage` supports `+` and `+=` for accumulating counts across multiple LLM calls:
+
+```python
+call_1 = TokenUsage(input_tokens=100, output_tokens=50, total_tokens=150, model="claude-sonnet-4-20250514")
+call_2 = TokenUsage(input_tokens=200, output_tokens=80, total_tokens=280)
+
+# Addition creates a new instance
+combined = call_1 + call_2
+print(combined.input_tokens)   # 300
+print(combined.output_tokens)  # 130
+print(combined.total_tokens)   # 430
+print(combined.model)          # "claude-sonnet-4-20250514"
+
+# In-place addition
+call_1 += call_2
+print(call_1.total_tokens)     # 430
+```
+
+<Note>
+  The `model` field is preserved from the left operand if set, otherwise taken from the right operand. This means the first model used is retained across accumulation.
+</Note>
+
+### Extracting from AIMessage
+
+When working with LangChain responses directly, you can extract usage from an `AIMessage`:
+
+```python
+from pyworkflow_agents import TokenUsage
+
+# response is an AIMessage from llm.invoke() or llm.ainvoke()
+usage = TokenUsage.from_message(response)
+print(usage.input_tokens, usage.output_tokens)
+```
+
+If the message has no `usage_metadata`, a zero-valued `TokenUsage` is returned.
+
+### Serialization
+
+Use `to_dict()` to serialize token usage for storage in pyworkflow events or logging:
+
+```python
+usage = TokenUsage(input_tokens=100, output_tokens=50, total_tokens=150, model="gpt-4o")
+data = usage.to_dict()
+# {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150, "model": "gpt-4o"}
+```
+
+The `model` key is omitted when `None`.
+
+## TokenUsageTracker
+
+`TokenUsageTracker` is a LangChain `BaseCallbackHandler` that automatically captures token usage from every LLM call. Pass it to any LangChain chat model via the `callbacks` parameter.
+
+```python
+from pyworkflow_agents import TokenUsageTracker
+from langchain_anthropic import ChatAnthropic
+
+# Create tracker and attach to model
+tracker = TokenUsageTracker()
+llm = ChatAnthropic(model="claude-sonnet-4-20250514", callbacks=[tracker])
+
+# Make LLM calls
+response = await llm.ainvoke("What is 2 + 2?")
+response = await llm.ainvoke("What is the capital of France?")
+
+# Check accumulated usage
+print(tracker.total_usage.input_tokens)   # Total input across all calls
+print(tracker.total_usage.output_tokens)  # Total output across all calls
+print(tracker.total_usage.total_tokens)   # Grand total
+print(len(tracker.call_usages))           # 2 (one per call)
+```
+
+### Provider Format Support
+
+The tracker automatically handles different provider response formats:
+
+| Provider | Format | Fields |
+|----------|--------|--------|
+| OpenAI | `llm_output.token_usage` | `prompt_tokens`, `completion_tokens`, `total_tokens` |
+| Anthropic | `llm_output.usage` | `input_tokens`, `output_tokens` |
+| Fallback | `generation.message.usage_metadata` | `input_tokens`, `output_tokens`, `total_tokens` |
+
+You don't need to configure anything — the tracker detects the format automatically.
+
+### Per-Call Records
+
+Access individual call records through `call_usages`:
+
+```python
+tracker = TokenUsageTracker()
+llm = ChatAnthropic(model="claude-sonnet-4-20250514", callbacks=[tracker])
+
+await llm.ainvoke("Short question")
+await llm.ainvoke("A much longer and more detailed question...")
+
+for i, usage in enumerate(tracker.call_usages):
+    print(f"Call {i + 1}: {usage.input_tokens} in, {usage.output_tokens} out")
+```
+
+### Resetting
+
+Clear all accumulated data to start fresh:
+
+```python
+tracker.reset()
+
+print(tracker.total_usage.total_tokens)  # 0
+print(tracker.call_usages)              # []
+```
+
+### Usage in Workflows
+
+A typical pattern is to attach a tracker to your LLM within a workflow step, then record the usage in the step result:
+
+```python
+from pyworkflow import workflow, step
+from pyworkflow_agents import TokenUsageTracker
+from langchain_anthropic import ChatAnthropic
+
+@step()
+async def analyze_document(document: str):
+    tracker = TokenUsageTracker()
+    llm = ChatAnthropic(model="claude-sonnet-4-20250514", callbacks=[tracker])
+
+    response = await llm.ainvoke(f"Summarize this document:\n\n{document}")
+
+    return {
+        "summary": response.content,
+        "token_usage": tracker.total_usage.to_dict(),
+    }
+
+@workflow()
+async def document_pipeline(document: str):
+    result = await analyze_document(document)
+    print(f"Used {result['token_usage']['total_tokens']} tokens")
+    return result
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Error Handling" icon="triangle-exclamation" href="/agents/error-handling">
+    Handle provider errors and missing dependencies gracefully.
+  </Card>
+  <Card title="Installation" icon="download" href="/agents/installation">
+    Install additional LLM providers.
+  </Card>
+</CardGroup>

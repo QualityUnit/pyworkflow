@@ -1,0 +1,144 @@
+---
+title: 'Installation'
+description: 'Install pyworkflow_agents with your preferred LLM provider'
+---
+
+## Base Installation
+
+The `pyworkflow_agents` module requires `langchain-core` as its foundation. Install it via the `agents` extra:
+
+```bash
+pip install 'pyworkflow-engine[agents]'
+```
+
+This gives you access to `ChatModel`, `TokenUsageTracker`, message types, and all agent exceptions.
+
+## Provider Extras
+
+To use a specific LLM provider, install the corresponding extra. Each extra bundles `langchain-core` plus the provider's LangChain integration package.
+
+<Tabs>
+  <Tab title="Anthropic">
+    ```bash
+    pip install 'pyworkflow-engine[agents-anthropic]'
+    ```
+
+    Installs: `langchain-core` + `langchain-anthropic`
+
+    ```python
+    from langchain_anthropic import ChatAnthropic
+    from pyworkflow_agents import ChatModel
+
+    llm: ChatModel = ChatAnthropic(model="claude-sonnet-4-20250514")
+    ```
+  </Tab>
+  <Tab title="OpenAI">
+    ```bash
+    pip install 'pyworkflow-engine[agents-openai]'
+    ```
+
+    Installs: `langchain-core` + `langchain-openai`
+
+    ```python
+    from langchain_openai import ChatOpenAI
+    from pyworkflow_agents import ChatModel
+
+    llm: ChatModel = ChatOpenAI(model="gpt-4o")
+    ```
+  </Tab>
+  <Tab title="Google">
+    ```bash
+    pip install 'pyworkflow-engine[agents-google]'
+    ```
+
+    Installs: `langchain-core` + `langchain-google-genai`
+
+    ```python
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    from pyworkflow_agents import ChatModel
+
+    llm: ChatModel = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+    ```
+  </Tab>
+  <Tab title="Ollama">
+    ```bash
+    pip install 'pyworkflow-engine[agents-ollama]'
+    ```
+
+    Installs: `langchain-core` + `langchain-ollama`
+
+    ```python
+    from langchain_ollama import ChatOllama
+    from pyworkflow_agents import ChatModel
+
+    llm: ChatModel = ChatOllama(model="llama3")
+    ```
+  </Tab>
+</Tabs>
+
+### Install All Providers
+
+To install every supported provider at once:
+
+```bash
+pip install 'pyworkflow-engine[agents-all]'
+```
+
+## Dependency Summary
+
+| Extra | Packages Installed |
+|-------|-------------------|
+| `agents` | `langchain-core` |
+| `agents-anthropic` | `langchain-core`, `langchain-anthropic` |
+| `agents-openai` | `langchain-core`, `langchain-openai` |
+| `agents-google` | `langchain-core`, `langchain-google-genai` |
+| `agents-ollama` | `langchain-core`, `langchain-ollama` |
+| `agents-all` | All of the above |
+
+## Verifying Your Installation
+
+After installing, verify that everything is working:
+
+```python
+# Always works (no langchain-core needed)
+from pyworkflow_agents import AgentError, ProviderError
+print("Exceptions OK")
+
+# Requires langchain-core
+from pyworkflow_agents import ChatModel, TokenUsageTracker
+print("Types + tracking OK")
+
+# Requires provider package (e.g. langchain-anthropic)
+from langchain_anthropic import ChatAnthropic
+print("Anthropic provider OK")
+```
+
+<Warning>
+  If `langchain-core` is not installed, importing `ChatModel` or `TokenUsageTracker` from `pyworkflow_agents` will silently skip — no error is raised. The exception classes (`AgentError`, `ProviderError`, `ProviderNotInstalledError`) are always available regardless of installed dependencies.
+</Warning>
+
+## What Gets Imported
+
+The `pyworkflow_agents` module conditionally exports based on what's installed:
+
+| Export | Available Without langchain-core | Available With langchain-core |
+|--------|--------------------------------|-------------------------------|
+| `AgentError` | Yes | Yes |
+| `ProviderError` | Yes | Yes |
+| `ProviderNotInstalledError` | Yes | Yes |
+| `ChatModel` | No | Yes |
+| `MessageList` | No | Yes |
+| `AIMessage`, `HumanMessage`, `SystemMessage`, `ToolMessage` | No | Yes |
+| `TokenUsage` | No | Yes |
+| `TokenUsageTracker` | No | Yes |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Token Tracking" icon="chart-line" href="/agents/token-tracking">
+    Track token usage across LLM calls in your workflows.
+  </Card>
+  <Card title="Error Handling" icon="triangle-exclamation" href="/agents/error-handling">
+    Handle provider errors and missing dependencies.
+  </Card>
+</CardGroup>

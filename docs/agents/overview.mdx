@@ -1,0 +1,73 @@
+---
+title: 'Agents Overview'
+description: 'Build LLM-powered agents on top of durable PyWorkflow orchestration'
+---
+
+## What is PyWorkflow Agents?
+
+PyWorkflow Agents (`pyworkflow_agents`) is a separate module that brings LLM capabilities to your PyWorkflow workflows. It provides type aliases, token tracking, and exception handling for integrating LLM providers through [LangChain](https://python.langchain.com/).
+
+```python
+from pyworkflow_agents import ChatModel, TokenUsageTracker
+from langchain_anthropic import ChatAnthropic
+
+# Create any LangChain chat model
+llm: ChatModel = ChatAnthropic(model="claude-sonnet-4-20250514")
+
+# Track token usage across calls
+tracker = TokenUsageTracker()
+llm_with_tracking = ChatAnthropic(model="claude-sonnet-4-20250514", callbacks=[tracker])
+```
+
+<Note>
+  `pyworkflow_agents` is an **optional module** — it lives alongside the core `pyworkflow` package and is installed separately. Your existing workflows work without it.
+</Note>
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="No Custom Abstractions" icon="plug">
+    Uses LangChain's `BaseChatModel` directly. Bring your own `ChatAnthropic`, `ChatOpenAI`, or any LangChain-compatible model.
+  </Card>
+  <Card title="Token Tracking" icon="chart-bar">
+    Built-in callback handler that tracks input/output tokens across multiple LLM calls, supporting OpenAI and Anthropic response formats.
+  </Card>
+  <Card title="Graceful Degradation" icon="shield-check">
+    Exceptions are always importable, even without `langchain-core`. The module never crashes if optional dependencies are missing.
+  </Card>
+  <Card title="Provider Flexibility" icon="shuffle">
+    Switch between Anthropic, OpenAI, Google, Ollama, or any LangChain provider with a single line change.
+  </Card>
+</CardGroup>
+
+## Architecture
+
+PyWorkflow Agents sits on top of the core PyWorkflow engine:
+
+```
+Your Application
+    ↓
+pyworkflow_agents        ← LLM types, token tracking, agent exceptions
+    ↓
+langchain-core           ← Chat models, messages, callbacks
+    ↓
+pyworkflow               ← Durable workflow orchestration
+    ↓
+Celery + Storage         ← Distributed execution + persistence
+```
+
+The `pyworkflow_agents` module depends on `pyworkflow` (for the base `WorkflowError` class) but is **not** a submodule of it. This keeps the core engine lightweight for users who don't need LLM capabilities.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/agents/installation">
+    Install pyworkflow_agents with your preferred LLM provider.
+  </Card>
+  <Card title="Token Tracking" icon="chart-line" href="/agents/token-tracking">
+    Track and accumulate token usage across LLM calls.
+  </Card>
+  <Card title="Error Handling" icon="triangle-exclamation" href="/agents/error-handling">
+    Handle provider errors and missing dependencies gracefully.
+  </Card>
+</CardGroup>

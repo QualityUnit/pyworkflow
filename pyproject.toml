@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.poetry]
-packages = [{include = "pyworkflow"}]
+packages = [{include = "pyworkflow"}, {include = "pyworkflow_agents"}]
 
 [project]
 name = "pyworkflow-engine"
@@ -88,6 +88,20 @@ all = [
     "cassandra-driver>=3.29.0",
 ]
 
+# Agent LLM providers
+agents = ["langchain-core>=1.0.0,<3.0.0"]
+agents-anthropic = ["langchain-core>=1.0.0,<3.0.0", "langchain-anthropic>=1.0.0,<3.0.0"]
+agents-openai = ["langchain-core>=1.0.0,<3.0.0", "langchain-openai>=1.0.0,<3.0.0"]
+agents-google = ["langchain-core>=1.0.0,<3.0.0", "langchain-google-genai>=2.0.0,<6.0.0"]
+agents-ollama = ["langchain-core>=1.0.0,<3.0.0", "langchain-ollama>=0.3.0,<3.0.0"]
+agents-all = [
+    "langchain-core>=1.0.0,<3.0.0",
+    "langchain-anthropic>=1.0.0,<3.0.0",
+    "langchain-openai>=1.0.0,<3.0.0",
+    "langchain-google-genai>=2.0.0,<6.0.0",
+    "langchain-ollama>=0.3.0,<3.0.0",
+]
+
 # Development dependencies
 dev = [
     # Testing
@@ -116,6 +130,9 @@ dev = [
     "redis>=5.0.0",
     "aiosqlite>=0.19.0",
     "asyncpg>=0.29.0",
+
+    # Agent dependencies for development
+    "langchain-core>=1.0.0,<3.0.0",
 ]
 
 [project.urls]
@@ -251,6 +268,11 @@ module = [
     "InquirerPy.*",
     "prompt_toolkit.*",
     "yaml.*",
+    "langchain_core.*",
+    "langchain_anthropic.*",
+    "langchain_openai.*",
+    "langchain_google_genai.*",
+    "langchain_ollama.*",
 ]
 ignore_missing_imports = true
 

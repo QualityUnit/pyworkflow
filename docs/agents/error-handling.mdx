@@ -1,0 +1,121 @@
+---
+title: 'Error Handling'
+description: 'Handle provider errors and missing dependencies gracefully'
+---
+
+## Exception Hierarchy
+
+PyWorkflow Agents defines three exception classes that integrate with the core PyWorkflow error hierarchy:
+
+```
+WorkflowError (pyworkflow)
+└── AgentError
+    └── ProviderError
+        └── ProviderNotInstalledError
+```
+
+All agent exceptions inherit from `WorkflowError`, so existing error handling in your workflows automatically catches agent-related errors too.
+
+<Note>
+  Agent exceptions are **always importable** — they do not require `langchain-core` or any provider packages.
+</Note>
+
+## AgentError
+
+Base exception for all agent-related errors. Use it as a catch-all for any error originating from the agents module.
+
+```python
+from pyworkflow_agents import AgentError
+
+try:
+    result = await run_agent(task)
+except AgentError as e:
+    print(f"Agent failed: {e}")
+```
+
+## ProviderError
+
+Raised when an LLM provider returns an error. Includes a `provider` attribute identifying which provider caused the issue.
+
+```python
+from pyworkflow_agents import ProviderError
+
+try:
+    response = await call_llm(prompt)
+except ProviderError as e:
+    print(f"Provider '{e.provider}' failed: {e}")
+    # Provider 'anthropic' failed: Rate limit exceeded
+```
+
+### Creating ProviderError
+
+```python
+from pyworkflow_agents import ProviderError
+
+# With provider name
+raise ProviderError("Rate limit exceeded", provider="anthropic")
+
+# Without provider name
+raise ProviderError("Unknown LLM error")
+```
+
+## ProviderNotInstalledError
+
+Raised when a required provider package is missing. The error message includes the exact `pip install` command to resolve the issue.
+
+```python
+from pyworkflow_agents import ProviderNotInstalledError
+
+try:
+    from langchain_anthropic import ChatAnthropic
+except ImportError:
+    raise ProviderNotInstalledError("anthropic", "langchain-anthropic")
+    # LLM provider 'anthropic' requires the 'langchain-anthropic' package.
+    # Install it with: pip install 'pyworkflow-engine[agents-anthropic]'
+```
+
+### Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `provider` | `str` | Provider name (e.g. `"anthropic"`, `"openai"`) |
+| `package` | `str` | Missing package name (e.g. `"langchain-anthropic"`) |
+
+## Usage in Workflows
+
+Combine agent exceptions with PyWorkflow's built-in error handling for fault-tolerant LLM workflows:
+
+```python
+from pyworkflow import workflow, step, RetryableError, FatalError
+from pyworkflow_agents import ProviderError
+
+@step(max_retries=3, retry_delay="exponential")
+async def call_llm(prompt: str):
+    try:
+        response = await llm.ainvoke(prompt)
+        return response.content
+    except ProviderError as e:
+        if "rate limit" in str(e).lower():
+            raise RetryableError("LLM rate limited", retry_after="30s")
+        raise FatalError(f"LLM provider error: {e}")
+
+@workflow()
+async def ai_workflow(task: str):
+    result = await call_llm(task)
+    return result
+```
+
+<Tip>
+  Since `AgentError` inherits from `WorkflowError`, you can catch all workflow and agent errors uniformly with `except WorkflowError`.
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Agents Overview" icon="robot" href="/agents/overview">
+    Learn about the pyworkflow_agents module architecture.
+  </Card>
+  <Card title="Token Tracking" icon="chart-line" href="/agents/token-tracking">
+    Track token usage across LLM calls.
+  </Card>
+</CardGroup>

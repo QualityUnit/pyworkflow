@@ -67,6 +67,15 @@
       ]
     },
     {
+      "group": "Agents",
+      "pages": [
+        "agents/overview",
+        "agents/installation",
+        "agents/token-tracking",
+        "agents/error-handling"
+      ]
+    },
+    {
       "group": "Guides",
       "pages": [
         "guides/configuration",

@@ -12,6 +12,7 @@ Exceptions are always importable. Types and token tracking require langchain-cor
 
 from pyworkflow_agents.exceptions import (
     AgentError,
+    AgentPause,
     ProviderError,
     ProviderNotInstalledError,
 )
@@ -19,6 +20,7 @@ from pyworkflow_agents.exceptions import (
 __all__ = [
     # Exceptions (always available)
     "AgentError",
+    "AgentPause",
     "ProviderError",
     "ProviderNotInstalledError",
 ]

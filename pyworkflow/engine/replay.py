@@ -99,6 +99,15 @@ class EventReplayer:
         elif event.type == EventType.AGENT_TOOL_RESULT:
             await self._apply_agent_tool_result(ctx, event)
 
+        elif event.type in (
+            EventType.AGENT_PAUSED,
+            EventType.AGENT_RESUMED,
+            EventType.AGENT_APPROVAL_REQUESTED,
+            EventType.AGENT_APPROVAL_RECEIVED,
+        ):
+            # Informational events — actual state is handled by HOOK_CREATED/HOOK_RECEIVED
+            pass
+
         # Other event types don't affect replay state
         # (workflow_started, step_started, step_failed, etc. are informational)
 

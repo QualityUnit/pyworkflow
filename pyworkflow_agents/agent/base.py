@@ -5,6 +5,7 @@ Agent base class (OOP API) for pyworkflow agents.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -28,6 +29,10 @@ class Agent(ABC):
     max_iterations: int = 10
     name: str | None = None
     record_events: bool = True
+    parallel_tool_calls: bool = True
+    require_approval: bool | list[str] | Callable[[str, dict], bool] | None = None
+    approval_handler: Callable[[list[dict]], Awaitable[list[dict]]] | None = None
+    on_agent_action: Callable | None = None
 
     @abstractmethod
     async def run(self, *args: Any, **kwargs: Any) -> str | list:
@@ -68,6 +73,10 @@ class Agent(ABC):
             agent_name=self._get_name(),
             record_events=self.record_events,
             run_id=run_id,
+            parallel_tool_calls=self.parallel_tool_calls,
+            require_approval=self.require_approval,
+            approval_handler=self.approval_handler,
+            on_agent_action=self.on_agent_action,
         )
 
     def _get_name(self) -> str:

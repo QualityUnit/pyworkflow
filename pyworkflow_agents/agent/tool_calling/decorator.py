@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import functools
 import inspect
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -25,6 +25,10 @@ def tool_calling_agent(
     max_iterations: int = 10,
     name: str | None = None,
     record_events: bool = True,
+    parallel_tool_calls: bool = True,
+    require_approval: bool | list[str] | Callable[[str, dict], bool] | None = None,
+    approval_handler: Callable[[list[dict]], Awaitable[list[dict]]] | None = None,
+    on_agent_action: Callable | None = None,
 ) -> Any:
     """
     Decorator to turn a function into a tool-calling agent.
@@ -76,6 +80,10 @@ def tool_calling_agent(
                 agent_name=actual_name,
                 record_events=record_events,
                 run_id=run_id,
+                parallel_tool_calls=parallel_tool_calls,
+                require_approval=require_approval,
+                approval_handler=approval_handler,
+                on_agent_action=on_agent_action,
             )
 
         wrapper.__agent__ = True  # type: ignore[attr-defined]

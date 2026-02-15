@@ -12,8 +12,10 @@ Supports three execution modes (auto-detected):
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -21,6 +23,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.tools import BaseTool
 
 from pyworkflow_agents.agent.types import AgentResult
+from pyworkflow_agents.exceptions import AgentPause
 from pyworkflow_agents.token_tracking import TokenUsage, TokenUsageTracker
 from pyworkflow_agents.tools.base import ToolResult
 from pyworkflow_agents.tools.registry import ToolRegistry
@@ -47,11 +50,35 @@ async def run_tool_calling_loop(
     agent_name: str = "",
     record_events: bool = True,
     run_id: str | None = None,
+    parallel_tool_calls: bool = True,
+    require_approval: bool | list[str] | Callable[[str, dict], bool] | None = None,
+    approval_handler: Callable[[list[dict]], Awaitable[list[dict]]] | None = None,
+    on_agent_action: Callable[[int, AIMessage, list], Awaitable[str | AgentPause | None]] | None = None,
 ) -> AgentResult:
     """Run a tool-calling agent loop: LLM responds, optionally calls tools, repeats until done.
 
     In durable mode (workflow context with storage), LLM responses are cached for
     deterministic replay and tool calls are recorded as workflow steps.
+
+    Args:
+        model: The LLM to use for generating responses.
+        input: The initial prompt string or list of messages.
+        tools: Tools available to the agent.
+        system_prompt: System prompt override.
+        max_iterations: Maximum number of LLM call iterations.
+        agent_id: Explicit agent identifier (auto-generated if empty).
+        agent_name: Human-readable agent name.
+        record_events: Whether to record events to storage.
+        run_id: Explicit run ID (auto-detected from context if None).
+        parallel_tool_calls: Execute multiple tool calls concurrently (default True).
+        require_approval: Filter for which tool calls need human approval before execution.
+            None = no approval needed (default), True = all tools, list[str] = named tools,
+            callable = dynamic filter receiving (tool_name, tool_args).
+        approval_handler: Async callback for standalone/transient mode approval.
+            Receives list of tool call dicts, returns list of decision dicts.
+        on_agent_action: Async callback invoked after each LLM response.
+            Receives (iteration, response, messages). Returns None to continue,
+            str to inject as HumanMessage, or AgentPause to suspend.
     """
 
     # Detect workflow context and execution mode
@@ -101,6 +128,51 @@ async def run_tool_calling_loop(
     last_response = None
 
     for iteration in range(max_iterations):
+        # =================================================================
+        # Pause/Resume checkpoint — on_agent_action callback
+        # =================================================================
+        if iteration > 0 and on_agent_action is not None:
+            action_result = await on_agent_action(iteration, last_response, messages)
+            if isinstance(action_result, AgentPause):
+                if is_durable and ctx is not None:
+                    # Durable: suspend via hook
+                    await _record_event(
+                        run_id,
+                        _import_create_agent_paused_event(),
+                        agent_id=agent_id,
+                        iteration=iteration,
+                        reason=action_result.reason,
+                    )
+                    from pyworkflow.primitives.hooks import hook
+
+                    payload = await hook(
+                        f"agent_pause_{agent_id}_{iteration}",
+                        timeout=None,
+                    )
+                    await _record_event(
+                        run_id,
+                        _import_create_agent_resumed_event(),
+                        agent_id=agent_id,
+                        iteration=iteration,
+                        message=payload.get("message") if isinstance(payload, dict) else None,
+                    )
+                    injected_msg = payload.get("message", "") if isinstance(payload, dict) else str(payload)
+                    if injected_msg:
+                        messages.append(HumanMessage(content=injected_msg))
+                else:
+                    # Standalone: return partial result
+                    return AgentResult(
+                        content=last_response.content if last_response and hasattr(last_response, "content") else "",
+                        messages=messages,
+                        tool_calls_made=tool_calls_count,
+                        token_usage=total_usage,
+                        iterations=iteration,
+                        finish_reason="paused",
+                        agent_id=agent_id,
+                    )
+            elif isinstance(action_result, str):
+                messages.append(HumanMessage(content=action_result))
+
         # =================================================================
         # LLM Call — durable mode checks cache first
         # =================================================================
@@ -192,52 +264,124 @@ async def run_tool_calling_loop(
             # Append AI message (with tool_calls) BEFORE ToolMessages
             messages.append(response)
 
-            for tc in response_tool_calls:
-                tc_name = tc["name"]
-                tc_args = tc["args"]
-                tc_id = tc["id"]
+            # =============================================================
+            # HITL checkpoint — check approval before executing tools
+            # =============================================================
+            tools_to_execute = list(response_tool_calls)
 
-                if is_durable and ctx is not None:
-                    # Durable mode: execute as step with caching
-                    tool_result = await _execute_tool_as_step(
-                        ctx, registry, agent_id, iteration,
-                        tc_name, tc_args, tc_id, run_id,
+            if require_approval is not None:
+                pending = _get_tools_needing_approval(response_tool_calls, require_approval)
+
+                if pending:
+                    # Get approval decisions
+                    decisions = await _get_approval_decisions(
+                        ctx=ctx,
+                        is_durable=is_durable,
+                        run_id=run_id,
+                        agent_id=agent_id,
+                        iteration=iteration,
+                        pending=pending,
+                        approval_handler=approval_handler,
+                        record_events=record_events,
                     )
-                else:
-                    # Non-durable: execute directly
-                    if record_events:
-                        await _record_event(
-                            run_id,
-                            _import_create_agent_tool_call_event(),
+
+                    if decisions is None:
+                        # Standalone without handler — return partial result
+                        return AgentResult(
+                            content="",
+                            messages=messages,
+                            tool_calls_made=tool_calls_count,
+                            token_usage=total_usage,
+                            iterations=iteration + 1,
+                            finish_reason="approval_required",
                             agent_id=agent_id,
-                            iteration=iteration,
-                            tool_call_id=tc_id,
-                            tool_name=tc_name,
-                            tool_args=tc_args,
+                            pending_tool_calls=pending,
                         )
 
-                    tool_result = await registry.execute(tc_name, tc_args, tc_id)
+                    # Apply decisions
+                    tools_to_execute, feedback = _apply_approval_decisions(
+                        response_tool_calls, decisions,
+                    )
 
-                    if record_events:
-                        await _record_event(
-                            run_id,
-                            _import_create_agent_tool_result_event(),
-                            agent_id=agent_id,
-                            iteration=iteration,
-                            tool_call_id=tc_id,
-                            tool_name=tc_name,
-                            result=str(tool_result.result) if not tool_result.is_error else tool_result.error,
-                            is_error=tool_result.is_error,
-                            duration_ms=tool_result.duration_ms,
+                    # Add rejection feedback as HumanMessage
+                    for fb in feedback:
+                        messages.append(HumanMessage(content=fb))
+
+                    # If all rejected, continue loop for next LLM call
+                    if not tools_to_execute:
+                        last_response = response
+                        continue
+
+            # =============================================================
+            # Execute tools — parallel or sequential
+            # =============================================================
+            if parallel_tool_calls and len(tools_to_execute) > 1:
+                tool_results = await _execute_tools_parallel(
+                    ctx=ctx,
+                    is_durable=is_durable,
+                    registry=registry,
+                    agent_id=agent_id,
+                    iteration=iteration,
+                    tool_calls=tools_to_execute,
+                    run_id=run_id,
+                    record_events=record_events,
+                )
+                for tc, tool_result in zip(tools_to_execute, tool_results, strict=True):
+                    tc_id = tc["id"]
+                    if tool_result.is_error:
+                        content = f"Error: {tool_result.error}"
+                    else:
+                        content = str(tool_result.result)
+                    messages.append(ToolMessage(content=content, tool_call_id=tc_id))
+                    tool_calls_count += 1
+            else:
+                # Sequential execution
+                for tc in tools_to_execute:
+                    tc_name = tc["name"]
+                    tc_args = tc["args"]
+                    tc_id = tc["id"]
+
+                    if is_durable and ctx is not None:
+                        # Durable mode: execute as step with caching
+                        tool_result = await _execute_tool_as_step(
+                            ctx, registry, agent_id, iteration,
+                            tc_name, tc_args, tc_id, run_id,
                         )
+                    else:
+                        # Non-durable: execute directly
+                        if record_events:
+                            await _record_event(
+                                run_id,
+                                _import_create_agent_tool_call_event(),
+                                agent_id=agent_id,
+                                iteration=iteration,
+                                tool_call_id=tc_id,
+                                tool_name=tc_name,
+                                tool_args=tc_args,
+                            )
 
-                # Build ToolMessage
-                if tool_result.is_error:
-                    content = f"Error: {tool_result.error}"
-                else:
-                    content = str(tool_result.result)
-                messages.append(ToolMessage(content=content, tool_call_id=tc_id))
-                tool_calls_count += 1
+                        tool_result = await registry.execute(tc_name, tc_args, tc_id)
+
+                        if record_events:
+                            await _record_event(
+                                run_id,
+                                _import_create_agent_tool_result_event(),
+                                agent_id=agent_id,
+                                iteration=iteration,
+                                tool_call_id=tc_id,
+                                tool_name=tc_name,
+                                result=str(tool_result.result) if not tool_result.is_error else tool_result.error,
+                                is_error=tool_result.is_error,
+                                duration_ms=tool_result.duration_ms,
+                            )
+
+                    # Build ToolMessage
+                    if tool_result.is_error:
+                        content = f"Error: {tool_result.error}"
+                    else:
+                        content = str(tool_result.result)
+                    messages.append(ToolMessage(content=content, tool_call_id=tc_id))
+                    tool_calls_count += 1
 
             # Continue loop for next LLM call
             last_response = response
@@ -482,6 +626,227 @@ async def _execute_tool_as_step(
 
 
 # ---------------------------------------------------------------------------
+# Parallel tool execution
+# ---------------------------------------------------------------------------
+
+
+async def _execute_tools_parallel(
+    ctx: Any,
+    is_durable: bool,
+    registry: ToolRegistry,
+    agent_id: str,
+    iteration: int,
+    tool_calls: list[dict[str, Any]],
+    run_id: str | None,
+    record_events: bool,
+) -> list[ToolResult]:
+    """Execute multiple tool calls concurrently via asyncio.gather().
+
+    Returns results in the same order as tool_calls. Exceptions are caught
+    and converted to error ToolResults so the loop can continue.
+    """
+
+    async def _run_one(tc: dict[str, Any]) -> ToolResult:
+        tc_name = tc["name"]
+        tc_args = tc["args"]
+        tc_id = tc["id"]
+
+        try:
+            if is_durable and ctx is not None:
+                return await _execute_tool_as_step(
+                    ctx, registry, agent_id, iteration,
+                    tc_name, tc_args, tc_id, run_id,
+                )
+            else:
+                if record_events:
+                    await _record_event(
+                        run_id,
+                        _import_create_agent_tool_call_event(),
+                        agent_id=agent_id,
+                        iteration=iteration,
+                        tool_call_id=tc_id,
+                        tool_name=tc_name,
+                        tool_args=tc_args,
+                    )
+
+                result = await registry.execute(tc_name, tc_args, tc_id)
+
+                if record_events:
+                    await _record_event(
+                        run_id,
+                        _import_create_agent_tool_result_event(),
+                        agent_id=agent_id,
+                        iteration=iteration,
+                        tool_call_id=tc_id,
+                        tool_name=tc_name,
+                        result=str(result.result) if not result.is_error else result.error,
+                        is_error=result.is_error,
+                        duration_ms=result.duration_ms,
+                    )
+                return result
+        except Exception as exc:
+            return ToolResult(
+                tool_name=tc_name,
+                tool_call_id=tc_id,
+                result=None,
+                error=str(exc),
+                duration_ms=0,
+                is_error=True,
+            )
+
+    results = await asyncio.gather(*[_run_one(tc) for tc in tool_calls])
+    return list(results)
+
+
+# ---------------------------------------------------------------------------
+# HITL (Human-in-the-Loop) helpers
+# ---------------------------------------------------------------------------
+
+
+def _check_approval_needed(
+    tool_calls: list[dict[str, Any]],
+    require_approval: bool | list[str] | Callable[[str, dict], bool],
+) -> bool:
+    """Check if any tool calls in the batch need approval."""
+    return len(_get_tools_needing_approval(tool_calls, require_approval)) > 0
+
+
+def _get_tools_needing_approval(
+    tool_calls: list[dict[str, Any]],
+    require_approval: bool | list[str] | Callable[[str, dict], bool],
+) -> list[dict]:
+    """Return the subset of tool calls that need human approval.
+
+    Returns list of dicts: [{"tool_call_id": ..., "tool_name": ..., "tool_args": ...}]
+    """
+    pending = []
+    for tc in tool_calls:
+        tc_name = tc["name"]
+        tc_args = tc["args"]
+        tc_id = tc["id"]
+
+        needs_approval = False
+        if require_approval is True:
+            needs_approval = True
+        elif isinstance(require_approval, list):
+            needs_approval = tc_name in require_approval
+        elif callable(require_approval):
+            needs_approval = require_approval(tc_name, tc_args)
+
+        if needs_approval:
+            pending.append({
+                "tool_call_id": tc_id,
+                "tool_name": tc_name,
+                "tool_args": tc_args,
+            })
+    return pending
+
+
+async def _get_approval_decisions(
+    ctx: Any,
+    is_durable: bool,
+    run_id: str | None,
+    agent_id: str,
+    iteration: int,
+    pending: list[dict],
+    approval_handler: Callable[[list[dict]], Awaitable[list[dict]]] | None,
+    record_events: bool,
+) -> list[dict] | None:
+    """Get approval decisions for pending tool calls.
+
+    Returns:
+        List of decision dicts, or None if standalone without handler.
+    """
+    if is_durable and ctx is not None:
+        # Record approval requested event
+        if record_events:
+            await _record_event(
+                run_id,
+                _import_create_agent_approval_requested_event(),
+                agent_id=agent_id,
+                iteration=iteration,
+                tool_calls=pending,
+            )
+
+        # Suspend via hook — workflow suspends until external resume
+        from pyworkflow.primitives.hooks import hook
+
+        payload = await hook(
+            f"agent_approval_{agent_id}_{iteration}",
+            timeout=None,
+        )
+
+        decisions = payload.get("decisions", []) if isinstance(payload, dict) else []
+
+        # Record approval received event
+        if record_events:
+            await _record_event(
+                run_id,
+                _import_create_agent_approval_received_event(),
+                agent_id=agent_id,
+                iteration=iteration,
+                decisions=decisions,
+            )
+
+        return decisions
+
+    elif approval_handler is not None:
+        # Standalone/transient with callback
+        return await approval_handler(pending)
+
+    else:
+        # Standalone without handler — return None to signal partial result
+        return None
+
+
+def _apply_approval_decisions(
+    tool_calls: list[dict[str, Any]],
+    decisions: list[dict],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Apply approval decisions to tool calls.
+
+    Returns:
+        (approved_tool_calls, feedback_messages) where:
+        - approved_tool_calls: Tool calls to execute (approved + modified)
+        - feedback_messages: Rejection feedback strings
+    """
+    # Build decision lookup by tool_call_id
+    decision_map: dict[str, dict] = {}
+    for d in decisions:
+        tc_id = d.get("tool_call_id")
+        if tc_id:
+            decision_map[tc_id] = d
+
+    approved = []
+    feedback = []
+
+    for tc in tool_calls:
+        tc_id = tc["id"]
+        decision = decision_map.get(tc_id)
+
+        if decision is None:
+            # No decision for this tool call — it wasn't in the pending list, keep it
+            approved.append(tc)
+            continue
+
+        action = decision.get("action", "approve")
+
+        if action == "approve":
+            approved.append(tc)
+        elif action == "modify":
+            modified_args = decision.get("modified_args", tc["args"])
+            approved.append({**tc, "args": modified_args})
+        elif action == "reject":
+            fb = decision.get("feedback")
+            if fb:
+                feedback.append(f"Tool '{tc['name']}' was rejected: {fb}")
+            else:
+                feedback.append(f"Tool '{tc['name']}' was rejected by human reviewer.")
+
+    return approved, feedback
+
+
+# ---------------------------------------------------------------------------
 # General helpers
 # ---------------------------------------------------------------------------
 
@@ -590,5 +955,37 @@ def _import_create_agent_completed_event() -> Any:
     try:
         from pyworkflow.engine.events import create_agent_completed_event
         return create_agent_completed_event
+    except ImportError:
+        return None
+
+
+def _import_create_agent_paused_event() -> Any:
+    try:
+        from pyworkflow.engine.events import create_agent_paused_event
+        return create_agent_paused_event
+    except ImportError:
+        return None
+
+
+def _import_create_agent_resumed_event() -> Any:
+    try:
+        from pyworkflow.engine.events import create_agent_resumed_event
+        return create_agent_resumed_event
+    except ImportError:
+        return None
+
+
+def _import_create_agent_approval_requested_event() -> Any:
+    try:
+        from pyworkflow.engine.events import create_agent_approval_requested_event
+        return create_agent_approval_requested_event
+    except ImportError:
+        return None
+
+
+def _import_create_agent_approval_received_event() -> Any:
+    try:
+        from pyworkflow.engine.events import create_agent_approval_received_event
+        return create_agent_approval_received_event
     except ImportError:
         return None

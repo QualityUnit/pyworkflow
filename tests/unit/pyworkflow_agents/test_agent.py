@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from pyworkflow_agents.agent import AgentResult, Agent, agent, run_agent_loop  # noqa: E402
 from pyworkflow_agents.agent import DEFAULT_SYSTEM_PROMPT, tool_calling_agent, run_tool_calling_loop  # noqa: E402
+from pyworkflow_agents.exceptions import AgentPause  # noqa: E402
 from pyworkflow_agents.token_tracking import TokenUsage  # noqa: E402
 from pyworkflow_agents.tools import ToolRegistry  # noqa: E402
 
@@ -486,3 +487,490 @@ class TestAgentBaseClass:
 
         a = MyAgent()
         assert a._get_name() == "explicit_name"
+
+
+# ---------------------------------------------------------------------------
+# Parallel tool calls tests
+# ---------------------------------------------------------------------------
+
+
+def _multi_tool_call_response(calls):
+    """AIMessage with multiple tool calls."""
+    return AIMessage(content="", tool_calls=calls)
+
+
+def _make_multi_registry():
+    """Create a ToolRegistry with two tools for parallel testing."""
+    from langchain_core.tools import StructuredTool
+
+    def tool_a(x: int) -> str:
+        """Tool A."""
+        return f"a_{x}"
+
+    def tool_b(y: str) -> str:
+        """Tool B."""
+        return f"b_{y}"
+
+    ta = StructuredTool.from_function(tool_a, name="tool_a", description="Tool A")
+    tb = StructuredTool.from_function(tool_b, name="tool_b", description="Tool B")
+    registry = ToolRegistry()
+    registry.register(ta)
+    registry.register(tb)
+    return registry
+
+
+class TestParallelToolCalls:
+    """Tests for parallel tool execution."""
+
+    @pytest.mark.asyncio
+    async def test_parallel_execution_with_multiple_tools(self):
+        """Multiple tool calls execute concurrently when parallel_tool_calls=True."""
+        registry = _make_multi_registry()
+        model = MockModel([
+            _multi_tool_call_response([
+                {"name": "tool_a", "args": {"x": 1}, "id": "call_a"},
+                {"name": "tool_b", "args": {"y": "test"}, "id": "call_b"},
+            ]),
+            _simple_response("parallel done"),
+        ])
+        result = await run_tool_calling_loop(
+            model=model,
+            input="test",
+            tools=registry,
+            parallel_tool_calls=True,
+            record_events=False,
+        )
+        assert result.content == "parallel done"
+        assert result.tool_calls_made == 2
+
+        # Verify ToolMessages for both calls exist
+        tool_msgs = [m for m in result.messages if isinstance(m, ToolMessage)]
+        assert len(tool_msgs) == 2
+        contents = {m.content for m in tool_msgs}
+        assert "a_1" in contents
+        assert "b_test" in contents
+
+    @pytest.mark.asyncio
+    async def test_sequential_execution_when_disabled(self):
+        """Tool calls execute sequentially when parallel_tool_calls=False."""
+        registry = _make_multi_registry()
+        model = MockModel([
+            _multi_tool_call_response([
+                {"name": "tool_a", "args": {"x": 2}, "id": "call_a"},
+                {"name": "tool_b", "args": {"y": "seq"}, "id": "call_b"},
+            ]),
+            _simple_response("sequential done"),
+        ])
+        result = await run_tool_calling_loop(
+            model=model,
+            input="test",
+            tools=registry,
+            parallel_tool_calls=False,
+            record_events=False,
+        )
+        assert result.content == "sequential done"
+        assert result.tool_calls_made == 2
+
+    @pytest.mark.asyncio
+    async def test_single_tool_call_stays_sequential(self):
+        """Single tool call uses sequential path even with parallel_tool_calls=True."""
+        registry = _make_registry_with_tool()
+        model = MockModel([
+            _tool_call_response("my_tool", {"x": 1}, "call_1"),
+            _simple_response("done"),
+        ])
+        result = await run_tool_calling_loop(
+            model=model,
+            input="test",
+            tools=registry,
+            parallel_tool_calls=True,
+            record_events=False,
+        )
+        assert result.content == "done"
+        assert result.tool_calls_made == 1
+
+    @pytest.mark.asyncio
+    async def test_parallel_handles_tool_errors(self):
+        """Parallel execution converts exceptions to error ToolMessages."""
+        from langchain_core.tools import StructuredTool
+
+        def failing_tool(x: int) -> str:
+            """Fails."""
+            raise ValueError("boom")
+
+        def good_tool(x: int) -> str:
+            """Works."""
+            return f"ok_{x}"
+
+        ft = StructuredTool.from_function(failing_tool, name="failing_tool", description="Fails")
+        gt = StructuredTool.from_function(good_tool, name="good_tool", description="Works")
+        registry = ToolRegistry()
+        registry.register(ft)
+        registry.register(gt)
+
+        model = MockModel([
+            _multi_tool_call_response([
+                {"name": "failing_tool", "args": {"x": 1}, "id": "call_f"},
+                {"name": "good_tool", "args": {"x": 2}, "id": "call_g"},
+            ]),
+            _simple_response("recovered from parallel"),
+        ])
+        result = await run_tool_calling_loop(
+            model=model,
+            input="test",
+            tools=registry,
+            parallel_tool_calls=True,
+            record_events=False,
+        )
+        assert result.content == "recovered from parallel"
+        tool_msgs = [m for m in result.messages if isinstance(m, ToolMessage)]
+        assert len(tool_msgs) == 2
+        error_msgs = [m for m in tool_msgs if "Error:" in m.content]
+        assert len(error_msgs) == 1
+
+
+# ---------------------------------------------------------------------------
+# HITL (Human-in-the-Loop) tests
+# ---------------------------------------------------------------------------
+
+
+class TestHITLApproval:
+    """Tests for human-in-the-loop approval mechanism."""
+
+    @pytest.mark.asyncio
+    async def test_approval_required_true_with_handler_approve_all(self):
+        """require_approval=True + approval_handler that approves all."""
+        registry = _make_registry_with_tool()
+
+        async def approve_all(pending):
+            return [{"tool_call_id": p["tool_call_id"], "action": "approve"} for p in pending]
+
+        model = MockModel([
+            _tool_call_response("my_tool", {"x": 1}, "call_1"),
+            _simple_response("approved done"),
+        ])
+        result = await run_tool_calling_loop(
+            model=model,
+            input="test",
+            tools=registry,
+            require_approval=True,
+            approval_handler=approve_all,
+            record_events=False,
+        )
+        assert result.content == "approved done"
+        assert result.tool_calls_made == 1
+        assert result.finish_reason == "stop"
+
+    @pytest.mark.asyncio
+    async def test_approval_required_true_with_handler_reject_all(self):
+        """require_approval=True + handler rejects all — LLM sees feedback."""
+        registry = _make_registry_with_tool()
+
+        async def reject_all(pending):
+            return [
+                {"tool_call_id": p["tool_call_id"], "action": "reject", "feedback": "Not allowed"}
+                for p in pending
+            ]
+
+        model = MockModel([
+            _tool_call_response("my_tool", {"x": 1}, "call_1"),
+            _simple_response("ok understood"),
+        ])
+        result = await run_tool_calling_loop(
+            model=model,
+            input="test",
+            tools=registry,
+            require_approval=True,
+            approval_handler=reject_all,
+            record_events=False,
+        )
+        assert result.content == "ok understood"
+        assert result.tool_calls_made == 0
+        # Check feedback message was injected
+        human_msgs = [m for m in result.messages if isinstance(m, HumanMessage)]
+        feedback_msgs = [m for m in human_msgs if "rejected" in m.content.lower()]
+        assert len(feedback_msgs) == 1
+
+    @pytest.mark.asyncio
+    async def test_approval_required_true_no_handler_returns_partial(self):
+        """require_approval=True without handler returns approval_required."""
+        registry = _make_registry_with_tool()
+        model = MockModel([
+            _tool_call_response("my_tool", {"x": 1}, "call_1"),
+        ])
+        result = await run_tool_calling_loop(
+            model=model,
+            input="test",
+            tools=registry,
+            require_approval=True,
+            record_events=False,
+        )
+        assert result.finish_reason == "approval_required"
+        assert result.pending_tool_calls is not None
+        assert len(result.pending_tool_calls) == 1
+        assert result.pending_tool_calls[0]["tool_name"] == "my_tool"
+
+    @pytest.mark.asyncio
+    async def test_approval_by_tool_name_list(self):
+        """require_approval=['my_tool'] filters only named tools."""
+        registry = _make_multi_registry()
+
+        approvals_received = []
+
+        async def track_handler(pending):
+            approvals_received.extend(pending)
+            return [{"tool_call_id": p["tool_call_id"], "action": "approve"} for p in pending]
+
+        model = MockModel([
+            _multi_tool_call_response([
+                {"name": "tool_a", "args": {"x": 1}, "id": "call_a"},
+                {"name": "tool_b", "args": {"y": "test"}, "id": "call_b"},
+            ]),
+            _simple_response("partial approval done"),
+        ])
+        result = await run_tool_calling_loop(
+            model=model,
+            input="test",
+            tools=registry,
+            require_approval=["tool_a"],
+            approval_handler=track_handler,
+            record_events=False,
+        )
+        assert result.content == "partial approval done"
+        # Only tool_a should have been sent for approval
+        assert len(approvals_received) == 1
+        assert approvals_received[0]["tool_name"] == "tool_a"
+
+    @pytest.mark.asyncio
+    async def test_approval_by_callable_filter(self):
+        """require_approval as callable filters dynamically."""
+        registry = _make_registry_with_tool()
+
+        async def approve_all(pending):
+            return [{"tool_call_id": p["tool_call_id"], "action": "approve"} for p in pending]
+
+        model = MockModel([
+            _tool_call_response("my_tool", {"x": 1}, "call_1"),
+            _simple_response("callable filter done"),
+        ])
+        result = await run_tool_calling_loop(
+            model=model,
+            input="test",
+            tools=registry,
+            require_approval=lambda name, args: name == "my_tool",
+            approval_handler=approve_all,
+            record_events=False,
+        )
+        assert result.content == "callable filter done"
+        assert result.tool_calls_made == 1
+
+    @pytest.mark.asyncio
+    async def test_approval_modify_args(self):
+        """Handler can modify tool args before execution."""
+        registry = _make_registry_with_tool()
+
+        async def modify_handler(pending):
+            return [
+                {
+                    "tool_call_id": p["tool_call_id"],
+                    "action": "modify",
+                    "modified_args": {"x": 99},
+                }
+                for p in pending
+            ]
+
+        model = MockModel([
+            _tool_call_response("my_tool", {"x": 1}, "call_1"),
+            _simple_response("modified done"),
+        ])
+        result = await run_tool_calling_loop(
+            model=model,
+            input="test",
+            tools=registry,
+            require_approval=True,
+            approval_handler=modify_handler,
+            record_events=False,
+        )
+        assert result.content == "modified done"
+        assert result.tool_calls_made == 1
+        # Verify the tool was called with modified args (result_99)
+        tool_msgs = [m for m in result.messages if isinstance(m, ToolMessage)]
+        assert any("result_99" in m.content for m in tool_msgs)
+
+    @pytest.mark.asyncio
+    async def test_no_approval_needed_skips_handler(self):
+        """When require_approval=None, handler is never called."""
+        registry = _make_registry_with_tool()
+        handler_called = False
+
+        async def should_not_be_called(pending):
+            nonlocal handler_called
+            handler_called = True
+            return []
+
+        model = MockModel([
+            _tool_call_response("my_tool", {"x": 1}, "call_1"),
+            _simple_response("no approval"),
+        ])
+        result = await run_tool_calling_loop(
+            model=model,
+            input="test",
+            tools=registry,
+            require_approval=None,
+            approval_handler=should_not_be_called,
+            record_events=False,
+        )
+        assert result.content == "no approval"
+        assert not handler_called
+
+
+# ---------------------------------------------------------------------------
+# Pause/Resume (on_agent_action) tests
+# ---------------------------------------------------------------------------
+
+
+class TestPauseResume:
+    """Tests for on_agent_action callback (pause/resume/steering)."""
+
+    @pytest.mark.asyncio
+    async def test_inject_message_via_callback(self):
+        """on_agent_action returning str injects HumanMessage."""
+        registry = _make_registry_with_tool()
+        model = MockModel([
+            _tool_call_response("my_tool", {"x": 1}, "call_1"),
+            _simple_response("steered response"),
+        ])
+
+        async def steer(iteration, response, messages):
+            if iteration == 1:
+                return "Focus on X instead"
+            return None
+
+        result = await run_tool_calling_loop(
+            model=model,
+            input="test",
+            tools=registry,
+            on_agent_action=steer,
+            record_events=False,
+        )
+        assert result.content == "steered response"
+        # Verify the injected message is in the conversation
+        human_msgs = [m for m in result.messages if isinstance(m, HumanMessage)]
+        injected = [m for m in human_msgs if m.content == "Focus on X instead"]
+        assert len(injected) == 1
+
+    @pytest.mark.asyncio
+    async def test_callback_returning_none_continues(self):
+        """on_agent_action returning None continues normally."""
+        model = MockModel([_simple_response("normal")])
+
+        async def noop(iteration, response, messages):
+            return None
+
+        result = await run_tool_calling_loop(
+            model=model,
+            input="test",
+            on_agent_action=noop,
+            record_events=False,
+        )
+        assert result.content == "normal"
+
+    @pytest.mark.asyncio
+    async def test_agent_pause_standalone_returns_paused(self):
+        """AgentPause in standalone mode returns finish_reason='paused'."""
+        registry = _make_registry_with_tool()
+        model = MockModel([
+            _tool_call_response("my_tool", {"x": 1}, "call_1"),
+            _simple_response("should not reach"),
+        ])
+
+        async def pause_on_second(iteration, response, messages):
+            if iteration == 1:
+                return AgentPause(reason="user_pause")
+            return None
+
+        result = await run_tool_calling_loop(
+            model=model,
+            input="test",
+            tools=registry,
+            on_agent_action=pause_on_second,
+            record_events=False,
+        )
+        assert result.finish_reason == "paused"
+        assert result.iterations == 1
+
+    @pytest.mark.asyncio
+    async def test_callback_not_called_on_first_iteration(self):
+        """on_agent_action is NOT called on iteration 0."""
+        callback_calls = []
+
+        async def track_callback(iteration, response, messages):
+            callback_calls.append(iteration)
+            return None
+
+        registry = _make_registry_with_tool()
+        model = MockModel([
+            _tool_call_response("my_tool", {"x": 1}, "call_1"),
+            _simple_response("done"),
+        ])
+        result = await run_tool_calling_loop(
+            model=model,
+            input="test",
+            tools=registry,
+            on_agent_action=track_callback,
+            record_events=False,
+        )
+        assert result.content == "done"
+        # Callback should only be called for iteration 1, not 0
+        assert callback_calls == [1]
+
+
+# ---------------------------------------------------------------------------
+# AgentResult new fields tests
+# ---------------------------------------------------------------------------
+
+
+class TestAgentResultNewFields:
+    """Tests for new AgentResult fields: pause_token and pending_tool_calls."""
+
+    def test_default_values_are_none(self):
+        result = AgentResult(content="test")
+        assert result.pause_token is None
+        assert result.pending_tool_calls is None
+
+    def test_to_dict_excludes_none_fields(self):
+        result = AgentResult(content="test")
+        d = result.to_dict()
+        assert "pause_token" not in d
+        assert "pending_tool_calls" not in d
+
+    def test_to_dict_includes_when_set(self):
+        result = AgentResult(
+            content="test",
+            pause_token="tok_123",
+            pending_tool_calls=[{"tool_name": "x"}],
+        )
+        d = result.to_dict()
+        assert d["pause_token"] == "tok_123"
+        assert d["pending_tool_calls"] == [{"tool_name": "x"}]
+
+
+# ---------------------------------------------------------------------------
+# AgentPause sentinel tests
+# ---------------------------------------------------------------------------
+
+
+class TestAgentPauseSentinel:
+    """Tests for the AgentPause class."""
+
+    def test_default_reason(self):
+        pause = AgentPause()
+        assert pause.reason == "user_requested"
+
+    def test_custom_reason(self):
+        pause = AgentPause(reason="need_input")
+        assert pause.reason == "need_input"
+
+    def test_importable_from_top_level(self):
+        from pyworkflow_agents import AgentPause as AP
+        assert AP is AgentPause

@@ -27,6 +27,18 @@ class ProviderError(AgentError):
         self.provider = provider
 
 
+class AgentPause:
+    """Sentinel returned by on_agent_action to trigger durable pause.
+
+    When an ``on_agent_action`` callback returns an ``AgentPause`` instance,
+    the agent loop will suspend the workflow via a hook (durable mode) or
+    return a partial ``AgentResult`` (standalone mode).
+    """
+
+    def __init__(self, reason: str = "user_requested") -> None:
+        self.reason = reason
+
+
 class ProviderNotInstalledError(ProviderError):
     """
     Raised when the required LLM provider package is not installed.

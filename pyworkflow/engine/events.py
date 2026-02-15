@@ -73,6 +73,12 @@ class EventType(Enum):
     AGENT_COMPLETED = "agent.completed"
     AGENT_ERROR = "agent.error"
 
+    # Agent HITL and pause/resume events
+    AGENT_PAUSED = "agent.paused"
+    AGENT_RESUMED = "agent.resumed"
+    AGENT_APPROVAL_REQUESTED = "agent.approval_requested"
+    AGENT_APPROVAL_RECEIVED = "agent.approval_received"
+
     # Multi-agent events (future)
     AGENT_HANDOFF = "agent.handoff"
 
@@ -1211,6 +1217,130 @@ def create_agent_completed_event(
             "token_usage": token_usage,
             "finish_reason": finish_reason,
             "completed_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_agent_paused_event(
+    run_id: str,
+    agent_id: str,
+    iteration: int,
+    reason: str = "user_requested",
+) -> Event:
+    """Create an agent paused event.
+
+    Recorded when the agent loop suspends to wait for external input.
+
+    Args:
+        run_id: The workflow run ID
+        agent_id: Unique identifier for this agent invocation
+        iteration: The iteration number when the pause occurred
+        reason: Reason for the pause
+
+    Returns:
+        Event: The agent paused event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.AGENT_PAUSED,
+        data={
+            "agent_id": agent_id,
+            "iteration": iteration,
+            "reason": reason,
+            "paused_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_agent_resumed_event(
+    run_id: str,
+    agent_id: str,
+    iteration: int,
+    message: str | None = None,
+) -> Event:
+    """Create an agent resumed event.
+
+    Recorded when the agent loop resumes after a pause.
+
+    Args:
+        run_id: The workflow run ID
+        agent_id: Unique identifier for this agent invocation
+        iteration: The iteration number when the resume occurred
+        message: Optional injected user message
+
+    Returns:
+        Event: The agent resumed event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.AGENT_RESUMED,
+        data={
+            "agent_id": agent_id,
+            "iteration": iteration,
+            "message": message,
+            "resumed_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_agent_approval_requested_event(
+    run_id: str,
+    agent_id: str,
+    iteration: int,
+    tool_calls: list[dict[str, Any]],
+) -> Event:
+    """Create an agent approval requested event.
+
+    Recorded when tool calls require human approval before execution.
+
+    Args:
+        run_id: The workflow run ID
+        agent_id: Unique identifier for this agent invocation
+        iteration: The iteration number
+        tool_calls: List of tool calls awaiting approval
+
+    Returns:
+        Event: The agent approval requested event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.AGENT_APPROVAL_REQUESTED,
+        data={
+            "agent_id": agent_id,
+            "iteration": iteration,
+            "tool_calls": tool_calls,
+            "requested_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_agent_approval_received_event(
+    run_id: str,
+    agent_id: str,
+    iteration: int,
+    decisions: list[dict[str, Any]],
+) -> Event:
+    """Create an agent approval received event.
+
+    Recorded when human approval decisions are received for tool calls.
+
+    Args:
+        run_id: The workflow run ID
+        agent_id: Unique identifier for this agent invocation
+        iteration: The iteration number
+        decisions: List of approval decisions
+
+    Returns:
+        Event: The agent approval received event
+    """
+    return Event(
+        run_id=run_id,
+        type=EventType.AGENT_APPROVAL_RECEIVED,
+        data={
+            "agent_id": agent_id,
+            "iteration": iteration,
+            "decisions": decisions,
+            "received_at": datetime.now(UTC).isoformat(),
         },
     )
 

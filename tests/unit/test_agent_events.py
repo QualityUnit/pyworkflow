@@ -8,11 +8,15 @@ from pyworkflow.context import LocalContext
 from pyworkflow.engine.events import (
     Event,
     EventType,
+    create_agent_approval_received_event,
+    create_agent_approval_requested_event,
     create_agent_completed_event,
     create_agent_error_event,
     create_agent_llm_call_event,
     create_agent_llm_response_event,
+    create_agent_paused_event,
     create_agent_response_event,
+    create_agent_resumed_event,
     create_agent_started_event,
     create_agent_tool_call_event,
     create_agent_tool_result_event,
@@ -60,8 +64,20 @@ class TestAgentEventTypes:
     def test_memory_compacted_event_type(self):
         assert EventType.MEMORY_COMPACTED.value == "memory.compacted"
 
-    def test_all_13_agent_and_memory_event_types_exist(self):
-        """Verify all 13 new enum values are accessible."""
+    def test_agent_paused_event_type(self):
+        assert EventType.AGENT_PAUSED.value == "agent.paused"
+
+    def test_agent_resumed_event_type(self):
+        assert EventType.AGENT_RESUMED.value == "agent.resumed"
+
+    def test_agent_approval_requested_event_type(self):
+        assert EventType.AGENT_APPROVAL_REQUESTED.value == "agent.approval_requested"
+
+    def test_agent_approval_received_event_type(self):
+        assert EventType.AGENT_APPROVAL_RECEIVED.value == "agent.approval_received"
+
+    def test_all_agent_and_memory_event_types_exist(self):
+        """Verify all agent/memory enum values are accessible."""
         event_types = [
             EventType.AGENT_STARTED,
             EventType.AGENT_LLM_CALL,
@@ -71,15 +87,18 @@ class TestAgentEventTypes:
             EventType.AGENT_RESPONSE,
             EventType.AGENT_COMPLETED,
             EventType.AGENT_ERROR,
+            EventType.AGENT_PAUSED,
+            EventType.AGENT_RESUMED,
+            EventType.AGENT_APPROVAL_REQUESTED,
+            EventType.AGENT_APPROVAL_RECEIVED,
             EventType.AGENT_HANDOFF,
             EventType.MEMORY_STORED,
             EventType.MEMORY_RETRIEVED,
             EventType.MEMORY_COMPACTED,
         ]
-        assert len(event_types) == 12
-        # Plus AGENT_HANDOFF makes the total count correct
+        assert len(event_types) == 16
         # All should be unique
-        assert len(set(et.value for et in event_types)) == 12
+        assert len(set(et.value for et in event_types)) == 16
 
 
 class TestAgentEventCreationHelpers:
@@ -748,3 +767,118 @@ class TestLocalContextAgentCacheMethods:
         assert ctx.get_cached_agent_llm_response("agent_1", 0)["content"] == "iter_0"
         assert ctx.get_cached_agent_llm_response("agent_1", 1)["content"] == "iter_1"
         assert ctx.get_cached_agent_llm_response("agent_1", 2)["content"] == "iter_2"
+
+
+# ---------------------------------------------------------------------------
+# HITL and Pause/Resume event creation helpers
+# ---------------------------------------------------------------------------
+
+
+class TestAgentHITLEventCreation:
+    """Test HITL and pause/resume event creation helpers."""
+
+    def test_create_agent_paused_event(self):
+        event = create_agent_paused_event(
+            run_id="run_1",
+            agent_id="agent_abc",
+            iteration=3,
+            reason="user_requested",
+        )
+        assert isinstance(event, Event)
+        assert event.type == EventType.AGENT_PAUSED
+        assert event.run_id == "run_1"
+        assert event.data["agent_id"] == "agent_abc"
+        assert event.data["iteration"] == 3
+        assert event.data["reason"] == "user_requested"
+        assert "paused_at" in event.data
+
+    def test_create_agent_resumed_event(self):
+        event = create_agent_resumed_event(
+            run_id="run_1",
+            agent_id="agent_abc",
+            iteration=3,
+            message="Continue with Y",
+        )
+        assert isinstance(event, Event)
+        assert event.type == EventType.AGENT_RESUMED
+        assert event.data["agent_id"] == "agent_abc"
+        assert event.data["iteration"] == 3
+        assert event.data["message"] == "Continue with Y"
+        assert "resumed_at" in event.data
+
+    def test_create_agent_resumed_event_without_message(self):
+        event = create_agent_resumed_event(
+            run_id="run_1",
+            agent_id="agent_abc",
+            iteration=3,
+        )
+        assert event.data["message"] is None
+
+    def test_create_agent_approval_requested_event(self):
+        tool_calls = [
+            {"tool_call_id": "tc_1", "tool_name": "delete", "tool_args": {"path": "/tmp"}},
+        ]
+        event = create_agent_approval_requested_event(
+            run_id="run_1",
+            agent_id="agent_abc",
+            iteration=2,
+            tool_calls=tool_calls,
+        )
+        assert isinstance(event, Event)
+        assert event.type == EventType.AGENT_APPROVAL_REQUESTED
+        assert event.data["tool_calls"] == tool_calls
+        assert event.data["agent_id"] == "agent_abc"
+        assert event.data["iteration"] == 2
+        assert "requested_at" in event.data
+
+    def test_create_agent_approval_received_event(self):
+        decisions = [
+            {"tool_call_id": "tc_1", "action": "approve"},
+            {"tool_call_id": "tc_2", "action": "reject", "feedback": "No"},
+        ]
+        event = create_agent_approval_received_event(
+            run_id="run_1",
+            agent_id="agent_abc",
+            iteration=2,
+            decisions=decisions,
+        )
+        assert isinstance(event, Event)
+        assert event.type == EventType.AGENT_APPROVAL_RECEIVED
+        assert event.data["decisions"] == decisions
+        assert "received_at" in event.data
+
+
+class TestReplayHITLEvents:
+    """Test that HITL events are handled during replay without errors."""
+
+    @pytest.mark.asyncio
+    async def test_replay_hitl_events_no_crash(self, tmp_path):
+        """HITL events are pass-through during replay."""
+        storage = FileStorageBackend(base_path=str(tmp_path))
+        ctx = LocalContext(
+            run_id="test_run",
+            workflow_name="test_workflow",
+            storage=storage,
+        )
+
+        events = [
+            create_agent_paused_event(
+                run_id="test_run", agent_id="a1", iteration=1, reason="pause",
+            ),
+            create_agent_resumed_event(
+                run_id="test_run", agent_id="a1", iteration=1, message="go",
+            ),
+            create_agent_approval_requested_event(
+                run_id="test_run", agent_id="a1", iteration=2,
+                tool_calls=[{"tool_call_id": "tc1", "tool_name": "x", "tool_args": {}}],
+            ),
+            create_agent_approval_received_event(
+                run_id="test_run", agent_id="a1", iteration=2,
+                decisions=[{"tool_call_id": "tc1", "action": "approve"}],
+            ),
+        ]
+        for i, event in enumerate(events, 1):
+            event.sequence = i
+
+        replayer = EventReplayer()
+        await replayer.replay(ctx, events)  # Should not raise

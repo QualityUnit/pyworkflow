@@ -21,9 +21,11 @@ class AgentResult:
     iterations: int = 0
     finish_reason: str = "stop"
     agent_id: str = ""
+    pause_token: str | None = None
+    pending_tool_calls: list | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "content": self.content,
             "messages": [
                 _message_to_dict(m) for m in self.messages
@@ -34,6 +36,11 @@ class AgentResult:
             "finish_reason": self.finish_reason,
             "agent_id": self.agent_id,
         }
+        if self.pause_token is not None:
+            d["pause_token"] = self.pause_token
+        if self.pending_tool_calls is not None:
+            d["pending_tool_calls"] = self.pending_tool_calls
+        return d
 
 
 def _message_to_dict(msg: Any) -> dict[str, Any]:

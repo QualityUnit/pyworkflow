@@ -39,6 +39,27 @@ def _configure_worker_logging() -> None:
         _logging_configured = True
 
 
+def _run_warmup_callable(dotted_path: str) -> None:
+    """Import and call a warmup function from a dotted path like 'app.warmup.run_warmup'."""
+    import importlib
+
+    from loguru import logger as loguru_logger
+
+    module_path, _, func_name = dotted_path.rpartition(".")
+    if not module_path:
+        loguru_logger.warning("PYWORKFLOW_WORKER_WARMUP: invalid path {!r}", dotted_path)
+        return
+    try:
+        mod = importlib.import_module(module_path)
+        func = getattr(mod, func_name)
+        func()
+        loguru_logger.info("PYWORKFLOW_WORKER_WARMUP: {} completed successfully", dotted_path)
+    except Exception:
+        loguru_logger.opt(exception=True).warning(
+            "PYWORKFLOW_WORKER_WARMUP: failed to run {!r}", dotted_path
+        )
+
+
 def is_sentinel_url(url: str) -> bool:
     """Check if URL uses sentinel:// or sentinel+ssl:// protocol."""
     return url.startswith("sentinel://") or url.startswith("sentinel+ssl://")
@@ -395,6 +416,13 @@ def on_worker_init(**kwargs):
     For solo/threads pool, this is the main initialization point.
     """
     _configure_worker_logging()
+
+    # Run user-defined warmup in the main process BEFORE forking.
+    # Modules loaded here are inherited by forked children via copy-on-write,
+    # avoiding per-child memory allocation (and OOM kills).
+    warmup_path = os.getenv("PYWORKFLOW_WORKER_WARMUP")
+    if warmup_path:
+        _run_warmup_callable(warmup_path)
 
 
 @worker_process_init.connect

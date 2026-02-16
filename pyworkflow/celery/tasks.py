@@ -10,6 +10,7 @@ These tasks enable:
 """
 
 import asyncio
+import contextlib
 import random
 import uuid
 from collections.abc import Callable
@@ -445,10 +446,8 @@ def execute_step_task(
     finally:
         # Release execution lock so retries or other tasks can proceed.
         if _exec_lock_acquired and _exec_lock_backend is not None:
-            try:
+            with contextlib.suppress(Exception):
                 _exec_lock_backend.unlock(_exec_lock_key)
-            except Exception:
-                pass  # Best effort - lock will expire via TTL
 
         # Clean up workflow context (must be reset before step context)
         if workflow_context_token is not None:
@@ -825,10 +824,8 @@ def start_workflow_task(
     finally:
         # Release execution lock so retries or re-dispatches can proceed.
         if _exec_lock_acquired and _exec_lock_backend is not None:
-            try:
+            with contextlib.suppress(Exception):
                 _exec_lock_backend.unlock(_exec_lock_key)
-            except Exception:
-                pass  # Best effort - lock will expire via TTL
 
 
 @celery_app.task(

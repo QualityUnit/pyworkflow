@@ -84,6 +84,9 @@ class EventReplayer:
         elif event.type == EventType.HOOK_EXPIRED:
             await self._apply_hook_expired(ctx, event)
 
+        elif event.type == EventType.HOOK_PROCESSED:
+            await self._apply_hook_processed(ctx, event)
+
         elif event.type == EventType.STEP_RETRYING:
             await self._apply_step_retrying(ctx, event)
 
@@ -164,6 +167,22 @@ class EventReplayer:
             ctx.cache_hook_result(hook_id, payload)
             logger.debug(
                 f"Cached hook result: {hook_id}",
+                run_id=ctx.run_id,
+                hook_id=hook_id,
+            )
+
+    async def _apply_hook_processed(self, ctx: LocalContext, event: Event) -> None:
+        """Apply hook_processed event - cache the on_received callback result."""
+        from pyworkflow.serialization.decoder import deserialize
+
+        hook_id = event.data.get("hook_id")
+        result_json = event.data.get("result")
+
+        if hook_id:
+            result = deserialize(result_json)
+            ctx.cache_hook_processed_result(hook_id, result)
+            logger.debug(
+                f"Cached hook processed result: {hook_id}",
                 run_id=ctx.run_id,
                 hook_id=hook_id,
             )

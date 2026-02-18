@@ -267,6 +267,7 @@ class MockContext(WorkflowContext):
         timeout: int | None = None,
         on_created: Callable[[str], Awaitable[None]] | None = None,
         payload_schema: type[BaseModel] | None = None,
+        on_received: Callable[[Any], Any | Awaitable[Any]] | None = None,
     ) -> Any:
         """
         Wait for an external event (hook).
@@ -278,9 +279,10 @@ class MockContext(WorkflowContext):
             timeout: Optional timeout in seconds (tracked but not enforced)
             on_created: Optional callback called with token (for testing)
             payload_schema: Optional Pydantic model (tracked but not enforced)
+            on_received: Optional callback applied to payload before returning
 
         Returns:
-            Mock hook payload
+            Mock hook payload (or on_received result if provided)
         """
         # Generate mock composite token: run_id:hook_name_counter
         self._hook_counter = getattr(self, "_hook_counter", 0) + 1
@@ -304,10 +306,19 @@ class MockContext(WorkflowContext):
 
         # Check for mock hook payload
         if name in self._mock_hooks:
-            return self._mock_hooks[name]
+            payload = self._mock_hooks[name]
+        else:
+            # Return default mock data
+            payload = {"hook": name, "mock": True}
 
-        # Return default mock data
-        return {"hook": name, "mock": True}
+        # Apply on_received callback if provided
+        if on_received is not None:
+            result = on_received(payload)
+            if asyncio.iscoroutine(result):
+                result = await result
+            return result
+
+        return payload
 
     # =========================================================================
     # Cancellation methods

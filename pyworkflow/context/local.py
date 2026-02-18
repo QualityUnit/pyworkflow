@@ -82,6 +82,7 @@ class LocalContext(WorkflowContext):
         self._completed_sleeps: set[str] = set()
         self._pending_sleeps: dict[str, Any] = {}
         self._hook_results: dict[str, Any] = {}
+        self._hook_processed_results: dict[str, Any] = {}
         self._pending_hooks: dict[str, Any] = {}
         self._step_counter = 0
         self._retry_states: dict[str, dict[str, Any]] = {}
@@ -168,6 +169,11 @@ class LocalContext(WorkflowContext):
                 hook_id = event.data.get("hook_id")
                 payload = deserialize(event.data.get("payload"))
                 self._hook_results[hook_id] = payload
+
+            elif event.type == EventType.HOOK_PROCESSED:
+                hook_id = event.data.get("hook_id")
+                result = deserialize(event.data.get("result"))
+                self._hook_processed_results[hook_id] = result
 
             elif event.type == EventType.HOOK_CREATED:
                 # Track pending hooks for re-suspension
@@ -458,6 +464,27 @@ class LocalContext(WorkflowContext):
     def get_hook_result(self, hook_id: str) -> Any:
         """Get a cached hook result."""
         return self._hook_results.get(hook_id)
+
+    # =========================================================================
+    # Hook processed state management (on_received callback results)
+    # =========================================================================
+
+    @property
+    def hook_processed_results(self) -> dict[str, Any]:
+        """Get hook processed results."""
+        return self._hook_processed_results
+
+    def cache_hook_processed_result(self, hook_id: str, result: Any) -> None:
+        """Cache a hook processed result."""
+        self._hook_processed_results[hook_id] = result
+
+    def has_hook_processed_result(self, hook_id: str) -> bool:
+        """Check if a hook processed result exists."""
+        return hook_id in self._hook_processed_results
+
+    def get_hook_processed_result(self, hook_id: str) -> Any:
+        """Get a cached hook processed result."""
+        return self._hook_processed_results.get(hook_id)
 
     # =========================================================================
     # Child workflow state management
@@ -892,6 +919,7 @@ class LocalContext(WorkflowContext):
         timeout: int | None = None,
         on_created: Callable[[str], Awaitable[None]] | None = None,
         payload_schema: type[BaseModel] | None = None,
+        on_received: Callable[[Any], Any | Awaitable[Any]] | None = None,
     ) -> Any:
         """
         Wait for an external event (webhook, approval, callback).
@@ -911,9 +939,12 @@ class LocalContext(WorkflowContext):
             timeout: Optional timeout in seconds
             on_created: Optional async callback called with token when hook is created
             payload_schema: Optional Pydantic model class for payload validation
+            on_received: Optional callback called with raw payload when hook is received.
+                The callback result is persisted as a HOOK_PROCESSED event and returned.
+                Runs exactly once even across multiple replay cycles.
 
         Returns:
-            Payload from resume_hook()
+            Payload from resume_hook() (or on_received result if provided)
 
         Raises:
             NotImplementedError: If not in durable mode
@@ -931,10 +962,37 @@ class LocalContext(WorkflowContext):
         self._step_counter += 1
         hook_id = f"hook_{name}_{self._step_counter}"
 
+        # Check if on_received already ran (replay mode) — return cached processed result
+        if hook_id in self._hook_processed_results:
+            logger.debug(f"[replay] Hook {hook_id} already processed, using cached result")
+            return self._hook_processed_results[hook_id]
+
         # Check if already received (replay mode)
         if hook_id in self._hook_results:
             logger.debug(f"[replay] Hook {hook_id} already received")
-            return self._hook_results[hook_id]
+            raw_payload = self._hook_results[hook_id]
+
+            # If on_received is provided, run it now and persist the result
+            if on_received is not None:
+                import asyncio as _asyncio
+
+                result = on_received(raw_payload)
+                if _asyncio.iscoroutine(result):
+                    result = await result
+
+                # Record HOOK_PROCESSED event
+                from pyworkflow.engine.events import create_hook_processed_event
+
+                event = create_hook_processed_event(
+                    run_id=self._run_id,
+                    hook_id=hook_id,
+                    result=result,
+                )
+                await self._get_storage().record_event(event)
+                self._hook_processed_results[hook_id] = result
+                return result
+
+            return raw_payload
 
         # Check if already pending (created but not yet received - replay mode)
         # This prevents duplicate hook creation when workflow resumes
@@ -942,9 +1000,6 @@ class LocalContext(WorkflowContext):
             logger.debug(f"[replay] Hook {hook_id} already pending, re-suspending")
             pending_data = self._pending_hooks[hook_id]
             actual_token = pending_data.get("token")
-            # Call on_created callback if provided
-            if on_created is not None:
-                await on_created(actual_token)
             raise SuspensionSignal(
                 reason=f"hook:{hook_id}",
                 hook_id=hook_id,

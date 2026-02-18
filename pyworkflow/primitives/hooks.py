@@ -20,6 +20,7 @@ async def hook(
     timeout: str | int | None = None,
     on_created: Callable[[str], Awaitable[None]] | None = None,
     payload_schema: type[BaseModel] | None = None,
+    on_received: Callable[[Any], Any | Awaitable[Any]] | None = None,
 ) -> Any:
     """
     Wait for an external event (webhook, approval, callback).
@@ -102,4 +103,5 @@ async def hook(
         timeout=timeout_seconds,
         on_created=on_created,
         payload_schema=payload_schema,
+        on_received=on_received,
     )

@@ -189,6 +189,7 @@ class WorkflowContext(ABC):
         timeout: int | None = None,
         on_created: Callable[[str], Awaitable[None]] | None = None,
         payload_schema: type[BaseModel] | None = None,
+        on_received: Callable[[Any], Any | Awaitable[Any]] | None = None,
     ) -> Any:
         """
         Wait for an external event (webhook, approval, callback).
@@ -201,9 +202,11 @@ class WorkflowContext(ABC):
             timeout: Optional timeout in seconds. None means wait forever.
             on_created: Optional async callback called with token when hook is created.
             payload_schema: Optional Pydantic model for payload validation.
+            on_received: Optional callback called with raw payload when hook is received.
+                The callback result is persisted and returned. Runs exactly once.
 
         Returns:
-            The payload passed to resume_hook()
+            The payload passed to resume_hook() (or on_received result if provided)
 
         Raises:
             HookExpiredError: If timeout is reached before resume

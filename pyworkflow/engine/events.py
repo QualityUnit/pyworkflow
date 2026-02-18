@@ -42,6 +42,7 @@ class EventType(Enum):
     HOOK_RECEIVED = "hook.received"
     HOOK_EXPIRED = "hook.expired"
     HOOK_DISPOSED = "hook.disposed"
+    HOOK_PROCESSED = "hook.processed"
 
     # Cancellation events
     CANCELLATION_REQUESTED = "cancellation.requested"
@@ -428,6 +429,20 @@ def create_hook_expired_event(run_id: str, hook_id: str) -> Event:
         run_id=run_id,
         type=EventType.HOOK_EXPIRED,
         data={"hook_id": hook_id},
+    )
+
+
+def create_hook_processed_event(run_id: str, hook_id: str, result: Any) -> Event:
+    """Create a hook processed event (on_received callback result)."""
+    from pyworkflow.serialization.encoder import serialize
+
+    return Event(
+        run_id=run_id,
+        type=EventType.HOOK_PROCESSED,
+        data={
+            "hook_id": hook_id,
+            "result": serialize(result),
+        },
     )
 
 

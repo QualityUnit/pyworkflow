@@ -1821,6 +1821,28 @@ async def _start_workflow_on_worker(
                 )
                 return run_id
 
+        # For hook suspensions, check if hook was already received (race condition).
+        # resume_hook() may have recorded HOOK_RECEIVED and scheduled a resume task
+        # while the workflow was still running (before status was set to SUSPENDED).
+        # That resume task would have failed try_claim_run and been discarded.
+        if hook_id and e.reason.startswith("hook:"):
+            hook_received = await storage.has_event(
+                run_id, EventType.HOOK_RECEIVED.value, hook_id=hook_id
+            )
+            if hook_received:
+                logger.info(
+                    "Hook received before suspension completed, scheduling resume",
+                    run_id=run_id,
+                    hook_id=hook_id,
+                )
+                schedule_workflow_resumption(
+                    run_id,
+                    datetime.now(UTC),
+                    storage_config=storage_config,
+                    triggered_by="resume_suspension_hook_race",
+                )
+                return run_id
+
         # Schedule automatic resumption if we have a resume_at time (for sleep/hook)
         resume_at = e.data.get("resume_at") if e.data else None
         if resume_at:
@@ -2409,6 +2431,25 @@ async def _resume_workflow_on_worker(
                     datetime.now(UTC),
                     storage_config=storage_config,
                     triggered_by="start_suspension_step_race",
+                )
+                return None
+
+        # For hook suspensions, check if hook was already received (race condition)
+        if hook_id and e.reason.startswith("hook:"):
+            hook_received = await storage.has_event(
+                run_id, EventType.HOOK_RECEIVED.value, hook_id=hook_id
+            )
+            if hook_received:
+                logger.info(
+                    "Hook received before resume suspension completed, scheduling resume",
+                    run_id=run_id,
+                    hook_id=hook_id,
+                )
+                schedule_workflow_resumption(
+                    run_id,
+                    datetime.now(UTC),
+                    storage_config=storage_config,
+                    triggered_by="start_suspension_hook_race",
                 )
                 return None
 

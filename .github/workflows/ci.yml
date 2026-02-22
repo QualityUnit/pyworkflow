@@ -114,7 +114,7 @@ jobs:
           python-version: '3.11'
 
       - run: pip install poetry
-      - run: poetry install --no-interaction --no-ansi
+      - run: poetry install --no-interaction --no-ansi --extras dev
       - run: poetry run ruff check .
 
   type-check:
@@ -133,7 +133,7 @@ jobs:
           python-version: '3.11'
 
       - run: pip install poetry
-      - run: poetry install --no-interaction --no-ansi
+      - run: poetry install --no-interaction --no-ansi --extras dev
       - run: poetry run mypy pyworkflow
 
   test:
@@ -152,7 +152,7 @@ jobs:
           python-version: '3.11'
 
       - run: pip install poetry
-      - run: poetry install --no-interaction --no-ansi
+      - run: poetry install --no-interaction --no-ansi --extras dev
 
       - name: Run tests
         run: poetry run pytest --tb=short --junitxml=test-results.xml
@@ -181,7 +181,7 @@ jobs:
           python-version: '3.11'
 
       - run: pip install poetry
-      - run: poetry install --no-interaction --no-ansi
+      - run: poetry install --no-interaction --no-ansi --extras dev
       - run: echo "no build command detected"
 
   structural-tests:

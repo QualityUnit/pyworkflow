@@ -36,7 +36,7 @@ jobs:
           ISSUE_JSON: ${{ toJSON(github.event.issue) }}
           EVENT_NAME: ${{ github.event.action }}
         run: |
-          DECISION=$(npx tsx scripts/issue-triage-guard.ts --evaluate)
+          DECISION=$(npx --yes tsx scripts/issue-triage-guard.ts --evaluate)
           echo "decision<<GUARD_EOF" >> "$GITHUB_OUTPUT"
           echo "$DECISION" >> "$GITHUB_OUTPUT"
           echo "GUARD_EOF" >> "$GITHUB_OUTPUT"

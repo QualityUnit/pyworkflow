@@ -368,7 +368,7 @@ jobs:
           ATTEMPT="${{ steps.guard.outputs.attempt }}"
           MODIFIED=$(git diff --name-only)
 
-          git add $MODIFIED
+          git add -u
 
           FILE_COUNT=$(echo "$MODIFIED" | wc -l | tr -d ' ')
 

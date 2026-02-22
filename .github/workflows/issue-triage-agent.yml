@@ -52,7 +52,8 @@ jobs:
 
       - name: Skip — log reason
         if: steps.guard.outputs.should-triage == 'false'
-        run: echo "::notice::Triage skipped: ${{ steps.guard.outputs.reason }}"
+        run: |
+          echo "::notice::Triage skipped: ${{ steps.guard.outputs.reason }}"
 
       - name: Ensure triage labels exist
         if: steps.guard.outputs.should-triage == 'true'

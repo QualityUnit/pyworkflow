@@ -1,5 +1,4 @@
 name: Issue Triage Agent
-# re-register: force GitHub to index this workflow for issue events
 
 on:
   issues:

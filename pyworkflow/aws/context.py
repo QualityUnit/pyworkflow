@@ -13,6 +13,7 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
+from pydantic import BaseModel
 
 from pyworkflow.context.base import StepFunction, WorkflowContext
 from pyworkflow.utils.duration import parse_duration
@@ -223,7 +224,8 @@ class AWSWorkflowContext(WorkflowContext):
         name: str,
         timeout: int | None = None,
         on_created: Callable[[str], Awaitable[None]] | None = None,
-        payload_schema: type | None = None,
+        payload_schema: type[BaseModel] | None = None,
+        on_received: Callable[[Any], Any | Awaitable[Any]] | None = None,
     ) -> Any:
         """Wait for hook (not implemented for AWS - use wait_for_callback)."""
         raise NotImplementedError("Use AWS context.wait_for_callback() instead")

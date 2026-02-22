@@ -1,0 +1,389 @@
+name: Issue Triage Agent
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  issues: write
+  contents: read
+  actions: write
+  id-token: write
+
+concurrency:
+  group: issue-triage-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    name: Triage Agent
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: 22
+
+      - name: Run triage guard
+        id: guard
+        env:
+          ISSUE_JSON: ${{ toJSON(github.event.issue) }}
+          EVENT_NAME: ${{ github.event.action }}
+        run: |
+          DECISION=$(npx --yes tsx scripts/issue-triage-guard.ts --evaluate)
+          echo "decision<<GUARD_EOF" >> "$GITHUB_OUTPUT"
+          echo "$DECISION" >> "$GITHUB_OUTPUT"
+          echo "GUARD_EOF" >> "$GITHUB_OUTPUT"
+
+          SHOULD=$(echo "$DECISION" | jq -r '.shouldTriage')
+          IS_RETRIAGE=$(echo "$DECISION" | jq -r '.isRetriage')
+          REASON=$(echo "$DECISION" | jq -r '.reason')
+          echo "should-triage=${SHOULD}" >> "$GITHUB_OUTPUT"
+          echo "is-retriage=${IS_RETRIAGE}" >> "$GITHUB_OUTPUT"
+          echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
+
+          echo "Guard: shouldTriage=${SHOULD}, isRetriage=${IS_RETRIAGE}"
+
+      - name: Skip — log reason
+        if: steps.guard.outputs.should-triage == 'false'
+        run: echo "::notice::Triage skipped: ${{ steps.guard.outputs.reason }}"
+
+      - name: Ensure triage labels exist
+        if: steps.guard.outputs.should-triage == 'true'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const labels = [
+              { name: 'needs-more-info',    color: 'FBCA04', description: 'Issue needs additional details' },
+              { name: 'agent:plan',         color: '1D76DB', description: 'Approved for automated planning' },
+              { name: 'agent:implement',    color: '0E8A16', description: 'Approved for automated implementation' },
+              { name: 'triage:failed',      color: 'D93F0B', description: 'Triage agent encountered an error' },
+              { name: 'needs-human-review', color: 'C5DEF5', description: 'Requires human review before proceeding' },
+            ];
+            for (const label of labels) {
+              try {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ...label,
+                });
+                core.info(`Created label: ${label.name}`);
+              } catch {
+                // Label already exists — fine
+              }
+            }
+
+      - name: Remove needs-more-info on re-triage
+        if: steps.guard.outputs.is-retriage == 'true'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                name: 'needs-more-info',
+              });
+              core.info('Removed needs-more-info label for re-triage.');
+            } catch {
+              // Label might not exist — fine
+            }
+
+      - name: Read triage prompt
+        if: steps.guard.outputs.should-triage == 'true'
+        id: prompt-file
+        run: |
+          if [[ -f ".codefactory/prompts/issue-triage.md" ]]; then
+            {
+              echo "content<<PROMPT_EOF"
+              cat .codefactory/prompts/issue-triage.md
+              echo "PROMPT_EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "content=Evaluate this issue for quality and actionability." >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build triage prompt
+        if: steps.guard.outputs.should-triage == 'true'
+        id: build-prompt
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          TRIAGE_TEMPLATE: ${{ steps.prompt-file.outputs.content }}
+          IS_RETRIAGE: ${{ steps.guard.outputs.is-retriage }}
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const template = process.env.TRIAGE_TEMPLATE || '';
+            const isRetriage = process.env.IS_RETRIAGE === 'true';
+            const labels = (issue.labels || []).map((l) => l.name).join(', ');
+
+            const prompt = [
+              template,
+              '',
+              '## Issue to Triage',
+              '',
+              `**Number**: #${issue.number}`,
+              `**Title**: ${issue.title}`,
+              `**Author**: ${issue.user.login}`,
+              `**Labels**: ${labels || 'none'}`,
+              `**Re-triage**: ${isRetriage ? 'yes — author updated the issue after needs-more-info' : 'no'}`,
+              '',
+              '### Body',
+              '',
+              issue.body || '*(empty body)*',
+            ].join('\n');
+
+            core.setOutput('prompt', prompt);
+            core.info(`Triage prompt built (${prompt.length} chars)`);
+
+      - name: Write triage JSON schema
+        if: steps.guard.outputs.should-triage == 'true'
+        id: schema
+        run: |
+          cat > /tmp/triage-schema.json << 'SCHEMA_EOF'
+          {"type":"object","required":["actionable","confidence","summary","suggestedLabels","estimatedComplexity"],"properties":{"actionable":{"type":"boolean"},"confidence":{"type":"number"},"missingInfo":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"},"suggestedLabels":{"type":"array","items":{"type":"string"}},"estimatedComplexity":{"type":"string","enum":["low","medium","high"]},"reproduced":{"type":["boolean","null"]},"reproductionNotes":{"type":"string"}},"additionalProperties":false}
+          SCHEMA_EOF
+          SCHEMA=$(cat /tmp/triage-schema.json | tr -d '\n' | tr -s ' ')
+          echo "value=${SCHEMA}" >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude triage analysis
+        if: steps.guard.outputs.should-triage == 'true'
+        id: claude-triage
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: ${{ steps.build-prompt.outputs.prompt }}
+          claude_args: "--max-turns 15 --json-schema '${{ steps.schema.outputs.value }}'"
+
+      - name: Parse structured verdict
+        if: steps.guard.outputs.should-triage == 'true'
+        id: verdict
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          STRUCTURED_OUTPUT: ${{ steps.claude-triage.outputs.structured_output || '' }}
+        with:
+          script: |
+            const raw = process.env.STRUCTURED_OUTPUT || '';
+            core.info(`Structured output length: ${raw.length}`);
+
+            if (!raw) {
+              core.warning('No structured output from Claude — structured_output is empty');
+              core.setOutput('parsed', 'false');
+              core.setOutput('raw-text', '');
+              return;
+            }
+
+            let verdict = null;
+            try {
+              verdict = JSON.parse(raw);
+            } catch (e) {
+              core.warning(`Failed to parse structured_output as JSON: ${e.message}`);
+              core.setOutput('parsed', 'false');
+              core.setOutput('raw-text', raw.slice(0, 2000));
+              return;
+            }
+
+            if (!verdict || typeof verdict.actionable !== 'boolean') {
+              core.warning('Structured output missing required "actionable" field');
+              core.setOutput('parsed', 'false');
+              core.setOutput('raw-text', raw.slice(0, 2000));
+              return;
+            }
+
+            core.setOutput('parsed', 'true');
+            core.setOutput('actionable', String(verdict.actionable));
+            core.setOutput('confidence', String(verdict.confidence || 0));
+            core.setOutput('complexity', verdict.estimatedComplexity || 'medium');
+            core.setOutput('summary', verdict.summary || '');
+            core.setOutput('missing-info', JSON.stringify(verdict.missingInfo || []));
+            core.setOutput('suggested-labels', JSON.stringify(verdict.suggestedLabels || []));
+            core.setOutput('raw-text', '');
+
+            core.info(`Verdict: actionable=${verdict.actionable}, confidence=${verdict.confidence}, complexity=${verdict.estimatedComplexity}`);
+
+      - name: Route triage decision
+        if: steps.guard.outputs.should-triage == 'true'
+        id: route
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          PARSED: ${{ steps.verdict.outputs.parsed }}
+          ACTIONABLE: ${{ steps.verdict.outputs.actionable }}
+          CONFIDENCE: ${{ steps.verdict.outputs.confidence }}
+          COMPLEXITY: ${{ steps.verdict.outputs.complexity }}
+          SUMMARY: ${{ steps.verdict.outputs.summary }}
+          MISSING_INFO: ${{ steps.verdict.outputs.missing-info }}
+          SUGGESTED_LABELS: ${{ steps.verdict.outputs.suggested-labels }}
+          RAW_TEXT: ${{ steps.verdict.outputs.raw-text }}
+        with:
+          script: |
+            const issueNumber = context.issue.number;
+            const parsed = process.env.PARSED === 'true';
+            const actionable = process.env.ACTIONABLE === 'true';
+            const confidence = parseFloat(process.env.CONFIDENCE || '0');
+            const complexity = process.env.COMPLEXITY || 'medium';
+            const summary = process.env.SUMMARY || '';
+            const rawText = process.env.RAW_TEXT || '';
+
+            let missingInfo = [];
+            let suggestedLabels = [];
+            try { missingInfo = JSON.parse(process.env.MISSING_INFO || '[]'); } catch {}
+            try { suggestedLabels = JSON.parse(process.env.SUGGESTED_LABELS || '[]'); } catch {}
+
+            const labelsToAdd = [];
+            const commentSections = [`<!-- issue-triage: #${issueNumber} -->`];
+
+            if (!parsed) {
+              labelsToAdd.push('triage:failed');
+              commentSections.push(
+                '⚠️ Issue Triage — Parse Failure',
+                '',
+                'The triage agent could not produce a valid verdict for this issue.',
+                'A human should review and triage manually.',
+              );
+              if (rawText) {
+                commentSections.push(
+                  '',
+                  '<details><summary>Agent raw output (for debugging)</summary>',
+                  '',
+                  '```',
+                  rawText.slice(0, 1500),
+                  '```',
+                  '',
+                  '</details>',
+                );
+              }
+            } else if (actionable && confidence >= 0.6) {
+              labelsToAdd.push('agent:plan');
+              commentSections.push(
+                '✅ Issue Triage — Actionable',
+                '',
+                `**Summary**: ${summary}`,
+                `**Confidence**: ${confidence}`,
+                `**Complexity**: ${complexity}`,
+                '',
+                'Triage complete — this issue is actionable and has been queued for planning.',
+              );
+              if (complexity === 'high') {
+                labelsToAdd.push('needs-human-review');
+                commentSections.push(
+                  '',
+                  '> ⚠️ High complexity or critical-path change detected — flagged for human review before implementation proceeds.',
+                );
+              }
+            } else {
+              labelsToAdd.push('needs-more-info');
+              const missingItems = missingInfo.length > 0
+                ? missingInfo.map((m) => `- ${m}`)
+                : ['- A clear description of the expected behaviour', '- Steps to reproduce or a minimal example'];
+              commentSections.push(
+                actionable
+                  ? '🔍 Issue Triage — More Details Needed'
+                  : '📋 Issue Triage — Not Actionable',
+                '',
+                `**Summary**: ${summary || 'Unable to determine issue intent'}`,
+                `**Confidence**: ${confidence}`,
+                '',
+                'This issue needs more information before it can be worked on. Please provide:',
+                ...missingItems,
+                '',
+                '*Edit this issue with the requested details and we will re-evaluate automatically.*',
+              );
+            }
+
+            // Append any suggested labels (skip internal harness labels)
+            const internalLabels = new Set(['agent:implement', 'needs-more-info', 'triage:failed', 'needs-human-review']);
+            for (const label of suggestedLabels) {
+              if (!internalLabels.has(label) && !labelsToAdd.includes(label)) {
+                try {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: label,
+                    color: 'EDEDED',
+                  });
+                } catch {}
+                labelsToAdd.push(label);
+              }
+            }
+
+            if (labelsToAdd.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: labelsToAdd,
+              });
+              core.info(`Added labels: ${labelsToAdd.join(', ')}`);
+            }
+
+            core.setOutput('should-plan', String(labelsToAdd.includes('agent:plan')));
+
+            commentSections.push(
+              '',
+              '---',
+              '*🤖 [Issue Triage Agent](https://github.com/codefactory) — automated issue triage.*',
+            );
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: commentSections.join('\n'),
+            });
+
+      - name: Dispatch planner workflow
+        if: steps.route.outputs.should-plan == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_NUM="${{ github.event.issue.number }}"
+          echo "Dispatching planner for issue #${ISSUE_NUM}..."
+          gh workflow run issue-planner.yml \
+            --field issue_number="${ISSUE_NUM}"
+          echo "✔ Planner workflow dispatched."
+
+      - name: Failure handler
+        if: failure() && steps.guard.outputs.should-triage == 'true'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const issueNumber = context.issue.number;
+            try {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: 'triage:failed',
+                color: 'D93F0B',
+                description: 'Triage agent encountered an error',
+              });
+            } catch {}
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              labels: ['triage:failed'],
+            });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: [
+                `<!-- issue-triage-failed: #${issueNumber} -->`,
+                '❌ Issue Triage — Agent Error',
+                '',
+                'The triage agent encountered an unexpected error while processing this issue.',
+                'A human should review and triage manually.',
+                '',
+                `**Run**: [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+                '',
+                '---',
+                '*🤖 [Issue Triage Agent](https://github.com/codefactory) — automated issue triage.*',
+              ].join('\n'),
+            });

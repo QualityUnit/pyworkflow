@@ -179,7 +179,7 @@ class EventReplayer:
         result_json = event.data.get("result")
 
         if hook_id:
-            result = deserialize(result_json)
+            result = deserialize(result_json or "null")
             ctx.cache_hook_processed_result(hook_id, result)
             logger.debug(
                 f"Cached hook processed result: {hook_id}",

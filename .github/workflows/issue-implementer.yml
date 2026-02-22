@@ -1,0 +1,809 @@
+name: Issue Implementer Agent
+
+on:
+  issues:
+    types: [opened, labeled]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to implement'
+        required: false
+        type: string
+      pr_number:
+        description: 'PR number for review-fix mode'
+        required: false
+        type: string
+      review_fix_cycle:
+        description: 'Review-fix cycle number (1-3)'
+        required: false
+        type: string
+
+# IMPORTANT: labeled events from GITHUB_TOKEN are suppressed by GitHub to prevent loops.
+# The planner workflow dispatches this workflow explicitly via `gh workflow run`.
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+concurrency:
+  group: issue-implementer-${{ github.event.issue.number || inputs.issue_number || inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  implement:
+    name: Implementer Agent
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: 22
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # ISSUE MODE: Fetch issue data when dispatched via workflow_dispatch
+      # ─────────────────────────────────────────────────────────────────────────
+
+      - name: Fetch issue JSON (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch' && inputs.issue_number != '' && inputs.pr_number == ''
+        id: fetch-issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_NUM="${{ inputs.issue_number }}"
+          # gh CLI uses 'author' not 'user' — remap to match github.event.issue shape
+          ISSUE_DATA=$(gh issue view "$ISSUE_NUM" --json number,title,body,labels,author \
+            | jq '{number, title, body, labels, user: {login: .author.login, type: (if .author.is_bot then "Bot" else "User" end)}}')
+          {
+            echo "json<<ISSUE_EOF"
+            echo "$ISSUE_DATA"
+            echo "ISSUE_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "Fetched issue #${ISSUE_NUM}"
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # GUARD: Decide whether to proceed (issue mode + review-fix mode)
+      # ─────────────────────────────────────────────────────────────────────────
+
+      - name: Run implementer guard
+        id: guard
+        env:
+          ISSUE_JSON: ${{ github.event_name == 'workflow_dispatch' && inputs.pr_number == '' && steps.fetch-issue.outputs.json || toJSON(github.event.issue) }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REVIEW_FIX_CYCLE: ${{ inputs.review_fix_cycle }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DECISION=$(npx --yes tsx scripts/issue-implementer-guard.ts --evaluate)
+          echo "decision<<GUARD_EOF" >> "$GITHUB_OUTPUT"
+          echo "$DECISION" >> "$GITHUB_OUTPUT"
+          echo "GUARD_EOF" >> "$GITHUB_OUTPUT"
+
+          SHOULD=$(echo "$DECISION" | jq -r '.shouldImplement')
+          BRANCH=$(echo "$DECISION" | jq -r '.branchName // ""')
+          REASON=$(echo "$DECISION" | jq -r '.reason')
+          ISSUE_NUM=$(echo "$DECISION" | jq -r '.issueNumber // ""')
+          ISSUE_TITLE=$(echo "$DECISION" | jq -r '.issueTitle // ""')
+          REVIEW_FIX=$(echo "$DECISION" | jq -r '.reviewFix // false')
+
+          echo "should-implement=${SHOULD}" >> "$GITHUB_OUTPUT"
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
+          echo "issue-number=${ISSUE_NUM}" >> "$GITHUB_OUTPUT"
+          echo "issue-title=${ISSUE_TITLE}" >> "$GITHUB_OUTPUT"
+          echo "review-fix=${REVIEW_FIX}" >> "$GITHUB_OUTPUT"
+
+          echo "Guard: shouldImplement=${SHOULD}, branch=${BRANCH}, reviewFix=${REVIEW_FIX}"
+
+      - name: Skip — log reason
+        if: steps.guard.outputs.should-implement == 'false'
+        run: |
+          echo "::notice::Implementation skipped: ${{ steps.guard.outputs.reason }}"
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # SETUP: Python environment (both modes, only if proceeding)
+      # ─────────────────────────────────────────────────────────────────────────
+
+      - name: Set up Python
+        if: steps.guard.outputs.should-implement == 'true'
+        uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        if: steps.guard.outputs.should-implement == 'true'
+        run: |
+          pip install poetry
+          poetry config virtualenvs.create false
+          poetry install --no-interaction
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # ISSUE MODE: Create new branch from default branch
+      # ─────────────────────────────────────────────────────────────────────────
+
+      - name: Ensure implementer labels exist
+        if: steps.guard.outputs.should-implement == 'true' && steps.guard.outputs.review-fix == 'false'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const labels = [
+              { name: 'agent-pr',            color: '0075CA', description: 'PR created by an automated agent' },
+              { name: 'agent:implement',      color: '0E8A16', description: 'Approved for automated implementation' },
+              { name: 'agent:needs-judgment', color: 'E4E669', description: 'Agent needs human judgment to proceed' },
+            ];
+            for (const label of labels) {
+              try {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ...label,
+                });
+              } catch {
+                // Label already exists — fine
+              }
+            }
+
+      - name: Create implementation branch
+        if: steps.guard.outputs.should-implement == 'true' && steps.guard.outputs.review-fix == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="${{ steps.guard.outputs.branch }}"
+          DEFAULT_BRANCH="${{ github.event.repository.default_branch || 'main' }}"
+
+          git config user.name "implementer-bot[bot]"
+          git config user.email "implementer-bot[bot]@users.noreply.github.com"
+
+          # Delete stale remote branch if it exists (from a previous failed run)
+          if git ls-remote --exit-code --heads origin "$BRANCH" &>/dev/null; then
+            git push origin --delete "$BRANCH" 2>/dev/null || true
+            echo "Deleted stale remote branch: ${BRANCH}"
+          fi
+
+          git fetch origin "$DEFAULT_BRANCH"
+          git checkout -b "$BRANCH" "origin/${DEFAULT_BRANCH}"
+          echo "✔ Created branch: ${BRANCH} from origin/${DEFAULT_BRANCH}"
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # REVIEW-FIX MODE: Checkout existing PR branch
+      # ─────────────────────────────────────────────────────────────────────────
+
+      - name: Checkout existing PR branch (review-fix)
+        if: steps.guard.outputs.should-implement == 'true' && steps.guard.outputs.review-fix == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="${{ steps.guard.outputs.branch }}"
+          git config user.name "implementer-bot[bot]"
+          git config user.email "implementer-bot[bot]@users.noreply.github.com"
+          git fetch origin "$BRANCH"
+          git checkout "$BRANCH"
+          echo "✔ Checked out existing branch: ${BRANCH}"
+
+      - name: Extract review feedback (review-fix)
+        if: steps.guard.outputs.should-implement == 'true' && steps.guard.outputs.review-fix == 'true'
+        id: review-feedback
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUM="${{ inputs.pr_number }}"
+          # Get the most recent REQUEST_CHANGES review comment by the harness bot
+          REVIEW_BODY=$(gh api "repos/${{ github.repository }}/issues/${PR_NUM}/comments" \
+            | jq -r '[.[] | select(.body | contains("<!-- review-verdict: REQUEST_CHANGES -->"))] | last | .body // ""')
+
+          if [[ -z "$REVIEW_BODY" || "$REVIEW_BODY" == "null" ]]; then
+            echo "::warning::No REQUEST_CHANGES review comment found on PR #${PR_NUM}"
+            REVIEW_BODY="No specific review feedback found. Fix any remaining issues in the implementation."
+          fi
+
+          {
+            echo "body<<REVIEW_EOF"
+            echo "$REVIEW_BODY"
+            echo "REVIEW_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "✔ Extracted review feedback ($(echo "$REVIEW_BODY" | wc -c) chars)"
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # BASELINE: Record quality gate state before agent runs
+      # ─────────────────────────────────────────────────────────────────────────
+
+      - name: Baseline quality gates
+        if: steps.guard.outputs.should-implement == 'true'
+        id: baseline
+        run: |
+          LINT_OK=false
+          TYPECHECK_OK=false
+          TEST_OK=false
+
+          ruff check . &>/dev/null && LINT_OK=true || true
+          mypy pyworkflow --ignore-missing-imports &>/dev/null && TYPECHECK_OK=true || true
+          pytest -q --tb=no &>/dev/null && TEST_OK=true || true
+
+          echo "lint=${LINT_OK}" >> "$GITHUB_OUTPUT"
+          echo "typecheck=${TYPECHECK_OK}" >> "$GITHUB_OUTPUT"
+          echo "test=${TEST_OK}" >> "$GITHUB_OUTPUT"
+          echo "Baseline — lint=${LINT_OK}, typecheck=${TYPECHECK_OK}, test=${TEST_OK}"
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # PROMPT: Read prompt file and build agent prompt
+      # ─────────────────────────────────────────────────────────────────────────
+
+      - name: Read implementer prompt
+        if: steps.guard.outputs.should-implement == 'true'
+        id: prompt-file
+        run: |
+          if [[ -f ".codefactory/prompts/issue-implementer.md" ]]; then
+            {
+              echo "content<<PROMPT_EOF"
+              cat .codefactory/prompts/issue-implementer.md
+              echo "PROMPT_EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "content=Implement the feature or fix described in the issue." >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build implementation prompt (issue mode)
+        if: steps.guard.outputs.should-implement == 'true' && steps.guard.outputs.review-fix == 'false'
+        id: build-prompt
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          IMPLEMENTER_TEMPLATE: ${{ steps.prompt-file.outputs.content }}
+          ISSUE_JSON: ${{ github.event_name == 'workflow_dispatch' && inputs.pr_number == '' && steps.fetch-issue.outputs.json || toJSON(github.event.issue) }}
+          BASELINE_LINT: ${{ steps.baseline.outputs.lint }}
+          BASELINE_TYPECHECK: ${{ steps.baseline.outputs.typecheck }}
+          BASELINE_TEST: ${{ steps.baseline.outputs.test }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        with:
+          script: |
+            const fs = require('fs');
+            const issue = JSON.parse(process.env.ISSUE_JSON || '{}');
+            const template = process.env.IMPLEMENTER_TEMPLATE || '';
+
+            let conventions = '';
+            try { conventions = fs.readFileSync('CLAUDE.md', 'utf-8').slice(0, 6000); } catch {}
+
+            let config = '';
+            try { config = fs.readFileSync('harness.config.json', 'utf-8'); } catch {}
+
+            const baseLint = process.env.BASELINE_LINT === 'true';
+            const baseTypecheck = process.env.BASELINE_TYPECHECK === 'true';
+            const baseTest = process.env.BASELINE_TEST === 'true';
+
+            const prompt = [
+              template,
+              '',
+              '## Issue to Implement',
+              '',
+              `**Number**: #${issue.number}`,
+              `**Title**: ${issue.title}`,
+              `**Author**: ${(issue.user || {}).login || 'unknown'}`,
+              '',
+              '### Body',
+              '',
+              issue.body || '*(empty body)*',
+              '',
+              '## Project Conventions (from CLAUDE.md)',
+              '',
+              conventions || 'No CLAUDE.md found.',
+              '',
+              '## Harness Configuration',
+              '',
+              '```json',
+              config || '{}',
+              '```',
+              '',
+              '## Baseline Quality Gate State',
+              '',
+              '| Check | Status |',
+              '|-------|--------|',
+              `| Lint (\`ruff check .\`) | ${baseLint ? '✅ passing' : '❌ already failing'} |`,
+              `| Type Check (\`mypy pyworkflow\`) | ${baseTypecheck ? '✅ passing' : '❌ already failing'} |`,
+              `| Tests (\`pytest\`) | ${baseTest ? '✅ passing' : '❌ already failing'} |`,
+              '',
+              '> **Do not introduce regressions.** If a check was passing at baseline, it must still pass after your changes.',
+            ].join('\n');
+
+            core.setOutput('prompt', prompt);
+            core.info(`Implementation prompt built (${prompt.length} chars)`);
+
+      - name: Build review-fix prompt (review-fix mode)
+        if: steps.guard.outputs.should-implement == 'true' && steps.guard.outputs.review-fix == 'true'
+        id: build-fix-prompt
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          IMPLEMENTER_TEMPLATE: ${{ steps.prompt-file.outputs.content }}
+          REVIEW_BODY: ${{ steps.review-feedback.outputs.body }}
+          BASELINE_LINT: ${{ steps.baseline.outputs.lint }}
+          BASELINE_TYPECHECK: ${{ steps.baseline.outputs.typecheck }}
+          BASELINE_TEST: ${{ steps.baseline.outputs.test }}
+        with:
+          script: |
+            const fs = require('fs');
+            const template = process.env.IMPLEMENTER_TEMPLATE || '';
+            const reviewBody = process.env.REVIEW_BODY || '';
+
+            let conventions = '';
+            try { conventions = fs.readFileSync('CLAUDE.md', 'utf-8').slice(0, 6000); } catch {}
+
+            let config = '';
+            try { config = fs.readFileSync('harness.config.json', 'utf-8'); } catch {}
+
+            const baseLint = process.env.BASELINE_LINT === 'true';
+            const baseTypecheck = process.env.BASELINE_TYPECHECK === 'true';
+            const baseTest = process.env.BASELINE_TEST === 'true';
+
+            const prompt = [
+              template,
+              '',
+              '## Mode: Review-Fix',
+              '',
+              `You are fixing issues flagged in a code review for PR #${{ inputs.pr_number }} (cycle ${{ inputs.review_fix_cycle }} of 3).`,
+              'Address **only** the issues listed in the review feedback below. Do not make unrelated changes.',
+              '',
+              '## Review Feedback to Address',
+              '',
+              reviewBody || '*(no review feedback found)*',
+              '',
+              '## Project Conventions (from CLAUDE.md)',
+              '',
+              conventions || 'No CLAUDE.md found.',
+              '',
+              '## Harness Configuration',
+              '',
+              '```json',
+              config || '{}',
+              '```',
+              '',
+              '## Baseline Quality Gate State',
+              '',
+              '| Check | Status |',
+              '|-------|--------|',
+              `| Lint (\`ruff check .\`) | ${baseLint ? '✅ passing' : '❌ already failing'} |`,
+              `| Type Check (\`mypy pyworkflow\`) | ${baseTypecheck ? '✅ passing' : '❌ already failing'} |`,
+              `| Tests (\`pytest\`) | ${baseTest ? '✅ passing' : '❌ already failing'} |`,
+              '',
+              '> **Do not introduce regressions.** If a check was passing at baseline, it must still pass after your changes.',
+            ].join('\n');
+
+            core.setOutput('prompt', prompt);
+            core.info(`Review-fix prompt built (${prompt.length} chars)`);
+
+      - name: Post start comment on issue
+        if: steps.guard.outputs.should-implement == 'true' && steps.guard.outputs.review-fix == 'false' && steps.guard.outputs.issue-number != ''
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const issueNumber = parseInt('${{ steps.guard.outputs.issue-number }}', 10);
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: [
+                `<!-- issue-implementer-start: #${issueNumber} -->`,
+                '🤖 **Implementation agent starting...**',
+                '',
+                `**Branch**: \`${{ steps.guard.outputs.branch }}\``,
+                `**Run**: [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+                '',
+                '---',
+                '*🤖 Issue Implementer Agent — automated implementation.*',
+              ].join('\n'),
+            });
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # AGENT: Run Claude Code to implement changes
+      # ─────────────────────────────────────────────────────────────────────────
+
+      - name: Run Claude implementation agent (issue mode)
+        if: steps.guard.outputs.should-implement == 'true' && steps.guard.outputs.review-fix == 'false'
+        id: claude-implement
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: ${{ steps.build-prompt.outputs.prompt }}
+          claude_args: '--max-turns 100 --allowedTools "Edit,Write,Read,Glob,Grep,Bash"'
+          allowed_bots: 'github-actions'
+
+      - name: Run Claude review-fix agent (review-fix mode)
+        if: steps.guard.outputs.should-implement == 'true' && steps.guard.outputs.review-fix == 'true'
+        id: claude-fix
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: ${{ steps.build-fix-prompt.outputs.prompt }}
+          claude_args: '--max-turns 60 --allowedTools "Edit,Write,Read,Glob,Grep,Bash"'
+          allowed_bots: 'github-actions'
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # POST-AGENT: Detect changes and revert protected files
+      # ─────────────────────────────────────────────────────────────────────────
+
+      - name: Check for file changes
+        if: steps.guard.outputs.should-implement == 'true'
+        id: changes
+        run: |
+          MODIFIED=$(git diff --name-only 2>/dev/null || echo "")
+          UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null || echo "")
+          ALL_CHANGED=$(printf "%s\n%s" "$MODIFIED" "$UNTRACKED" | grep -v '^$' | sort -u)
+
+          if [[ -z "$ALL_CHANGED" ]]; then
+            echo "has-changes=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No files were modified by the implementation agent."
+          else
+            echo "has-changes=true" >> "$GITHUB_OUTPUT"
+            COUNT=$(echo "$ALL_CHANGED" | wc -l)
+            echo "count=${COUNT}" >> "$GITHUB_OUTPUT"
+            {
+              echo "files<<FILES_EOF"
+              echo "$ALL_CHANGED"
+              echo "FILES_EOF"
+            } >> "$GITHUB_OUTPUT"
+            echo "✔ ${COUNT} file(s) modified or created"
+          fi
+
+      - name: Revert protected files
+        if: steps.changes.outputs.has-changes == 'true'
+        id: protected
+        run: |
+          MODIFIED=$(git diff --name-only 2>/dev/null || echo "")
+
+          while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+            case "$file" in
+              .github/workflows/*|harness.config.json|CLAUDE.md|poetry.lock|pyproject.toml|.pre-commit-config.yaml)
+                git checkout -- "$file"
+                echo "::warning::Reverted protected file: ${file}"
+                ;;
+            esac
+          done <<< "$MODIFIED"
+
+          REMAINING_MOD=$(git diff --name-only 2>/dev/null || echo "")
+          REMAINING_NEW=$(git ls-files --others --exclude-standard 2>/dev/null || echo "")
+          REMAINING=$(printf "%s\n%s" "$REMAINING_MOD" "$REMAINING_NEW" | grep -v '^$' | sort -u)
+
+          if [[ -z "$REMAINING" ]]; then
+            echo "::notice::No changes remain after reverting protected files."
+            echo "has-remaining=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-remaining=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # QUALITY GATES: Regression-only check — only fail on introduced regressions
+      # ─────────────────────────────────────────────────────────────────────────
+
+      - name: Quality gate — Lint
+        if: steps.changes.outputs.has-changes == 'true' && steps.protected.outputs.has-remaining == 'true'
+        id: lint
+        run: |
+          if ruff check .; then
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Quality gate — Type Check
+        if: steps.changes.outputs.has-changes == 'true' && steps.protected.outputs.has-remaining == 'true'
+        id: typecheck
+        run: |
+          if mypy pyworkflow --ignore-missing-imports; then
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Quality gate — Tests
+        if: steps.changes.outputs.has-changes == 'true' && steps.protected.outputs.has-remaining == 'true'
+        id: test
+        run: |
+          if pytest --tb=short; then
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Evaluate regressions
+        if: steps.changes.outputs.has-changes == 'true' && steps.protected.outputs.has-remaining == 'true'
+        id: gates
+        run: |
+          BASE_LINT="${{ steps.baseline.outputs.lint }}"
+          BASE_TC="${{ steps.baseline.outputs.typecheck }}"
+          BASE_TEST="${{ steps.baseline.outputs.test }}"
+          POST_LINT="${{ steps.lint.outputs.passed || 'false' }}"
+          POST_TC="${{ steps.typecheck.outputs.passed || 'false' }}"
+          POST_TEST="${{ steps.test.outputs.passed || 'false' }}"
+
+          REGRESSIONS=""
+          [[ "$BASE_LINT"  == "true" && "$POST_LINT"  != "true" ]] && REGRESSIONS="${REGRESSIONS}lint "
+          [[ "$BASE_TC"    == "true" && "$POST_TC"    != "true" ]] && REGRESSIONS="${REGRESSIONS}typecheck "
+          [[ "$BASE_TEST"  == "true" && "$POST_TEST"  != "true" ]] && REGRESSIONS="${REGRESSIONS}test "
+
+          REGRESSIONS="${REGRESSIONS%% }"
+          if [[ -n "$REGRESSIONS" ]]; then
+            echo "has-regressions=true" >> "$GITHUB_OUTPUT"
+            echo "regressions=${REGRESSIONS}" >> "$GITHUB_OUTPUT"
+            echo "::warning::Regressions detected: ${REGRESSIONS} — will document in PR"
+          else
+            echo "has-regressions=false" >> "$GITHUB_OUTPUT"
+            echo "regressions=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # ISSUE MODE: Commit, push, and open pull request
+      # ─────────────────────────────────────────────────────────────────────────
+
+      - name: Commit and push (issue mode)
+        if: >
+          steps.guard.outputs.should-implement == 'true' &&
+          steps.guard.outputs.review-fix == 'false' &&
+          steps.changes.outputs.has-changes == 'true' &&
+          steps.protected.outputs.has-remaining == 'true'
+        id: commit
+        run: |
+          ISSUE_NUM="${{ steps.guard.outputs.issue-number }}"
+          ISSUE_TITLE="${{ steps.guard.outputs.issue-title }}"
+          BRANCH="${{ steps.guard.outputs.branch }}"
+
+          git add -A
+          git commit -m "$(cat <<COMMIT_EOF
+          feat: implement #${ISSUE_NUM} — ${ISSUE_TITLE}
+
+          Automated implementation by Issue Implementer Agent.
+          Issue: #${ISSUE_NUM}
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_EOF
+          )"
+
+          git push origin "$BRANCH"
+          NEW_SHA=$(git rev-parse HEAD)
+          echo "new-sha=${NEW_SHA}" >> "$GITHUB_OUTPUT"
+          echo "✔ Pushed implementation commit: ${NEW_SHA:0:12}"
+
+      - name: Create pull request
+        if: steps.commit.outputs.new-sha != ''
+        id: pr
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          ISSUE_NUMBER: ${{ steps.guard.outputs.issue-number }}
+          ISSUE_TITLE: ${{ steps.guard.outputs.issue-title }}
+          BRANCH: ${{ steps.guard.outputs.branch }}
+          CHANGED_FILES: ${{ steps.changes.outputs.files }}
+          NEW_SHA: ${{ steps.commit.outputs.new-sha }}
+          BASELINE_LINT: ${{ steps.baseline.outputs.lint }}
+          BASELINE_TYPECHECK: ${{ steps.baseline.outputs.typecheck }}
+          BASELINE_TEST: ${{ steps.baseline.outputs.test }}
+          POST_LINT: ${{ steps.lint.outputs.passed || 'skipped' }}
+          POST_TYPECHECK: ${{ steps.typecheck.outputs.passed || 'skipped' }}
+          POST_TEST: ${{ steps.test.outputs.passed || 'skipped' }}
+          HAS_REGRESSIONS: ${{ steps.gates.outputs.has-regressions || 'false' }}
+          REGRESSIONS: ${{ steps.gates.outputs.regressions || '' }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        with:
+          script: |
+            const issueNumber = parseInt(process.env.ISSUE_NUMBER, 10);
+            const issueTitle = process.env.ISSUE_TITLE || '';
+            const branch = process.env.BRANCH || '';
+            const newSha = process.env.NEW_SHA || '';
+            const changedFiles = (process.env.CHANGED_FILES || '').trim().split('\n').filter(Boolean);
+            const hasRegressions = process.env.HAS_REGRESSIONS === 'true';
+            const regressions = process.env.REGRESSIONS || '';
+            const defaultBranch = process.env.DEFAULT_BRANCH || 'main';
+
+            const tier3Paths = new Set([
+              'pyproject.toml', 'poetry.lock',
+              'pyworkflow/engine/executor.py', 'pyworkflow/engine/replay.py',
+              'pyworkflow/celery/tasks.py', 'pyworkflow/storage/base.py',
+              'harness.config.json',
+            ]);
+            const touchesTier3 = changedFiles.some(f => tier3Paths.has(f));
+
+            const gateRow = (label, base, post) => {
+              const baseIcon = base === 'true' ? '✅' : '❌';
+              let postIcon;
+              if (post === 'skipped') postIcon = '⏭️ skipped';
+              else if (post === 'true') postIcon = '✅';
+              else postIcon = base === 'true' ? '❌ regression' : '⚠️ failing';
+              return `| ${label} | ${baseIcon} | ${postIcon} |`;
+            };
+
+            const sections = [
+              `<!-- issue-implementer: #${issueNumber} -->`,
+              `## 🤖 Automated Implementation — #${issueNumber}`,
+              '',
+              `**Issue**: [#${issueNumber}: ${issueTitle}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/issues/${issueNumber})`,
+              `**SHA**: \`${newSha.slice(0, 12)}\``,
+              `**Branch**: \`${branch}\``,
+            ];
+
+            if (hasRegressions) {
+              sections.push('', `> ⚠️ **Quality gate regressions detected**: ${regressions}. Human review required before merging.`);
+            }
+            if (touchesTier3) {
+              sections.push('', '> 🔴 **Tier 3 critical paths modified** — requires human review and manual approval.');
+            }
+
+            sections.push(
+              '',
+              '### Files Changed',
+              '',
+              ...changedFiles.map(f => `- \`${f}\``),
+              '',
+              '### Quality Gates',
+              '',
+              '| Check | Baseline | Post-Implementation |',
+              '|-------|----------|---------------------|',
+              gateRow('Lint (`ruff check .`)', process.env.BASELINE_LINT, process.env.POST_LINT),
+              gateRow('Type Check (`mypy pyworkflow`)', process.env.BASELINE_TYPECHECK, process.env.POST_TYPECHECK),
+              gateRow('Tests (`pytest`)', process.env.BASELINE_TEST, process.env.POST_TEST),
+              '',
+              '---',
+              '',
+              `Closes #${issueNumber}`,
+              '',
+              '---',
+              `*🤖 [Issue Implementer Agent](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) — automated implementation.*`,
+            );
+
+            const { data: newPr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `feat: ${issueTitle}`,
+              head: branch,
+              base: defaultBranch,
+              body: sections.join('\n'),
+            });
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: newPr.number,
+              labels: ['agent-pr'],
+            });
+
+            core.setOutput('pr-url', newPr.html_url);
+            core.setOutput('pr-number', String(newPr.number));
+            core.info(`PR created: ${newPr.html_url}`);
+
+      - name: Comment PR link on issue
+        if: steps.pr.outputs.pr-url != ''
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const issueNumber = parseInt('${{ steps.guard.outputs.issue-number }}', 10);
+            const prUrl = '${{ steps.pr.outputs.pr-url }}';
+            const prNumber = '${{ steps.pr.outputs.pr-number }}';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: [
+                `<!-- issue-implementer-pr: #${issueNumber} -->`,
+                `✅ **PR created**: ${prUrl}`,
+                '',
+                `Implementation is ready for review in [#${prNumber}](${prUrl}).`,
+                '',
+                '---',
+                '*🤖 Issue Implementer Agent — automated implementation.*',
+              ].join('\n'),
+            });
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # REVIEW-FIX MODE: Commit fixes and push to existing branch
+      # ─────────────────────────────────────────────────────────────────────────
+
+      - name: Commit and push (review-fix mode)
+        if: >
+          steps.guard.outputs.should-implement == 'true' &&
+          steps.guard.outputs.review-fix == 'true' &&
+          steps.changes.outputs.has-changes == 'true' &&
+          steps.protected.outputs.has-remaining == 'true'
+        id: fix-commit
+        run: |
+          CYCLE="${{ inputs.review_fix_cycle }}"
+          PR_NUM="${{ inputs.pr_number }}"
+
+          git add -A
+          git commit -m "$(cat <<COMMIT_EOF
+          fix: address review feedback (cycle ${CYCLE})
+
+          Review-fix by Issue Implementer Agent.
+          PR: #${PR_NUM}, cycle ${CYCLE}
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_EOF
+          )"
+
+          git push
+          NEW_SHA=$(git rev-parse HEAD)
+          echo "new-sha=${NEW_SHA}" >> "$GITHUB_OUTPUT"
+          echo "✔ Pushed review-fix commit: ${NEW_SHA:0:12}"
+
+      - name: Add review-fix-cycle label
+        if: steps.guard.outputs.review-fix == 'true' && steps.fix-commit.outputs.new-sha != ''
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const prNumber = parseInt('${{ inputs.pr_number }}', 10);
+            const cycle = '${{ inputs.review_fix_cycle }}';
+            const label = `review-fix-cycle-${cycle}`;
+
+            try {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: label,
+                color: '7B68EE',
+                description: `Review-fix cycle ${cycle}`,
+              });
+            } catch {
+              // Label already exists — fine
+            }
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              labels: [label],
+            });
+            core.info(`Added label: ${label}`);
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # FAILURE HANDLER
+      # ─────────────────────────────────────────────────────────────────────────
+
+      - name: Failure handler
+        if: failure() && steps.guard.outputs.should-implement == 'true'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const reviewFix = '${{ steps.guard.outputs.review-fix }}' === 'true';
+            const issueNum = '${{ steps.guard.outputs.issue-number }}';
+            const prNum = '${{ inputs.pr_number }}';
+            const commentTarget = reviewFix
+              ? parseInt(prNum || '0', 10)
+              : parseInt(issueNum || '0', 10);
+
+            if (!commentTarget) return;
+
+            try {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: 'agent:needs-judgment',
+                color: 'E4E669',
+                description: 'Agent needs human judgment to proceed',
+              });
+            } catch {}
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: commentTarget,
+              labels: ['agent:needs-judgment'],
+            });
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: commentTarget,
+              body: [
+                `<!-- issue-implementer-failed: #${commentTarget} -->`,
+                '❌ **Implementation Agent — Failed**',
+                '',
+                'The implementation agent encountered an error.',
+                'A human should review the failure and decide next steps.',
+                '',
+                `**Branch**: \`${{ steps.guard.outputs.branch }}\``,
+                `**Run**: [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+                '',
+                '---',
+                '*🤖 Issue Implementer Agent — automated implementation.*',
+              ].join('\n'),
+            });

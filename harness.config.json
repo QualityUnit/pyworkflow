@@ -139,7 +139,35 @@
     "requiredForUI": false,
     "browserTool": null
   },
-  "architecturalBoundaries": {},
+  "architecturalBoundaries": {
+    "core": {
+      "allowedImports": ["context", "engine", "serialization", "storage", "celery", "primitives"]
+    },
+    "engine": {
+      "allowedImports": ["context", "core", "serialization", "storage"]
+    },
+    "celery": {
+      "allowedImports": ["context", "core", "engine", "observability", "primitives", "serialization", "storage", "utils"]
+    },
+    "storage": {
+      "allowedImports": ["engine"]
+    },
+    "context": {
+      "allowedImports": ["core", "engine", "primitives", "serialization", "storage", "utils"]
+    },
+    "primitives": {
+      "allowedImports": ["context", "core", "engine", "serialization", "storage", "utils"]
+    },
+    "serialization": {
+      "allowedImports": []
+    },
+    "observability": {
+      "allowedImports": []
+    },
+    "utils": {
+      "allowedImports": ["storage"]
+    }
+  },
   "monorepo": {
     "enabled": false,
     "packages": [],

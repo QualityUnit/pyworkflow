@@ -92,7 +92,7 @@ jobs:
         with:
           ref: ${{ needs.risk-gate.outputs.sha }}
 
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+      - uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
         with:
           python-version: '3.11'
 
@@ -112,11 +112,11 @@ jobs:
         with:
           ref: ${{ needs.risk-gate.outputs.sha }}
 
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+      - uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
         with:
           python-version: '3.11'
 
-      - uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a  # v4.2.0
+      - uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-3.11-${{ hashFiles('pyproject.toml') }}
@@ -135,11 +135,11 @@ jobs:
         with:
           ref: ${{ needs.risk-gate.outputs.sha }}
 
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+      - uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
         with:
           python-version: '3.11'
 
-      - uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a  # v4.2.0
+      - uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-3.11-${{ hashFiles('pyproject.toml') }}
@@ -158,11 +158,11 @@ jobs:
         with:
           ref: ${{ needs.risk-gate.outputs.sha }}
 
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+      - uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
         with:
           python-version: '3.11'
 
-      - uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a  # v4.2.0
+      - uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-3.11-${{ hashFiles('pyproject.toml') }}
@@ -181,11 +181,11 @@ jobs:
         with:
           ref: ${{ needs.risk-gate.outputs.sha }}
 
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+      - uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
         with:
           python-version: '3.11'
 
-      - uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a  # v4.2.0
+      - uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-3.11-${{ hashFiles('pyproject.toml') }}
@@ -227,11 +227,11 @@ jobs:
         with:
           ref: ${{ needs.risk-gate.outputs.sha }}
 
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+      - uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
         with:
           python-version: '3.11'
 
-      - uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a  # v4.2.0
+      - uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-3.11-${{ hashFiles('pyproject.toml') }}

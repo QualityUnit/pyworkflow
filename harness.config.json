@@ -1,0 +1,291 @@
+{
+  "version": "1.0.0",
+  "repoRoot": "/home/yasha/Desktop/projects/pyworkflow",
+  "detection": {
+    "primaryLanguage": "Python",
+    "framework": null,
+    "packageManager": null,
+    "ciProvider": "GitHub Actions",
+    "monorepo": false
+  },
+  "riskTiers": {
+    "tier1": {
+      "name": "low",
+      "description": "Documentation, markdown files, license, and non-code project metadata",
+      "patterns": [
+        "docs/**",
+        "*.md",
+        "**/*.md",
+        "*.mdx",
+        "**/*.mdx",
+        "LICENSE",
+        "MANIFEST.in",
+        ".gitignore",
+        ".dockerignore",
+        ".editorconfig"
+      ],
+      "requiredChecks": [
+        "lint",
+        "harness-smoke"
+      ],
+      "mergePolicy": {
+        "minApprovals": 0,
+        "requireReviewAgent": false,
+        "allowSelfMerge": true
+      },
+      "evidenceRequirements": []
+    },
+    "tier2": {
+      "name": "medium",
+      "description": "Source code, tests, examples, workflow configs, and non-critical package config",
+      "patterns": [
+        "pyworkflow/**/*.py",
+        "pyworkflow_agents/**",
+        "tests/**",
+        "examples/**",
+        ".github/workflows/**",
+        ".pre-commit-config.yaml",
+        "docker-compose.yaml"
+      ],
+      "requiredChecks": [
+        "lint",
+        "type-check",
+        "test",
+        "build",
+        "structural-tests",
+        "review-agent",
+        "harness-smoke"
+      ],
+      "mergePolicy": {
+        "minApprovals": 1,
+        "requireReviewAgent": false,
+        "allowSelfMerge": false
+      },
+      "evidenceRequirements": [
+        "tests-pass",
+        "lint-clean",
+        "type-check-clean"
+      ]
+    },
+    "tier3": {
+      "name": "high",
+      "description": "Project manifest, dependency lock, execution engine, storage contracts — changes here affect every environment and require human review",
+      "patterns": [
+        "pyproject.toml",
+        "poetry.lock",
+        "pyworkflow/engine/executor.py",
+        "pyworkflow/engine/replay.py",
+        "pyworkflow/celery/tasks.py",
+        "pyworkflow/storage/base.py",
+        "harness.config.json"
+      ],
+      "requiredChecks": [
+        "lint",
+        "type-check",
+        "test",
+        "build",
+        "structural-tests",
+        "review-agent",
+        "harness-smoke",
+        "manual-approval",
+        "expanded-coverage"
+      ],
+      "mergePolicy": {
+        "minApprovals": 2,
+        "requireReviewAgent": true,
+        "allowSelfMerge": false
+      },
+      "evidenceRequirements": [
+        "tests-pass",
+        "lint-clean",
+        "type-check-clean",
+        "manual-review"
+      ]
+    }
+  },
+  "commands": {
+    "test": "pytest",
+    "build": "python -m build",
+    "lint": "ruff check .",
+    "typeCheck": "mypy pyworkflow --ignore-missing-imports"
+  },
+  "docsDrift": {
+    "trackedDocs": [
+      "README.md",
+      "docs",
+      "CLAUDE.md",
+      "DISTRIBUTED.md",
+      "RELEASING.md"
+    ],
+    "maxStaleDays": 30,
+    "requireUpdateWithCodeChange": false,
+    "exemptPatterns": [
+      "tests/**",
+      "examples/**",
+      "**/__pycache__/**",
+      "**/*.pyc",
+      "*.egg-info/**"
+    ]
+  },
+  "shaDiscipline": {
+    "enabled": true,
+    "enforceExactSha": true,
+    "rejectStaleReviews": true,
+    "description": "All CI gates pin to exact commit SHA from the risk policy gate"
+  },
+  "evidenceConfig": {
+    "screenshotDir": ".harness/evidence",
+    "retentionDays": 30,
+    "requiredForUI": false,
+    "browserTool": null
+  },
+  "architecturalBoundaries": {},
+  "monorepo": {
+    "enabled": false,
+    "packages": [],
+    "sharedChecks": []
+  },
+  "generatedAt": "2026-02-22T13:11:28.026Z",
+  "lastUpdated": "2026-02-22T14:01:03.919Z",
+  "harnesses": [
+    {
+      "name": "risk-contract",
+      "enabled": true,
+      "generatedAt": "2026-02-22T14:01:03.919Z",
+      "files": [
+        "/home/yasha/Desktop/projects/pyworkflow/harness.config.json"
+      ]
+    },
+    {
+      "name": "claude-md",
+      "enabled": true,
+      "generatedAt": "2026-02-22T14:01:03.919Z",
+      "files": [
+        "/home/yasha/Desktop/projects/pyworkflow/CLAUDE.md",
+        "/home/yasha/Desktop/projects/pyworkflow/.mcp.json"
+      ]
+    },
+    {
+      "name": "docs-structure",
+      "enabled": true,
+      "generatedAt": "2026-02-22T14:01:03.919Z",
+      "files": [
+        "/home/yasha/Desktop/projects/pyworkflow/docs/architecture.md",
+        "/home/yasha/Desktop/projects/pyworkflow/docs/conventions.md",
+        "/home/yasha/Desktop/projects/pyworkflow/docs/layers.md"
+      ]
+    },
+    {
+      "name": "pre-commit-hooks",
+      "enabled": true,
+      "generatedAt": "2026-02-22T14:01:03.919Z",
+      "files": [
+        "/home/yasha/Desktop/projects/pyworkflow/.pre-commit-config.yaml"
+      ]
+    },
+    {
+      "name": "risk-policy-gate",
+      "enabled": true,
+      "generatedAt": "2026-02-22T14:01:03.919Z",
+      "files": [
+        "/home/yasha/Desktop/projects/pyworkflow/harness.config.json",
+        "/home/yasha/Desktop/projects/pyworkflow/scripts/risk-policy-gate.sh",
+        "/home/yasha/Desktop/projects/pyworkflow/.github/workflows/risk-policy-gate.yml"
+      ]
+    },
+    {
+      "name": "ci-pipeline",
+      "enabled": true,
+      "generatedAt": "2026-02-22T14:01:03.919Z",
+      "files": [
+        "/home/yasha/Desktop/projects/pyworkflow/.github/workflows/ci.yml",
+        "/home/yasha/Desktop/projects/pyworkflow/.github/workflows/structural-tests.yml",
+        "/home/yasha/Desktop/projects/pyworkflow/.github/workflows/harness-smoke.yml",
+        "/home/yasha/Desktop/projects/pyworkflow/scripts/structural-tests.sh"
+      ]
+    },
+    {
+      "name": "review-agent",
+      "enabled": true,
+      "generatedAt": "2026-02-22T14:01:03.919Z",
+      "files": [
+        "/home/yasha/Desktop/projects/pyworkflow/.github/workflows/code-review-agent.yml",
+        "/home/yasha/Desktop/projects/pyworkflow/.github/workflows/review-agent-rerun.yml",
+        "/home/yasha/Desktop/projects/pyworkflow/.github/workflows/auto-resolve-threads.yml",
+        "/home/yasha/Desktop/projects/pyworkflow/scripts/review-agent-utils.ts",
+        "/home/yasha/Desktop/projects/pyworkflow/.codefactory/prompts/review-agent.md"
+      ]
+    },
+    {
+      "name": "remediation-loop",
+      "enabled": true,
+      "generatedAt": "2026-02-22T14:01:03.919Z",
+      "files": [
+        "/home/yasha/Desktop/projects/pyworkflow/.github/workflows/remediation-agent.yml",
+        "/home/yasha/Desktop/projects/pyworkflow/scripts/remediation-agent-prompt.md",
+        "/home/yasha/Desktop/projects/pyworkflow/scripts/remediation-guard.ts"
+      ]
+    },
+    {
+      "name": "pr-templates",
+      "enabled": true,
+      "generatedAt": "2026-02-22T14:01:03.919Z",
+      "files": [
+        "/home/yasha/Desktop/projects/pyworkflow/.github/PULL_REQUEST_TEMPLATE.md",
+        "/home/yasha/Desktop/projects/pyworkflow/.github/PULL_REQUEST_TEMPLATE/agent-pr.md"
+      ]
+    },
+    {
+      "name": "garbage-collection",
+      "enabled": true,
+      "generatedAt": "2026-02-22T14:01:03.919Z",
+      "files": []
+    },
+    {
+      "name": "incident-harness-loop",
+      "enabled": true,
+      "generatedAt": "2026-02-22T14:01:03.919Z",
+      "files": [
+        "/home/yasha/Desktop/projects/pyworkflow/.github/ISSUE_TEMPLATE/harness-gap.md",
+        "/home/yasha/Desktop/projects/pyworkflow/docs/harness-gaps.md",
+        "/home/yasha/Desktop/projects/pyworkflow/.github/workflows/weekly-metrics.yml"
+      ]
+    },
+    {
+      "name": "issue-triage",
+      "enabled": true,
+      "generatedAt": "2026-02-22T14:01:03.919Z",
+      "files": [
+        "/home/yasha/Desktop/projects/pyworkflow/.github/workflows/issue-triage.yml",
+        "/home/yasha/Desktop/projects/pyworkflow/.codefactory/prompts/issue-triage.md",
+        "/home/yasha/Desktop/projects/pyworkflow/scripts/issue-triage-guard.ts"
+      ]
+    },
+    {
+      "name": "issue-planner",
+      "enabled": true,
+      "generatedAt": "2026-02-22T14:01:03.919Z",
+      "files": [
+        "/home/yasha/Desktop/projects/pyworkflow/.github/workflows/issue-planner.yml",
+        "/home/yasha/Desktop/projects/pyworkflow/scripts/issue-planner-guard.ts",
+        "/home/yasha/Desktop/projects/pyworkflow/.codefactory/prompts/issue-planner.md"
+      ]
+    },
+    {
+      "name": "issue-implementer",
+      "enabled": true,
+      "generatedAt": "2026-02-22T14:01:03.919Z",
+      "files": [
+        "/home/yasha/Desktop/projects/pyworkflow/.github/workflows/issue-implementer.yml",
+        "/home/yasha/Desktop/projects/pyworkflow/scripts/issue-implementer-guard.ts",
+        "/home/yasha/Desktop/projects/pyworkflow/.codefactory/prompts/issue-implementer.md"
+      ]
+    },
+    {
+      "name": "skills-installer",
+      "enabled": true,
+      "generatedAt": "2026-02-22T14:01:03.919Z",
+      "files": []
+    }
+  ]
+}

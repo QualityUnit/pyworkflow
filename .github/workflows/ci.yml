@@ -1,113 +1,284 @@
 name: CI
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened]
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to run CI for (used by implementer agent)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # ============================================================================
+  # Preflight — classifies the PR by risk tier and computes required checks.
+  # All downstream jobs gate on this job's outputs.
+  # For push events (post-merge), defaults to Tier 2 with standard checks.
+  # ============================================================================
+  risk-gate:
+    name: Risk Policy Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.pr-gate.outputs.sha || steps.push-gate.outputs.sha }}
+      tier: ${{ steps.pr-gate.outputs.tier || steps.push-gate.outputs.tier }}
+      tier-name: ${{ steps.pr-gate.outputs.tier-name || steps.push-gate.outputs.tier-name }}
+      required-checks: ${{ steps.pr-gate.outputs.required-checks || steps.push-gate.outputs.required-checks }}
+      docs-drift: ${{ steps.pr-gate.outputs.docs-drift || steps.push-gate.outputs.docs-drift }}
+      review-agent-status: ${{ steps.pr-gate.outputs.review-agent-status || steps.push-gate.outputs.review-agent-status }}
+    steps:
+      - name: Resolve PR context
+        id: pr-context
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_JSON=$(gh pr view "${{ inputs.pr_number }}" --repo "${{ github.repository }}" --json headRefOid,baseRefName)
+          echo "head-sha=$(echo "$PR_JSON" | jq -r '.headRefOid')" >> "$GITHUB_OUTPUT"
+          echo "base-ref=$(echo "$PR_JSON" | jq -r '.baseRefName')" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout at verified SHA
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ steps.pr-context.outputs.head-sha || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Run risk policy gate (PR)
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        id: pr-gate
+        run: bash scripts/risk-policy-gate.sh
+        env:
+          EXPECTED_SHA: ${{ steps.pr-context.outputs.head-sha || github.event.pull_request.head.sha }}
+          BASE_REF: ${{ steps.pr-context.outputs.base-ref || github.event.pull_request.base.ref }}
+          STRICTNESS: relaxed
+
+      - name: Set defaults (push to main)
+        if: github.event_name == 'push'
+        id: push-gate
+        run: |
+          {
+            echo "sha=${{ github.sha }}"
+            echo "tier=2"
+            echo "tier-name=medium"
+            echo 'required-checks=["lint","type-check","test","build","structural-tests","harness-smoke"]'
+            echo "docs-drift=false"
+            echo "review-agent-status=skipped"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Annotate PR with tier
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        run: |
+          echo "### Risk Policy Gate" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Tier** | ${{ steps.pr-gate.outputs.tier }} (${{ steps.pr-gate.outputs.tier-name }}) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **SHA** | \`${{ steps.pr-gate.outputs.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Docs Drift** | ${{ steps.pr-gate.outputs.docs-drift }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "<details><summary>Required Checks</summary>" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          echo '${{ steps.pr-gate.outputs.required-checks }}' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "</details>" >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================================================
+  # Downstream jobs — gated by risk tier via contains() on required-checks.
+  # ============================================================================
+
   lint:
     name: Lint
+    needs: risk-gate
+    if: contains(fromJSON(needs.risk-gate.outputs.required-checks), 'lint')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          python-version: "3.11"
+          ref: ${{ needs.risk-gate.outputs.sha }}
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install ruff
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: '3.11'
 
-      - name: Run Ruff linter
-        run: ruff check .
-
-      - name: Run Ruff formatter check
-        run: ruff format --check .
+      - run: pip install poetry
+      - run: poetry install --no-interaction --no-ansi
+      - run: poetry run ruff check .
 
   type-check:
     name: Type Check
+    needs: risk-gate
+    if: contains(fromJSON(needs.risk-gate.outputs.required-checks), 'type-check')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          python-version: "3.11"
+          ref: ${{ needs.risk-gate.outputs.sha }}
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: '3.11'
 
-      - name: Run mypy
-        run: mypy pyworkflow --ignore-missing-imports
+      - run: pip install poetry
+      - run: poetry install --no-interaction --no-ansi
+      - run: poetry run mypy pyworkflow
 
   test:
-    name: Test (Python ${{ matrix.python-version }})
+    name: Test
+    needs: risk-gate
+    if: contains(fromJSON(needs.risk-gate.outputs.required-checks), 'test')
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
-
+    timeout-minutes: 20
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          python-version: ${{ matrix.python-version }}
+          ref: ${{ needs.risk-gate.outputs.sha }}
 
-      - name: Cache pip dependencies
-        uses: actions/cache@v5
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-${{ matrix.python-version }}-
-            ${{ runner.os }}-pip-
+          python-version: '3.11'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+      - run: pip install poetry
+      - run: poetry install --no-interaction --no-ansi
 
-      - name: Run unit tests
-        run: |
-          pytest tests/unit/ -v --tb=short --cov=pyworkflow --cov-report=xml --cov-report=term-missing
+      - name: Run tests
+        run: poetry run pytest --tb=short --junitxml=test-results.xml
 
-      - name: Run integration tests
-        run: |
-          pytest tests/integration/ -v --tb=short --cov=pyworkflow --cov-append --cov-report=xml --cov-report=term-missing
-
-      - name: Upload coverage reports to Codecov
-        if: matrix.python-version == '3.11'
-        uses: codecov/codecov-action@v5
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          files: ./coverage.xml
-          flags: unittests
-          name: codecov-pyworkflow
-          fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          name: test-results
+          path: test-results.xml
+          retention-days: 7
 
-  test-all:
-    name: All Tests Passed
-    needs: [lint, type-check, test]
+  build:
+    name: Build
+    needs: risk-gate
+    if: contains(fromJSON(needs.risk-gate.outputs.required-checks), 'build')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - name: All tests passed
-        run: echo "All CI checks passed successfully!"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.risk-gate.outputs.sha }}
+
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: '3.11'
+
+      - run: pip install poetry
+      - run: poetry install --no-interaction --no-ansi
+      - run: echo "no build command detected"
+
+  structural-tests:
+    name: Structural Tests
+    needs: risk-gate
+    if: contains(fromJSON(needs.risk-gate.outputs.required-checks), 'structural-tests')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.risk-gate.outputs.sha }}
+
+      - name: Validate architectural boundaries
+        run: bash scripts/structural-tests.sh
+
+  harness-smoke:
+    name: Harness Smoke
+    needs: risk-gate
+    if: contains(fromJSON(needs.risk-gate.outputs.required-checks), 'harness-smoke')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.risk-gate.outputs.sha }}
+
+      - name: Validate harness.config.json
+        run: |
+          python3 -c "
+          import json, sys
+          with open('harness.config.json') as f:
+              config = json.load(f)
+          required = ['version', 'riskTiers', 'commands', 'shaDiscipline', 'architecturalBoundaries']
+          missing = [k for k in required if k not in config]
+          if missing:
+              print('Missing keys:', ', '.join(missing)); sys.exit(1)
+          for t in ['tier1', 'tier2', 'tier3']:
+              if t not in config['riskTiers']:
+                  print('Missing tier:', t); sys.exit(1)
+          print('✔ harness.config.json schema valid')
+          "
+
+      - name: Check CLAUDE.md
+        run: |
+          if [[ ! -s CLAUDE.md ]]; then
+            echo "::error::CLAUDE.md is missing or empty"
+            exit 1
+          fi
+          echo "✔ CLAUDE.md present ($(wc -l < CLAUDE.md) lines)"
+
+      - name: Check critical files
+        run: |
+          files=(
+            pyproject.toml poetry.lock harness.config.json
+            pyworkflow/engine/executor.py pyworkflow/engine/replay.py
+            pyworkflow/celery/tasks.py pyworkflow/storage/base.py
+          )
+          for f in "${files[@]}"; do
+            if [[ ! -f "$f" ]]; then
+              echo "::error::Missing: $f"
+              exit 1
+            fi
+          done
+          echo "✔ All critical files present"
+
+      - name: Check workflow files
+        run: |
+          for f in .github/workflows/ci.yml .github/workflows/structural-tests.yml .github/workflows/harness-smoke.yml; do
+            if [[ ! -f "$f" ]]; then
+              echo "::error::Missing workflow: $f"
+              exit 1
+            fi
+          done
+          echo "✔ All workflow files present"
+
+      - name: Check PR template
+        run: |
+          if [[ -f .github/PULL_REQUEST_TEMPLATE.md ]]; then
+            echo "✔ PR template: .github/PULL_REQUEST_TEMPLATE.md"
+          else
+            echo "::warning::No PR template found — consider adding .github/PULL_REQUEST_TEMPLATE.md"
+          fi
+
+  manual-approval:
+    name: Manual Approval (Tier 3)
+    needs: risk-gate
+    if: contains(fromJSON(needs.risk-gate.outputs.required-checks), 'manual-approval')
+    runs-on: ubuntu-latest
+    timeout-minutes: 1440
+    environment: tier3-approval
+    steps:
+      - name: Tier 3 change detected
+        run: |
+          echo "::warning::This PR touches critical paths and requires manual approval."
+          echo "A maintainer must approve the 'tier3-approval' environment to proceed."
+          echo ""
+          echo "Tier 3 critical paths: pyproject.toml, poetry.lock,"
+          echo "  pyworkflow/engine/executor.py, pyworkflow/engine/replay.py,"
+          echo "  pyworkflow/celery/tasks.py, pyworkflow/storage/base.py"

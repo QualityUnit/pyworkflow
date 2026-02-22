@@ -554,10 +554,14 @@ jobs:
           steps.changes.outputs.has-changes == 'true' &&
           steps.protected.outputs.has-remaining == 'true'
         id: commit
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           ISSUE_NUM="${{ steps.guard.outputs.issue-number }}"
           ISSUE_TITLE="${{ steps.guard.outputs.issue-title }}"
           BRANCH="${{ steps.guard.outputs.branch }}"
+
+          git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${{ github.repository }}.git"
 
           git add -A
           git commit -m "$(cat <<COMMIT_EOF
@@ -713,9 +717,13 @@ jobs:
           steps.changes.outputs.has-changes == 'true' &&
           steps.protected.outputs.has-remaining == 'true'
         id: fix-commit
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           CYCLE="${{ inputs.review_fix_cycle }}"
           PR_NUM="${{ inputs.pr_number }}"
+
+          git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${{ github.repository }}.git"
 
           git add -A
           git commit -m "$(cat <<COMMIT_EOF

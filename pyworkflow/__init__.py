@@ -102,6 +102,7 @@ from pyworkflow.engine.executor import (
     get_workflow_chain,
     get_workflow_events,
     get_workflow_run,
+    get_workflow_run_by_idempotency_key,
     resume,
     start,
 )
@@ -202,6 +203,7 @@ __all__ = [
     "resume",
     "cancel_workflow",
     "get_workflow_run",
+    "get_workflow_run_by_idempotency_key",
     "get_workflow_events",
     "get_workflow_chain",
     # Exceptions

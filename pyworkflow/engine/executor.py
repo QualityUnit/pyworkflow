@@ -475,6 +475,34 @@ async def get_workflow_run(
     return await storage.get_run(run_id)
 
 
+async def get_workflow_run_by_idempotency_key(
+    idempotency_key: str,
+    storage: StorageBackend | None = None,
+) -> WorkflowRun | None:
+    """
+    Get workflow run information by idempotency key.
+
+    Args:
+        idempotency_key: Idempotency key used when the run was started
+        storage: Storage backend (defaults to configured storage or FileStorageBackend)
+
+    Returns:
+        WorkflowRun if found, None otherwise
+    """
+    if storage is None:
+        from pyworkflow.config import get_config
+
+        config = get_config()
+        storage = config.storage
+
+    if storage is None:
+        from pyworkflow.storage.file import FileStorageBackend
+
+        storage = FileStorageBackend()
+
+    return await storage.get_run_by_idempotency_key(idempotency_key)
+
+
 async def get_workflow_events(
     run_id: str,
     storage: StorageBackend | None = None,

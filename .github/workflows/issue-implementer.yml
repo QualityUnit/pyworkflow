@@ -138,7 +138,7 @@ jobs:
 
       - name: Ensure implementer labels exist
         if: steps.guard.outputs.should-implement == 'true' && steps.guard.outputs.review-fix == 'false'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const labels = [
@@ -260,7 +260,7 @@ jobs:
       - name: Build implementation prompt (issue mode)
         if: steps.guard.outputs.should-implement == 'true' && steps.guard.outputs.review-fix == 'false'
         id: build-prompt
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           IMPLEMENTER_TEMPLATE: ${{ steps.prompt-file.outputs.content }}
           ISSUE_JSON: ${{ github.event_name == 'workflow_dispatch' && inputs.pr_number == '' && steps.fetch-issue.outputs.json || toJSON(github.event.issue) }}
@@ -324,7 +324,7 @@ jobs:
       - name: Build review-fix prompt (review-fix mode)
         if: steps.guard.outputs.should-implement == 'true' && steps.guard.outputs.review-fix == 'true'
         id: build-fix-prompt
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           IMPLEMENTER_TEMPLATE: ${{ steps.prompt-file.outputs.content }}
           REVIEW_BODY: ${{ steps.review-feedback.outputs.body }}
@@ -385,7 +385,7 @@ jobs:
 
       - name: Post start comment on issue
         if: steps.guard.outputs.should-implement == 'true' && steps.guard.outputs.review-fix == 'false' && steps.guard.outputs.issue-number != ''
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const issueNumber = parseInt('${{ steps.guard.outputs.issue-number }}', 10);
@@ -581,7 +581,7 @@ jobs:
       - name: Create pull request
         if: steps.commit.outputs.new-sha != ''
         id: pr
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           ISSUE_NUMBER: ${{ steps.guard.outputs.issue-number }}
           ISSUE_TITLE: ${{ steps.guard.outputs.issue-title }}
@@ -686,7 +686,7 @@ jobs:
 
       - name: Comment PR link on issue
         if: steps.pr.outputs.pr-url != ''
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const issueNumber = parseInt('${{ steps.guard.outputs.issue-number }}', 10);
@@ -743,7 +743,7 @@ jobs:
 
       - name: Add review-fix-cycle label
         if: steps.guard.outputs.review-fix == 'true' && steps.fix-commit.outputs.new-sha != ''
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const prNumber = parseInt('${{ inputs.pr_number }}', 10);
@@ -776,7 +776,7 @@ jobs:
 
       - name: Failure handler
         if: failure() && steps.guard.outputs.should-implement == 'true'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const reviewFix = '${{ steps.guard.outputs.review-fix }}' === 'true';

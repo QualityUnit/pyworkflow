@@ -132,7 +132,7 @@ jobs:
 
       - name: Post guard rejection comment
         if: steps.guard.outputs.should-remediate == 'false'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           DECISION: ${{ steps.guard.outputs.decision }}
           BASELINE_LINT: ${{ steps.baseline.outputs.lint }}
@@ -192,7 +192,7 @@ jobs:
       - name: Build remediation prompt
         if: steps.guard.outputs.should-remediate == 'true'
         id: build-prompt
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           FINDINGS_JSON: ${{ inputs.findings }}
           HEAD_SHA: ${{ inputs.head_sha }}
@@ -390,7 +390,7 @@ jobs:
 
       - name: Add remediation attempt label
         if: steps.guard.outputs.should-remediate == 'true'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           ATTEMPT: ${{ steps.guard.outputs.attempt }}
         with:
@@ -422,7 +422,7 @@ jobs:
 
       - name: Post audit comment
         if: always() && steps.guard.outputs.should-remediate == 'true'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           GUARD_DECISION: ${{ steps.guard.outputs.decision }}
           HAS_CHANGES: ${{ steps.changes.outputs.has-changes }}

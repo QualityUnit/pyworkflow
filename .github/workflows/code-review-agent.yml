@@ -130,7 +130,7 @@ jobs:
 
       - name: Notify PR — review agent skipped (Tier 1)
         if: steps.tier.outputs.tier == '1'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           HEAD_SHA: ${{ steps.pr.outputs.head-sha }}
           PR_NUMBER: ${{ steps.pr.outputs.pr-number }}
@@ -178,7 +178,7 @@ jobs:
       - name: SHA deduplication check
         if: steps.tier.outputs.tier != '1'
         id: dedup
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           HEAD_SHA: ${{ steps.pr.outputs.head-sha }}
           PR_NUMBER: ${{ steps.pr.outputs.pr-number }}
@@ -209,7 +209,7 @@ jobs:
       - name: Create in-progress check run
         if: steps.tier.outputs.tier != '1' && steps.dedup.outputs.skip != 'true'
         id: check
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           HEAD_SHA: ${{ steps.pr.outputs.head-sha }}
         with:
@@ -248,7 +248,7 @@ jobs:
       - name: Build review prompt
         if: steps.tier.outputs.tier != '1' && steps.dedup.outputs.skip != 'true'
         id: build-prompt
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           REVIEW_TEMPLATE: ${{ steps.prompt-file.outputs.content }}
           TIER: ${{ steps.tier.outputs.tier }}
@@ -350,7 +350,7 @@ jobs:
       - name: Post review comment
         if: steps.tier.outputs.tier != '1' && steps.dedup.outputs.skip != 'true'
         id: post-review
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           REVIEW_TEXT: ${{ steps.extract.outputs.review || '' }}
           REVIEW_FOUND: ${{ steps.extract.outputs.found || 'false' }}
@@ -465,7 +465,7 @@ jobs:
 
       - name: Update review comment with verdict
         if: steps.tier.outputs.tier != '1' && steps.dedup.outputs.skip != 'true' && steps.post-review.outputs.comment-id
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           COMMENT_ID: ${{ steps.post-review.outputs.comment-id }}
           VERDICT: ${{ steps.verdict.outputs.verdict || 'COMMENT' }}
@@ -510,7 +510,7 @@ jobs:
 
       - name: Complete check run
         if: always() && steps.check.outputs.check-run-id
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           CHECK_RUN_ID: ${{ steps.check.outputs.check-run-id }}
           REVIEW_OUTCOME: ${{ steps.review.outcome }}
@@ -538,7 +538,7 @@ jobs:
       - name: Check review-fix eligibility
         if: steps.tier.outputs.tier != '1' && steps.dedup.outputs.skip != 'true' && steps.verdict.outputs.verdict == 'REQUEST_CHANGES'
         id: review-fix
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           PR_NUMBER: ${{ steps.pr.outputs.pr-number }}
         with:
@@ -596,7 +596,7 @@ jobs:
 
       - name: Escalate — max review-fix cycles
         if: steps.review-fix.outputs.escalate == 'true'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           PR_NUMBER: ${{ steps.pr.outputs.pr-number }}
         with:
@@ -653,7 +653,7 @@ jobs:
 
       - name: Report skip as success
         if: steps.tier.outputs.tier == '1' || steps.dedup.outputs.skip == 'true'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           HEAD_SHA: ${{ steps.pr.outputs.head-sha }}
         with:

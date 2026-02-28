@@ -86,7 +86,7 @@ jobs:
 
       - name: Ensure planner labels exist
         if: steps.guard.outputs.should-plan == 'true'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const labels = [
@@ -124,7 +124,7 @@ jobs:
       - name: Build planning prompt
         if: steps.guard.outputs.should-plan == 'true'
         id: build-prompt
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           PLANNER_TEMPLATE: ${{ steps.prompt-file.outputs.content }}
           ISSUE_JSON: ${{ github.event_name == 'workflow_dispatch' && steps.fetch-issue.outputs.json || toJSON(github.event.issue) }}
@@ -222,7 +222,7 @@ jobs:
 
       - name: Post plan comment and add agent:implement label
         if: steps.guard.outputs.should-plan == 'true'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           PLAN_TEXT: ${{ steps.extract-plan.outputs.plan || '' }}
           PLAN_FOUND: ${{ steps.extract-plan.outputs.found || 'false' }}
@@ -269,7 +269,7 @@ jobs:
 
       - name: Failure handler
         if: failure() && steps.guard.outputs.should-plan == 'true'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const issueNumber = parseInt('${{ steps.guard.outputs.issue-number }}', 10);

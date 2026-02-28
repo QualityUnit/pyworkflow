@@ -18,7 +18,7 @@ Usage:
     ... )
 
 Environment Variables:
-    PYWORKFLOW_STORAGE_TYPE: Storage backend type (file, memory, sqlite, postgres, mysql)
+    PYWORKFLOW_STORAGE_TYPE: Storage backend type (file, memory, sqlite, postgres, mysql, citus)
     PYWORKFLOW_STORAGE_PATH: Path for file/sqlite backends
     PYWORKFLOW_POSTGRES_HOST: PostgreSQL host
     PYWORKFLOW_POSTGRES_PORT: PostgreSQL port
@@ -58,9 +58,9 @@ def _load_env_storage_config() -> dict[str, Any] | None:
 
     storage_type = storage_type.lower()
 
-    if storage_type == "postgres":
+    if storage_type in ("postgres", "citus"):
         return {
-            "type": "postgres",
+            "type": storage_type,
             "host": os.getenv("PYWORKFLOW_POSTGRES_HOST", "localhost"),
             "port": int(os.getenv("PYWORKFLOW_POSTGRES_PORT", "5432")),
             "user": os.getenv("PYWORKFLOW_POSTGRES_USER", "pyworkflow"),

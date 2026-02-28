@@ -47,6 +47,12 @@ try:
 except ImportError:
     MySQLStorageBackend = None  # type: ignore
 
+# Citus distributed PostgreSQL backend - optional import (requires asyncpg + Citus extension)
+try:
+    from pyworkflow.storage.citus import CitusStorageBackend
+except ImportError:
+    CitusStorageBackend = None  # type: ignore
+
 __all__ = [
     "StorageBackend",
     "FileStorageBackend",
@@ -56,6 +62,7 @@ __all__ = [
     "DynamoDBStorageBackend",
     "CassandraStorageBackend",
     "MySQLStorageBackend",
+    "CitusStorageBackend",
     "WorkflowRun",
     "StepExecution",
     "Hook",

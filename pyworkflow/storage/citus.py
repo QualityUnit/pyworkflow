@@ -350,9 +350,7 @@ class CitusStorageBackend(PostgresStorageBackend):
 
             # workflow_runs: anchor table, distribute first
             if "workflow_runs" not in distributed:
-                await conn.execute(
-                    "SELECT create_distributed_table('workflow_runs', 'run_id')"
-                )
+                await conn.execute("SELECT create_distributed_table('workflow_runs', 'run_id')")
 
             # Co-located tables: must reference the same distribution column
             colocated_run_id = ["events", "steps", "hooks", "cancellation_flags"]
@@ -365,9 +363,7 @@ class CitusStorageBackend(PostgresStorageBackend):
 
             # schedules: independent distribution
             if "schedules" not in distributed:
-                await conn.execute(
-                    "SELECT create_distributed_table('schedules', 'schedule_id')"
-                )
+                await conn.execute("SELECT create_distributed_table('schedules', 'schedule_id')")
 
             # schema_versions: reference table (replicated to all workers)
             if "schema_versions" not in distributed:

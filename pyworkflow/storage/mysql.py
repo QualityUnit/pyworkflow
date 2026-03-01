@@ -1290,8 +1290,7 @@ class MySQLStorageBackend(StorageBackend):
         terminal = ("completed", "failed", "cancelled", "continued_as_new", "interrupted")
         placeholders = ",".join("%s" * len(terminal))
         subq = (
-            f"SELECT run_id FROM workflow_runs "
-            f"WHERE status IN ({placeholders}) AND updated_at < %s"
+            f"SELECT run_id FROM workflow_runs WHERE status IN ({placeholders}) AND updated_at < %s"
         )
         params = (*terminal, older_than)
         async with pool.acquire() as conn:

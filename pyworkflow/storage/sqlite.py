@@ -1259,17 +1259,14 @@ class SQLiteStorageBackend(StorageBackend):
         terminal = ("completed", "failed", "cancelled", "continued_as_new", "interrupted")
         placeholders = ",".join("?" * len(terminal))
         subq = (
-            f"SELECT run_id FROM workflow_runs "
-            f"WHERE status IN ({placeholders}) AND updated_at < ?"
+            f"SELECT run_id FROM workflow_runs WHERE status IN ({placeholders}) AND updated_at < ?"
         )
         params = (*terminal, older_than.isoformat())
         async with db.cursor() as cur:
             await cur.execute(f"DELETE FROM events WHERE run_id IN ({subq})", params)
             await cur.execute(f"DELETE FROM steps WHERE run_id IN ({subq})", params)
             await cur.execute(f"DELETE FROM hooks WHERE run_id IN ({subq})", params)
-            await cur.execute(
-                f"DELETE FROM cancellation_flags WHERE run_id IN ({subq})", params
-            )
+            await cur.execute(f"DELETE FROM cancellation_flags WHERE run_id IN ({subq})", params)
             await cur.execute(
                 f"DELETE FROM workflow_runs WHERE status IN ({placeholders}) AND updated_at < ?",
                 params,

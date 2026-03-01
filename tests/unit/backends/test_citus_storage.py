@@ -15,7 +15,7 @@ import pytest
 # Skip all tests if asyncpg is not installed
 pytest.importorskip("asyncpg")
 
-from pyworkflow.storage.citus import CitusStorageBackend, CitusMigrationRunner
+from pyworkflow.storage.citus import CitusMigrationRunner, CitusStorageBackend
 from pyworkflow.storage.config import _create_storage_backend, config_to_storage, storage_to_config
 
 

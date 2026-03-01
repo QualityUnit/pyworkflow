@@ -84,8 +84,9 @@ def storage_to_config(storage: StorageBackend | None) -> dict[str, Any] | None:
             "port": getattr(storage, "port", 6379),
             "db": getattr(storage, "db", 0),
         }
-    elif class_name == "PostgresStorageBackend":
-        config: dict[str, Any] = {"type": "postgres"}
+    elif class_name in ("PostgresStorageBackend", "CitusStorageBackend"):
+        storage_type = "citus" if class_name == "CitusStorageBackend" else "postgres"
+        config: dict[str, Any] = {"type": storage_type}
         dsn = getattr(storage, "dsn", None)
         if dsn:
             config["dsn"] = dsn
@@ -240,6 +241,26 @@ def _create_storage_backend(config: dict[str, Any] | None) -> StorageBackend:
             return PostgresStorageBackend(dsn=config["dsn"])
         else:
             return PostgresStorageBackend(
+                host=config.get("host", "localhost"),
+                port=config.get("port", 5432),
+                user=config.get("user", "pyworkflow"),
+                password=config.get("password", ""),
+                database=config.get("database", "pyworkflow"),
+            )
+
+    elif storage_type == "citus":
+        try:
+            from pyworkflow.storage.citus import CitusStorageBackend
+        except ImportError:
+            raise ValueError(
+                "Citus storage backend is not available. Install asyncpg: pip install asyncpg"
+            )
+
+        # Support both DSN and individual parameters
+        if "dsn" in config:
+            return CitusStorageBackend(dsn=config["dsn"])
+        else:
+            return CitusStorageBackend(
                 host=config.get("host", "localhost"),
                 port=config.get("port", 5432),
                 user=config.get("user", "pyworkflow"),

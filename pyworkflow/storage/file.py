@@ -959,3 +959,40 @@ class FileStorageBackend(StorageBackend):
             schedule.running_run_ids.remove(run_id)
             schedule.updated_at = datetime.now(UTC)
             await self.update_schedule(schedule)
+
+    async def delete_old_runs(self, older_than: datetime) -> int:
+        """Delete terminal runs (and all related files) updated before older_than."""
+        terminal = {"completed", "failed", "cancelled", "continued_as_new", "interrupted"}
+
+        def _sync_delete() -> int:
+            count = 0
+            for run_file in list(self.runs_dir.glob("*.json")):
+                try:
+                    data = json.loads(run_file.read_text())
+                    if data.get("status") not in terminal:
+                        continue
+                    updated_at = datetime.fromisoformat(data["updated_at"])
+                    if updated_at >= older_than:
+                        continue
+                    run_id = data["run_id"]
+                    # Delete run file
+                    run_file.unlink(missing_ok=True)
+                    # Delete events file
+                    (self.events_dir / f"{run_id}.jsonl").unlink(missing_ok=True)
+                    # Delete step files belonging to this run
+                    for sf in list(self.steps_dir.glob("*.json")):
+                        try:
+                            sd = json.loads(sf.read_text())
+                            if sd.get("run_id") == run_id:
+                                sf.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                    # Delete hook files for this run
+                    for hf in list(self.hooks_dir.glob(f"{run_id}__*.json")):
+                        hf.unlink(missing_ok=True)
+                    count += 1
+                except Exception:
+                    continue
+            return count
+
+        return await asyncio.to_thread(_sync_delete)

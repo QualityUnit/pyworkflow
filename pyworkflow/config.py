@@ -33,6 +33,7 @@ Environment Variables:
     PYWORKFLOW_CELERY_BROKER: Celery broker URL
     PYWORKFLOW_CELERY_RESULT_BACKEND: Celery result backend URL
     PYWORKFLOW_RUNTIME: Default runtime (local, celery)
+    PYWORKFLOW_DATA_RETENTION_DAYS: Days to retain completed/failed/cancelled runs (unset = keep forever)
 """
 
 import os
@@ -161,6 +162,9 @@ class PyWorkflowConfig:
     celery_broker: str | None = None
     aws_region: str | None = None
 
+    # Data retention policy
+    data_retention_days: int | None = None  # None = keep forever
+
     # Event limit settings (WARNING: Do not modify unless you understand the implications)
     # These limits prevent runaway workflows from consuming excessive resources
     event_soft_limit: int = 10_000  # Log warning at this count
@@ -196,11 +200,21 @@ def _config_from_env_and_yaml() -> PyWorkflowConfig:
     celery_config = yaml_config.get("celery", {})
     celery_broker = os.getenv("PYWORKFLOW_CELERY_BROKER") or celery_config.get("broker")
 
+    # Data retention: env var > yaml > None (keep forever)
+    retention_env = os.getenv("PYWORKFLOW_DATA_RETENTION_DAYS")
+    if retention_env is not None:
+        data_retention_days: int | None = int(retention_env)
+    elif yaml_config.get("retention_days") is not None:
+        data_retention_days = int(yaml_config["retention_days"])
+    else:
+        data_retention_days = None
+
     return PyWorkflowConfig(
         default_runtime=runtime,
         default_durable=durable,
         storage=storage,
         celery_broker=celery_broker,
+        data_retention_days=data_retention_days,
     )
 
 
@@ -348,11 +362,16 @@ def configure_from_yaml(path: str | Path, discover: bool = True) -> None:
     celery_config = yaml_config.get("celery", {})
     celery_broker = celery_config.get("broker")
 
+    # Data retention
+    retention_raw = yaml_config.get("retention_days")
+    data_retention_days: int | None = int(retention_raw) if retention_raw is not None else None
+
     _config = PyWorkflowConfig(
         default_runtime=runtime,
         default_durable=durable,
         storage=storage,
         celery_broker=celery_broker,
+        data_retention_days=data_retention_days,
     )
     _config_loaded_from_yaml = True
 

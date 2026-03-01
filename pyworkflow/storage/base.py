@@ -700,6 +700,22 @@ class StorageBackend(ABC):
         """
         pass
 
+    @abstractmethod
+    async def delete_old_runs(self, older_than: datetime) -> int:
+        """
+        Delete workflow runs in terminal states last updated before `older_than`.
+
+        Terminal states: COMPLETED, FAILED, CANCELLED, CONTINUED_AS_NEW, INTERRUPTED.
+        Associated events, steps, hooks, and cancellation flags are deleted too.
+
+        Args:
+            older_than: Delete runs where updated_at < older_than
+
+        Returns:
+            Number of workflow runs deleted
+        """
+        pass
+
     async def health_check(self) -> bool:
         """
         Check if storage backend is healthy and accessible.

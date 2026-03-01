@@ -13,6 +13,7 @@ garbage collector and Celery's saferepr module. It does not affect functionality
 """
 
 import os
+from datetime import timedelta
 from typing import Any
 
 from celery import Celery
@@ -343,8 +344,14 @@ def create_celery_app(
         # Monitoring
         "worker_send_task_events": True,
         "task_send_sent_event": True,
-        # Beat scheduler (for sleep resumption)
-        "beat_schedule": {},
+        # Beat scheduler (for sleep resumption and periodic tasks)
+        "beat_schedule": {
+            "pyworkflow-data-retention": {
+                "task": "pyworkflow.run_data_retention",
+                "schedule": timedelta(hours=24),
+                "options": {"queue": "pyworkflow.default"},
+            },
+        },
         # Logging
         "worker_log_format": "[%(asctime)s: %(levelname)s/%(processName)s] %(message)s",
         "worker_task_log_format": "[%(asctime)s: %(levelname)s/%(processName)s] [%(task_name)s(%(task_id)s)] %(message)s",

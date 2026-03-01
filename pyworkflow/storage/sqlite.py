@@ -1253,6 +1253,28 @@ class SQLiteStorageBackend(StorageBackend):
             schedule.updated_at = datetime.now(UTC)
             await self.update_schedule(schedule)
 
+    async def delete_old_runs(self, older_than: datetime) -> int:
+        """Delete terminal runs (and all related data) updated before older_than."""
+        db = self._ensure_connected()
+        terminal = ("completed", "failed", "cancelled", "continued_as_new", "interrupted")
+        placeholders = ",".join("?" * len(terminal))
+        subq = (
+            f"SELECT run_id FROM workflow_runs WHERE status IN ({placeholders}) AND updated_at < ?"
+        )
+        params = (*terminal, older_than.isoformat())
+        async with db.cursor() as cur:
+            await cur.execute(f"DELETE FROM events WHERE run_id IN ({subq})", params)
+            await cur.execute(f"DELETE FROM steps WHERE run_id IN ({subq})", params)
+            await cur.execute(f"DELETE FROM hooks WHERE run_id IN ({subq})", params)
+            await cur.execute(f"DELETE FROM cancellation_flags WHERE run_id IN ({subq})", params)
+            await cur.execute(
+                f"DELETE FROM workflow_runs WHERE status IN ({placeholders}) AND updated_at < ?",
+                params,
+            )
+            count = cur.rowcount
+        await db.commit()
+        return count if count is not None else 0
+
     # Helper methods for converting database rows to domain objects
 
     def _row_to_workflow_run(self, row: Any) -> WorkflowRun:

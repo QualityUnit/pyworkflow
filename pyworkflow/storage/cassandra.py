@@ -1709,6 +1709,72 @@ class CassandraStorageBackend(StorageBackend):
             schedule.updated_at = datetime.now(UTC)
             await self.update_schedule(schedule)
 
+    async def delete_old_runs(self, older_than: datetime) -> int:
+        """Delete terminal runs (and all related data) updated before older_than."""
+        session = self._ensure_connected()
+        terminal = ["completed", "failed", "cancelled", "continued_as_new", "interrupted"]
+        count = 0
+
+        for status_val in terminal:
+            rows = session.execute(
+                SimpleStatement(
+                    "SELECT run_id FROM runs_by_status WHERE status = %s",
+                    consistency_level=self.read_consistency,
+                ),
+                (status_val,),
+            )
+            for row in rows:
+                run_id = row.run_id
+                # Fetch run to check updated_at
+                run_row = session.execute(
+                    SimpleStatement(
+                        "SELECT updated_at FROM workflow_runs WHERE run_id = %s",
+                        consistency_level=self.read_consistency,
+                    ),
+                    (run_id,),
+                ).one()
+                if run_row is None or run_row.updated_at >= older_than:
+                    continue
+                # Delete all related data
+                session.execute(
+                    SimpleStatement(
+                        "DELETE FROM events WHERE run_id = %s",
+                        consistency_level=self.write_consistency,
+                    ),
+                    (run_id,),
+                )
+                session.execute(
+                    SimpleStatement(
+                        "DELETE FROM steps WHERE run_id = %s",
+                        consistency_level=self.write_consistency,
+                    ),
+                    (run_id,),
+                )
+                session.execute(
+                    SimpleStatement(
+                        "DELETE FROM hooks WHERE run_id = %s",
+                        consistency_level=self.write_consistency,
+                    ),
+                    (run_id,),
+                )
+                session.execute(
+                    SimpleStatement(
+                        "DELETE FROM cancellation_flags WHERE run_id = %s",
+                        consistency_level=self.write_consistency,
+                    ),
+                    (run_id,),
+                )
+                session.execute(
+                    SimpleStatement(
+                        "DELETE FROM workflow_runs WHERE run_id = %s",
+                        consistency_level=self.write_consistency,
+                    ),
+                    (run_id,),
+                )
+                count += 1
+
+        return count
+
     # Helper methods for converting Cassandra rows to domain objects
 
     def _row_to_workflow_run(self, row: Any) -> WorkflowRun:

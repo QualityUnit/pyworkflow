@@ -2749,3 +2749,45 @@ async def _handle_continue_as_new_celery(
     )
 
     return new_run_id
+
+
+@celery_app.task(
+    name="pyworkflow.run_data_retention",
+    base=SingletonWorkflowTask,
+    bind=True,
+    queue="pyworkflow.default",
+    release_lock_on_failure=True,
+    lock_expiry=7200,  # 2h safety net
+)
+def run_data_retention_task(self: SingletonWorkflowTask) -> dict[str, Any]:
+    """
+    Periodic task: delete workflow runs older than data_retention_days.
+
+    Singleton (only one instance runs at a time). Skips if data_retention_days
+    is not configured.
+    """
+    from datetime import timedelta
+
+    from pyworkflow.config import get_config
+    from pyworkflow.storage.config import storage_to_config
+
+    config = get_config()
+    if config.data_retention_days is None:
+        logger.debug("Data retention not configured; skipping.")
+        return {"deleted": 0, "skipped": True}
+
+    storage = config.storage
+    if storage is None:
+        logger.warning("No storage configured; skipping data retention.")
+        return {"deleted": 0, "skipped": True}
+
+    cutoff = datetime.now(UTC) - timedelta(days=config.data_retention_days)
+    logger.info(
+        "Running data retention: deleting runs updated before {}",
+        cutoff.isoformat(),
+    )
+    storage_config = storage_to_config(storage)
+    backend = _get_storage_backend(storage_config)
+    count = run_async(backend.delete_old_runs(cutoff))
+    logger.info("Data retention complete: deleted {} runs", count)
+    return {"deleted": count, "skipped": False}

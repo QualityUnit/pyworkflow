@@ -598,6 +598,37 @@ class InMemoryStorageBackend(StorageBackend):
                 schedule.running_run_ids.remove(run_id)
                 schedule.updated_at = datetime.now(UTC)
 
+    async def delete_old_runs(self, older_than: datetime) -> int:
+        """Delete terminal runs updated before older_than."""
+        terminal = {
+            RunStatus.COMPLETED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+            RunStatus.CONTINUED_AS_NEW,
+            RunStatus.INTERRUPTED,
+        }
+        with self._lock:
+            to_delete = [
+                run_id
+                for run_id, run in self._runs.items()
+                if run.status in terminal and run.updated_at < older_than
+            ]
+            for run_id in to_delete:
+                run = self._runs.pop(run_id)
+                self._events.pop(run_id, None)
+                self._event_sequences.pop(run_id, None)
+                if run.idempotency_key:
+                    self._idempotency_index.pop(run.idempotency_key, None)
+                step_ids = [sid for sid, s in self._steps.items() if s.run_id == run_id]
+                for sid in step_ids:
+                    del self._steps[sid]
+                hook_keys = [k for k in self._hooks if k[0] == run_id]
+                for k in hook_keys:
+                    hook = self._hooks.pop(k)
+                    self._token_index.pop(hook.token, None)
+                self._cancellation_flags.pop(run_id, None)
+            return len(to_delete)
+
     # Utility methods
 
     def clear(self) -> None:

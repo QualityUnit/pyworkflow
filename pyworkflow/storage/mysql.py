@@ -1284,6 +1284,32 @@ class MySQLStorageBackend(StorageBackend):
             schedule.updated_at = datetime.now(UTC)
             await self.update_schedule(schedule)
 
+    async def delete_old_runs(self, older_than: datetime) -> int:
+        """Delete terminal runs (and all related data) updated before older_than."""
+        pool = self._ensure_connected()
+        terminal = ("completed", "failed", "cancelled", "continued_as_new", "interrupted")
+        placeholders = ",".join("%s" * len(terminal))
+        subq = (
+            f"SELECT run_id FROM workflow_runs "
+            f"WHERE status IN ({placeholders}) AND updated_at < %s"
+        )
+        params = (*terminal, older_than)
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(f"DELETE FROM events WHERE run_id IN ({subq})", params)
+                await cur.execute(f"DELETE FROM steps WHERE run_id IN ({subq})", params)
+                await cur.execute(f"DELETE FROM hooks WHERE run_id IN ({subq})", params)
+                await cur.execute(
+                    f"DELETE FROM cancellation_flags WHERE run_id IN ({subq})", params
+                )
+                await cur.execute(
+                    f"DELETE FROM workflow_runs WHERE status IN ({placeholders}) AND updated_at < %s",
+                    params,
+                )
+                count = cur.rowcount
+            await conn.commit()
+        return count if count is not None else 0
+
     # Helper methods for converting database rows to domain objects
 
     def _row_to_workflow_run(self, row: dict) -> WorkflowRun:

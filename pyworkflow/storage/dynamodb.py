@@ -1308,6 +1308,76 @@ class DynamoDBStorageBackend(StorageBackend):
             schedule.updated_at = datetime.now(UTC)
             await self.update_schedule(schedule)
 
+    async def delete_old_runs(self, older_than: datetime) -> int:
+        """Delete terminal runs (and all related items) updated before older_than."""
+        terminal = ["completed", "failed", "cancelled", "continued_as_new", "interrupted"]
+        cutoff_iso = older_than.isoformat()
+        count = 0
+
+        async with self._get_client() as client:
+            # Scan for matching runs using GSI1 (status-based)
+            run_ids: list[str] = []
+            for status_val in terminal:
+                params: dict[str, Any] = {
+                    "TableName": self.table_name,
+                    "IndexName": "GSI1",
+                    "KeyConditionExpression": "GSI1PK = :pk AND begins_with(GSI1SK, :status)",
+                    "FilterExpression": "updated_at < :cutoff",
+                    "ExpressionAttributeValues": {
+                        ":pk": {"S": "RUNS"},
+                        ":status": {"S": f"{status_val}#"},
+                        ":cutoff": {"S": cutoff_iso},
+                    },
+                    "ProjectionExpression": "run_id",
+                }
+                while True:
+                    response = await client.query(**params)
+                    for item in response.get("Items", []):
+                        run_id_val = self._item_to_dict(item).get("run_id")
+                        if run_id_val:
+                            run_ids.append(run_id_val)
+                    last_key = response.get("LastEvaluatedKey")
+                    if not last_key:
+                        break
+                    params["ExclusiveStartKey"] = last_key
+
+            # For each run, delete all items with PK=RUN#{run_id} + cancellation flag
+            for run_id in run_ids:
+                # Query all items for this run
+                pk_val = f"RUN#{run_id}"
+                all_items: list[dict[str, Any]] = []
+                query_params: dict[str, Any] = {
+                    "TableName": self.table_name,
+                    "KeyConditionExpression": "PK = :pk",
+                    "ExpressionAttributeValues": {":pk": {"S": pk_val}},
+                    "ProjectionExpression": "PK, SK",
+                }
+                while True:
+                    resp = await client.query(**query_params)
+                    all_items.extend(resp.get("Items", []))
+                    lk = resp.get("LastEvaluatedKey")
+                    if not lk:
+                        break
+                    query_params["ExclusiveStartKey"] = lk
+
+                # Also add the cancellation flag item if it exists
+                all_items.append({"PK": {"S": f"CANCEL#{run_id}"}, "SK": {"S": "#FLAG"}})
+
+                # Batch delete in groups of 25 (DynamoDB limit)
+                for i in range(0, len(all_items), 25):
+                    batch = all_items[i : i + 25]
+                    request_items = {
+                        self.table_name: [
+                            {"DeleteRequest": {"Key": {"PK": item["PK"], "SK": item["SK"]}}}
+                            for item in batch
+                        ]
+                    }
+                    await client.batch_write_item(RequestItems=request_items)
+
+                count += 1
+
+        return count
+
     # Helper methods for converting DynamoDB items to domain objects
 
     def _item_to_workflow_run(self, item: dict[str, Any]) -> WorkflowRun:

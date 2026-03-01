@@ -1415,6 +1415,37 @@ class PostgresStorageBackend(StorageBackend):
             schedule.updated_at = datetime.now(UTC)
             await self.update_schedule(schedule)
 
+    async def delete_old_runs(self, older_than: datetime) -> int:
+        """Delete terminal runs (and all related data) updated before older_than."""
+        terminal = ["completed", "failed", "cancelled", "continued_as_new", "interrupted"]
+        pool = await self._get_pool()
+        async with pool.acquire() as conn, conn.transaction():
+            subq = (
+                "SELECT run_id FROM workflow_runs "
+                "WHERE status = ANY($1) AND updated_at < $2"
+            )
+            await conn.execute(
+                f"DELETE FROM events WHERE run_id IN ({subq})", terminal, older_than
+            )
+            await conn.execute(
+                f"DELETE FROM steps WHERE run_id IN ({subq})", terminal, older_than
+            )
+            await conn.execute(
+                f"DELETE FROM hooks WHERE run_id IN ({subq})", terminal, older_than
+            )
+            await conn.execute(
+                f"DELETE FROM cancellation_flags WHERE run_id IN ({subq})",
+                terminal,
+                older_than,
+            )
+            result = await conn.execute(
+                "DELETE FROM workflow_runs WHERE status = ANY($1) AND updated_at < $2",
+                terminal,
+                older_than,
+            )
+            # asyncpg returns e.g. "DELETE 42"
+            return int(result.split()[-1])
+
     # Helper methods for converting database rows to domain objects
 
     def _row_to_workflow_run(self, row: asyncpg.Record) -> WorkflowRun:

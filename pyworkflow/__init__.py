@@ -156,6 +156,21 @@ from pyworkflow.storage.schemas import (
     WorkflowRun,
 )
 
+# Streams (pub/sub signal pattern)
+from pyworkflow.streams import (
+    CheckpointBackend,
+    Signal,
+    Stream,
+    StreamConsumer,
+    StreamStepContext,
+    emit,
+    get_checkpoint,
+    get_current_signal,
+    save_checkpoint,
+    stream_step,
+    stream_workflow,
+)
+
 __all__ = [
     # Version
     "__version__",
@@ -264,4 +279,16 @@ __all__ = [
     "get_logger",
     "bind_workflow_context",
     "bind_step_context",
+    # Streams
+    "stream_workflow",
+    "stream_step",
+    "emit",
+    "Signal",
+    "Stream",
+    "StreamStepContext",
+    "StreamConsumer",
+    "CheckpointBackend",
+    "get_current_signal",
+    "get_checkpoint",
+    "save_checkpoint",
 ]

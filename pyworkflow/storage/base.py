@@ -716,6 +716,227 @@ class StorageBackend(ABC):
         """
         pass
 
+    # Stream Operations
+
+    async def create_stream(self, stream_id: str, metadata: dict | None = None) -> None:
+        """
+        Create a new stream.
+
+        Args:
+            stream_id: Unique stream identifier
+            metadata: Optional stream metadata
+
+        Raises:
+            NotImplementedError: If backend doesn't support streams
+        """
+        raise NotImplementedError("This storage backend does not support streams")
+
+    async def get_stream(self, stream_id: str) -> dict | None:
+        """
+        Get a stream by ID.
+
+        Args:
+            stream_id: Stream identifier
+
+        Returns:
+            Stream data dict if found, None otherwise
+
+        Raises:
+            NotImplementedError: If backend doesn't support streams
+        """
+        raise NotImplementedError("This storage backend does not support streams")
+
+    # Signal Operations
+
+    async def publish_signal(
+        self,
+        signal_id: str,
+        stream_id: str,
+        signal_type: str,
+        payload: dict,
+        source_run_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> int:
+        """
+        Publish a signal to a stream. Assigns and returns a sequence number.
+
+        Args:
+            signal_id: Unique signal identifier
+            stream_id: Target stream identifier
+            signal_type: Signal type (e.g., "task.created")
+            payload: Signal payload data
+            source_run_id: Optional source workflow run ID
+            metadata: Optional signal metadata
+
+        Returns:
+            Assigned sequence number
+
+        Raises:
+            NotImplementedError: If backend doesn't support streams
+        """
+        raise NotImplementedError("This storage backend does not support streams")
+
+    async def get_signals(
+        self,
+        stream_id: str,
+        after_sequence: int = 0,
+        limit: int = 100,
+    ) -> list[dict]:
+        """
+        Get signals from a stream after a given sequence number.
+
+        Args:
+            stream_id: Stream identifier
+            after_sequence: Return signals with sequence > this value
+            limit: Maximum number of signals to return
+
+        Returns:
+            List of signal dicts ordered by sequence
+
+        Raises:
+            NotImplementedError: If backend doesn't support streams
+        """
+        raise NotImplementedError("This storage backend does not support streams")
+
+    # Subscription Operations
+
+    async def register_stream_subscription(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        signal_types: list[str],
+    ) -> None:
+        """
+        Register a stream step's subscription to signal types.
+
+        Args:
+            stream_id: Stream identifier
+            step_run_id: The stream step's run ID
+            signal_types: List of signal types to subscribe to
+
+        Raises:
+            NotImplementedError: If backend doesn't support streams
+        """
+        raise NotImplementedError("This storage backend does not support streams")
+
+    async def get_waiting_steps(
+        self,
+        stream_id: str,
+        signal_type: str,
+    ) -> list[dict]:
+        """
+        Get step_run_ids waiting for a specific signal type on a stream.
+
+        Args:
+            stream_id: Stream identifier
+            signal_type: Signal type to match
+
+        Returns:
+            List of dicts with step subscription info
+
+        Raises:
+            NotImplementedError: If backend doesn't support streams
+        """
+        raise NotImplementedError("This storage backend does not support streams")
+
+    async def update_subscription_status(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        status: str,
+    ) -> None:
+        """
+        Update a subscription's status.
+
+        Args:
+            stream_id: Stream identifier
+            step_run_id: The stream step's run ID
+            status: New status ("waiting", "running", "completed")
+
+        Raises:
+            NotImplementedError: If backend doesn't support streams
+        """
+        raise NotImplementedError("This storage backend does not support streams")
+
+    async def acknowledge_signal(
+        self,
+        signal_id: str,
+        step_run_id: str,
+    ) -> None:
+        """
+        Acknowledge that a signal has been processed by a step.
+
+        Args:
+            signal_id: Signal identifier
+            step_run_id: The step that processed the signal
+
+        Raises:
+            NotImplementedError: If backend doesn't support streams
+        """
+        raise NotImplementedError("This storage backend does not support streams")
+
+    async def get_pending_signals(
+        self,
+        stream_id: str,
+        step_run_id: str,
+    ) -> list[dict]:
+        """
+        Get signals that arrived for a step but haven't been acknowledged.
+
+        Args:
+            stream_id: Stream identifier
+            step_run_id: The stream step's run ID
+
+        Returns:
+            List of unacknowledged signal dicts
+
+        Raises:
+            NotImplementedError: If backend doesn't support streams
+        """
+        raise NotImplementedError("This storage backend does not support streams")
+
+    # Checkpoint Operations
+
+    async def save_checkpoint(self, step_run_id: str, data: dict) -> None:
+        """
+        Save checkpoint data for a stream step.
+
+        Args:
+            step_run_id: The stream step's run ID
+            data: Checkpoint data to persist
+
+        Raises:
+            NotImplementedError: If backend doesn't support streams
+        """
+        raise NotImplementedError("This storage backend does not support checkpoints")
+
+    async def load_checkpoint(self, step_run_id: str) -> dict | None:
+        """
+        Load checkpoint data for a stream step.
+
+        Args:
+            step_run_id: The stream step's run ID
+
+        Returns:
+            Checkpoint data dict if found, None otherwise
+
+        Raises:
+            NotImplementedError: If backend doesn't support streams
+        """
+        raise NotImplementedError("This storage backend does not support checkpoints")
+
+    async def delete_checkpoint(self, step_run_id: str) -> None:
+        """
+        Delete checkpoint data for a stream step.
+
+        Args:
+            step_run_id: The stream step's run ID
+
+        Raises:
+            NotImplementedError: If backend doesn't support streams
+        """
+        raise NotImplementedError("This storage backend does not support checkpoints")
+
     async def health_check(self) -> bool:
         """
         Check if storage backend is healthy and accessible.

@@ -32,6 +32,7 @@ class EventType(Enum):
     STEP_FAILED = "step.failed"
     STEP_RETRYING = "step.retrying"
     STEP_CANCELLED = "step.cancelled"
+    STEP_SUSPENDED = "step.suspended"  # Step suspended via step_hook (waiting for external event)
 
     # Sleep/wait events
     SLEEP_STARTED = "sleep.started"
@@ -544,6 +545,25 @@ def create_step_cancelled_event(
             "step_name": step_name,
             "reason": reason,
             "cancelled_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_step_suspended_event(
+    run_id: str,
+    step_id: str,
+    step_name: str,
+    hook_id: str,
+) -> Event:
+    """Create an event indicating a step has suspended via step_hook."""
+    return Event(
+        run_id=run_id,
+        type=EventType.STEP_SUSPENDED,
+        data={
+            "step_id": step_id,
+            "step_name": step_name,
+            "hook_id": hook_id,
+            "suspended_at": datetime.now(UTC).isoformat(),
         },
     )
 

@@ -996,6 +996,54 @@ class DynamoDBStorageBackend(StorageBackend):
                 },
             )
 
+    # Checkpoint Operations
+
+    async def save_checkpoint(self, step_run_id: str, data: dict) -> None:
+        """Save checkpoint data for a stream step."""
+        async with self._get_client() as client:
+            now = datetime.now(UTC).isoformat()
+            await client.put_item(
+                TableName=self.table_name,
+                Item=self._dict_to_item(
+                    {
+                        "PK": f"CHECKPOINT#{step_run_id}",
+                        "SK": "#DATA",
+                        "entity_type": "checkpoint",
+                        "step_run_id": step_run_id,
+                        "data": json.dumps(data),
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                ),
+            )
+
+    async def load_checkpoint(self, step_run_id: str) -> dict | None:
+        """Load checkpoint data for a stream step."""
+        async with self._get_client() as client:
+            response = await client.get_item(
+                TableName=self.table_name,
+                Key={
+                    "PK": {"S": f"CHECKPOINT#{step_run_id}"},
+                    "SK": {"S": "#DATA"},
+                },
+            )
+
+            if "Item" not in response:
+                return None
+
+            return json.loads(response["Item"]["data"]["S"])
+
+    async def delete_checkpoint(self, step_run_id: str) -> None:
+        """Delete checkpoint data for a stream step."""
+        async with self._get_client() as client:
+            await client.delete_item(
+                TableName=self.table_name,
+                Key={
+                    "PK": {"S": f"CHECKPOINT#{step_run_id}"},
+                    "SK": {"S": "#DATA"},
+                },
+            )
+
     # Continue-As-New Chain Operations
 
     async def update_run_continuation(

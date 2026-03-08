@@ -337,6 +337,16 @@ class SQLiteStorageBackend(StorageBackend):
             )
         """)
 
+        # Checkpoints table (step checkpoint data for resumable steps)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS checkpoints (
+                step_run_id TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP NOT NULL
+            )
+        """)
+
         await db.commit()
 
     def _ensure_connected(self) -> aiosqlite.Connection:
@@ -1253,6 +1263,44 @@ class SQLiteStorageBackend(StorageBackend):
             schedule.updated_at = datetime.now(UTC)
             await self.update_schedule(schedule)
 
+    # Checkpoint Operations
+
+    async def save_checkpoint(self, step_run_id: str, data: dict) -> None:
+        """Save or update a checkpoint for a step run."""
+        db = self._ensure_connected()
+        now = datetime.now(UTC).isoformat()
+
+        await db.execute(
+            """
+            INSERT OR REPLACE INTO checkpoints (step_run_id, data, created_at, updated_at)
+            VALUES (?, ?, COALESCE(
+                (SELECT created_at FROM checkpoints WHERE step_run_id = ?), ?
+            ), ?)
+            """,
+            (step_run_id, json.dumps(data), step_run_id, now, now),
+        )
+        await db.commit()
+
+    async def load_checkpoint(self, step_run_id: str) -> dict | None:
+        """Load a checkpoint for a step run, or None if not found."""
+        db = self._ensure_connected()
+
+        async with db.execute(
+            "SELECT data FROM checkpoints WHERE step_run_id = ?", (step_run_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        if row is None:
+            return None
+        return json.loads(row[0])
+
+    async def delete_checkpoint(self, step_run_id: str) -> None:
+        """Delete a checkpoint for a step run."""
+        db = self._ensure_connected()
+
+        await db.execute("DELETE FROM checkpoints WHERE step_run_id = ?", (step_run_id,))
+        await db.commit()
+
     async def delete_old_runs(self, older_than: datetime) -> int:
         """Delete terminal runs (and all related data) updated before older_than."""
         db = self._ensure_connected()
@@ -1267,6 +1315,7 @@ class SQLiteStorageBackend(StorageBackend):
             await cur.execute(f"DELETE FROM steps WHERE run_id IN ({subq})", params)
             await cur.execute(f"DELETE FROM hooks WHERE run_id IN ({subq})", params)
             await cur.execute(f"DELETE FROM cancellation_flags WHERE run_id IN ({subq})", params)
+            await cur.execute(f"DELETE FROM checkpoints WHERE step_run_id IN ({subq})", params)
             await cur.execute(
                 f"DELETE FROM workflow_runs WHERE status IN ({placeholders}) AND updated_at < ?",
                 params,

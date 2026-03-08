@@ -161,6 +161,13 @@ class LocalContext(WorkflowContext):
                 # Step completed - no longer in progress
                 self._steps_in_progress.discard(step_id)
 
+            elif event.type == EventType.STEP_SUSPENDED:
+                step_id = event.data.get("step_id")
+                if step_id:
+                    # Step suspended via step_hook — no longer in progress,
+                    # needs re-dispatch on workflow resume
+                    self._steps_in_progress.discard(step_id)
+
             elif event.type == EventType.SLEEP_COMPLETED:
                 sleep_id = event.data.get("sleep_id")
                 self._completed_sleeps.add(sleep_id)

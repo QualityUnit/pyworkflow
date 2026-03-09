@@ -299,12 +299,12 @@ async def list_hooks_cmd(
                     "Name": hook.name or "-",
                     "Status": hook.status.value,
                     "Run ID": hook.run_id,
-                    "Created": hook.created_at.strftime("%Y-%m-%d %H:%M")
-                    if hook.created_at
-                    else "-",
-                    "Expires": hook.expires_at.strftime("%Y-%m-%d %H:%M")
-                    if hook.expires_at
-                    else "-",
+                    "Created": (
+                        hook.created_at.strftime("%Y-%m-%d %H:%M") if hook.created_at else "-"
+                    ),
+                    "Expires": (
+                        hook.expires_at.strftime("%Y-%m-%d %H:%M") if hook.expires_at else "-"
+                    ),
                 }
                 for hook in hooks_list
             ]
@@ -376,15 +376,15 @@ async def hook_info_cmd(ctx: click.Context, token: str) -> None:
                 "Run ID": hook.run_id,
                 "Name": hook.name or "-",
                 "Status": hook.status.value,
-                "Created": hook.created_at.strftime("%Y-%m-%d %H:%M:%S")
-                if hook.created_at
-                else "-",
-                "Expires": hook.expires_at.strftime("%Y-%m-%d %H:%M:%S")
-                if hook.expires_at
-                else "-",
-                "Received": hook.received_at.strftime("%Y-%m-%d %H:%M:%S")
-                if hook.received_at
-                else "-",
+                "Created": (
+                    hook.created_at.strftime("%Y-%m-%d %H:%M:%S") if hook.created_at else "-"
+                ),
+                "Expires": (
+                    hook.expires_at.strftime("%Y-%m-%d %H:%M:%S") if hook.expires_at else "-"
+                ),
+                "Received": (
+                    hook.received_at.strftime("%Y-%m-%d %H:%M:%S") if hook.received_at else "-"
+                ),
             }
 
             # Show payload if received

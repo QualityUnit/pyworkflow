@@ -181,9 +181,11 @@ class PyWorkflowScheduler(Scheduler):
                     execute_scheduled_workflow_task.apply_async(
                         kwargs={
                             "schedule_id": schedule.schedule_id,
-                            "scheduled_time": schedule.next_run_time.isoformat()
-                            if schedule.next_run_time
-                            else now.isoformat(),
+                            "scheduled_time": (
+                                schedule.next_run_time.isoformat()
+                                if schedule.next_run_time
+                                else now.isoformat()
+                            ),
                             "storage_config": self._storage_config,
                         },
                         queue="pyworkflow.schedules",

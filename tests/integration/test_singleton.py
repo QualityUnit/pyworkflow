@@ -485,6 +485,6 @@ class TestSingletonConcurrency:
         existing_tasks = [r for r in results if r[0] == "existing"]
 
         assert len(new_tasks) == 1, f"Expected 1 new task, got {len(new_tasks)}: {results}"
-        assert len(existing_tasks) == 4, (
-            f"Expected 4 existing, got {len(existing_tasks)}: {results}"
-        )
+        assert (
+            len(existing_tasks) == 4
+        ), f"Expected 4 existing, got {len(existing_tasks)}: {results}"

@@ -114,9 +114,7 @@ async def start(
     effective_durable = (
         durable
         if durable is not None
-        else workflow_durable
-        if workflow_durable is not None
-        else config.default_durable
+        else workflow_durable if workflow_durable is not None else config.default_durable
     )
 
     # Validate runtime + durable combination

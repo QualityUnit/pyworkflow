@@ -2,7 +2,7 @@ name: Code Review Agent
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, labeled]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -25,6 +25,9 @@ concurrency:
 jobs:
   review:
     name: Review Agent
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'agent-pr')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

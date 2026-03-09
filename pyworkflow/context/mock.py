@@ -371,9 +371,9 @@ class MockContext(WorkflowContext):
         call_count = sum(1 for s in self._steps if s["name"] == step_name)
 
         if times is not None:
-            assert (
-                call_count == times
-            ), f"Step '{step_name}' expected {times} calls, got {call_count}"
+            assert call_count == times, (
+                f"Step '{step_name}' expected {times} calls, got {call_count}"
+            )
         else:
             assert call_count > 0, f"Step '{step_name}' was not called"
 
@@ -387,6 +387,6 @@ class MockContext(WorkflowContext):
         assert self.sleep_count > 0, "No sleep calls recorded"
 
         if total_seconds is not None:
-            assert (
-                self.total_sleep_seconds == total_seconds
-            ), f"Expected {total_seconds}s total sleep, got {self.total_sleep_seconds}s"
+            assert self.total_sleep_seconds == total_seconds, (
+                f"Expected {total_seconds}s total sleep, got {self.total_sleep_seconds}s"
+            )

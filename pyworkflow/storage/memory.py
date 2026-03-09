@@ -51,6 +51,14 @@ class InMemoryStorageBackend(StorageBackend):
         self._lock = threading.RLock()
         self._event_sequences: dict[str, int] = {}  # run_id -> next sequence
 
+        # Stream storage
+        self._streams: dict[str, dict] = {}  # stream_id -> stream data
+        self._signals: dict[str, list[dict]] = {}  # stream_id -> list of signal dicts
+        self._signal_sequences: dict[str, int] = {}  # stream_id -> next sequence
+        self._subscriptions: dict[tuple[str, str], dict] = {}  # (stream_id, step_run_id) -> sub
+        self._acknowledgments: set[tuple[str, str]] = set()  # (signal_id, step_run_id)
+        self._checkpoints: dict[str, dict] = {}  # step_run_id -> checkpoint data
+
     # Workflow Run Operations
 
     async def create_run(self, run: WorkflowRun) -> None:
@@ -629,6 +637,158 @@ class InMemoryStorageBackend(StorageBackend):
                 self._cancellation_flags.pop(run_id, None)
             return len(to_delete)
 
+    # Stream Operations
+
+    async def create_stream(self, stream_id: str, metadata: dict | None = None) -> None:
+        """Create a new stream."""
+        with self._lock:
+            if stream_id in self._streams:
+                raise ValueError(f"Stream {stream_id} already exists")
+            self._streams[stream_id] = {
+                "stream_id": stream_id,
+                "status": "active",
+                "created_at": datetime.now(UTC).isoformat(),
+                "metadata": metadata or {},
+            }
+            self._signals[stream_id] = []
+            self._signal_sequences[stream_id] = 0
+
+    async def get_stream(self, stream_id: str) -> dict | None:
+        """Get a stream by ID."""
+        with self._lock:
+            return self._streams.get(stream_id)
+
+    async def publish_signal(
+        self,
+        signal_id: str,
+        stream_id: str,
+        signal_type: str,
+        payload: dict,
+        source_run_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> int:
+        """Publish a signal to a stream."""
+        with self._lock:
+            if stream_id not in self._signals:
+                self._signals[stream_id] = []
+                self._signal_sequences[stream_id] = 0
+
+            seq = self._signal_sequences[stream_id]
+            self._signal_sequences[stream_id] += 1
+
+            signal_data = {
+                "signal_id": signal_id,
+                "stream_id": stream_id,
+                "signal_type": signal_type,
+                "payload": payload,
+                "published_at": datetime.now(UTC).isoformat(),
+                "sequence": seq,
+                "source_run_id": source_run_id,
+                "metadata": metadata or {},
+            }
+            self._signals[stream_id].append(signal_data)
+            return seq
+
+    async def get_signals(
+        self,
+        stream_id: str,
+        after_sequence: int = 0,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Get signals from a stream after a given sequence number."""
+        with self._lock:
+            signals = self._signals.get(stream_id, [])
+            filtered = [s for s in signals if (s.get("sequence", 0)) >= after_sequence]
+            filtered.sort(key=lambda s: s.get("sequence", 0))
+            return filtered[:limit]
+
+    async def register_stream_subscription(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        signal_types: list[str],
+    ) -> None:
+        """Register a stream step's subscription to signal types."""
+        with self._lock:
+            key = (stream_id, step_run_id)
+            self._subscriptions[key] = {
+                "stream_id": stream_id,
+                "step_run_id": step_run_id,
+                "signal_types": signal_types,
+                "status": "waiting",
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+
+    async def get_waiting_steps(
+        self,
+        stream_id: str,
+        signal_type: str,
+    ) -> list[dict]:
+        """Get step_run_ids waiting for a specific signal type on a stream."""
+        with self._lock:
+            result = []
+            for (sid, _), sub in self._subscriptions.items():
+                if sid == stream_id and sub["status"] == "waiting":
+                    if signal_type in sub["signal_types"]:
+                        result.append(sub)
+            return result
+
+    async def update_subscription_status(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        status: str,
+    ) -> None:
+        """Update a subscription's status."""
+        with self._lock:
+            key = (stream_id, step_run_id)
+            if key in self._subscriptions:
+                self._subscriptions[key]["status"] = status
+
+    async def acknowledge_signal(
+        self,
+        signal_id: str,
+        step_run_id: str,
+    ) -> None:
+        """Acknowledge that a signal has been processed by a step."""
+        with self._lock:
+            self._acknowledgments.add((signal_id, step_run_id))
+
+    async def get_pending_signals(
+        self,
+        stream_id: str,
+        step_run_id: str,
+    ) -> list[dict]:
+        """Get signals that arrived for a step but haven't been acknowledged."""
+        with self._lock:
+            sub = self._subscriptions.get((stream_id, step_run_id))
+            if not sub:
+                return []
+
+            signals = self._signals.get(stream_id, [])
+            pending = []
+            for sig in signals:
+                if sig["signal_type"] in sub["signal_types"]:
+                    if (sig["signal_id"], step_run_id) not in self._acknowledgments:
+                        pending.append(sig)
+            pending.sort(key=lambda s: s.get("sequence", 0))
+            return pending
+
+    async def save_checkpoint(self, step_run_id: str, data: dict) -> None:
+        """Save checkpoint data for a stream step."""
+        with self._lock:
+            self._checkpoints[step_run_id] = data
+
+    async def load_checkpoint(self, step_run_id: str) -> dict | None:
+        """Load checkpoint data for a stream step."""
+        with self._lock:
+            return self._checkpoints.get(step_run_id)
+
+    async def delete_checkpoint(self, step_run_id: str) -> None:
+        """Delete checkpoint data for a stream step."""
+        with self._lock:
+            self._checkpoints.pop(step_run_id, None)
+
     # Utility methods
 
     def clear(self) -> None:
@@ -647,6 +807,12 @@ class InMemoryStorageBackend(StorageBackend):
             self._token_index.clear()
             self._cancellation_flags.clear()
             self._event_sequences.clear()
+            self._streams.clear()
+            self._signals.clear()
+            self._signal_sequences.clear()
+            self._subscriptions.clear()
+            self._acknowledgments.clear()
+            self._checkpoints.clear()
 
     def __len__(self) -> int:
         """Return total number of workflow runs."""

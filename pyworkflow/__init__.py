@@ -29,7 +29,7 @@ Quick Start:
     >>> run_id = await start(my_workflow, "Alice")
 """
 
-__version__ = "0.1.37"
+__version__ = "0.2.0b1"
 
 # Configuration
 from pyworkflow.config import (
@@ -135,6 +135,12 @@ from pyworkflow.primitives.schedule import (
 )
 from pyworkflow.primitives.shield import shield
 from pyworkflow.primitives.sleep import sleep
+from pyworkflow.primitives.step_checkpoint import (
+    delete_step_checkpoint,
+    load_step_checkpoint,
+    save_step_checkpoint,
+)
+from pyworkflow.primitives.step_hook import step_hook
 
 # Runtime
 from pyworkflow.runtime import LocalRuntime, Runtime, get_runtime, register_runtime
@@ -154,6 +160,21 @@ from pyworkflow.storage.schemas import (
     ScheduleSpec,
     ScheduleStatus,
     WorkflowRun,
+)
+
+# Streams (pub/sub signal pattern)
+from pyworkflow.streams import (
+    CheckpointBackend,
+    Signal,
+    Stream,
+    StreamConsumer,
+    StreamStepContext,
+    emit,
+    get_checkpoint,
+    get_current_signal,
+    save_checkpoint,
+    stream_step,
+    stream_workflow,
 )
 
 __all__ = [
@@ -264,4 +285,21 @@ __all__ = [
     "get_logger",
     "bind_workflow_context",
     "bind_step_context",
+    # Step checkpoint + hooks
+    "save_step_checkpoint",
+    "load_step_checkpoint",
+    "delete_step_checkpoint",
+    "step_hook",
+    # Streams
+    "stream_workflow",
+    "stream_step",
+    "emit",
+    "Signal",
+    "Stream",
+    "StreamStepContext",
+    "StreamConsumer",
+    "CheckpointBackend",
+    "get_current_signal",
+    "get_checkpoint",
+    "save_checkpoint",
 ]

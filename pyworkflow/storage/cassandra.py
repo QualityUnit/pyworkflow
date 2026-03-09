@@ -178,6 +178,7 @@ class CassandraStorageBackend(StorageBackend):
         await self._create_steps_tables(session)
         await self._create_hooks_tables(session)
         await self._create_cancellation_flags_table(session)
+        await self._create_checkpoints_table(session)
         await self._create_schedules_tables(session)
 
         # Create query pattern tables
@@ -310,6 +311,17 @@ class CassandraStorageBackend(StorageBackend):
             CREATE TABLE IF NOT EXISTS cancellation_flags (
                 run_id TEXT PRIMARY KEY,
                 created_at TIMESTAMP
+            )
+        """)
+
+    async def _create_checkpoints_table(self, session: Session) -> None:
+        """Create checkpoints table."""
+        session.execute("""
+            CREATE TABLE IF NOT EXISTS checkpoints (
+                step_run_id TEXT PRIMARY KEY,
+                data TEXT,
+                created_at TIMESTAMP,
+                updated_at TIMESTAMP
             )
         """)
 
@@ -1306,6 +1318,50 @@ class CassandraStorageBackend(StorageBackend):
                 consistency_level=self.write_consistency,
             ),
             (run_id,),
+        )
+
+    # Checkpoint Operations
+
+    async def save_checkpoint(self, step_run_id: str, data: dict) -> None:
+        """Save a checkpoint for a step run."""
+        session = self._ensure_connected()
+        now = datetime.now(UTC)
+
+        session.execute(
+            SimpleStatement(
+                "INSERT INTO checkpoints (step_run_id, data, created_at, updated_at) "
+                "VALUES (%s, %s, %s, %s)",
+                consistency_level=self.write_consistency,
+            ),
+            (step_run_id, json.dumps(data), now, now),
+        )
+
+    async def load_checkpoint(self, step_run_id: str) -> dict | None:
+        """Load a checkpoint for a step run."""
+        session = self._ensure_connected()
+
+        row = session.execute(
+            SimpleStatement(
+                "SELECT data FROM checkpoints WHERE step_run_id = %s",
+                consistency_level=self.read_consistency,
+            ),
+            (step_run_id,),
+        ).one()
+
+        if row is None:
+            return None
+        return json.loads(row.data)
+
+    async def delete_checkpoint(self, step_run_id: str) -> None:
+        """Delete a checkpoint for a step run."""
+        session = self._ensure_connected()
+
+        session.execute(
+            SimpleStatement(
+                "DELETE FROM checkpoints WHERE step_run_id = %s",
+                consistency_level=self.write_consistency,
+            ),
+            (step_run_id,),
         )
 
     # Continue-As-New Chain Operations

@@ -356,6 +356,16 @@ class MySQLStorageBackend(StorageBackend):
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """)
 
+            # Checkpoints table
+            await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS checkpoints (
+                        step_run_id VARCHAR(255) PRIMARY KEY,
+                        data LONGTEXT NOT NULL,
+                        created_at DATETIME(6) NOT NULL,
+                        updated_at DATETIME(6) NOT NULL
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """)
+
     def _ensure_connected(self) -> aiomysql.Pool:
         """Ensure database pool is connected."""
         if not self._pool:
@@ -999,6 +1009,42 @@ class MySQLStorageBackend(StorageBackend):
 
         async with pool.acquire() as conn, conn.cursor() as cur:
             await cur.execute("DELETE FROM cancellation_flags WHERE run_id = %s", (run_id,))
+
+    # Checkpoint Operations
+
+    async def save_checkpoint(self, step_run_id: str, data: dict) -> None:
+        """Save or update a checkpoint for a step run."""
+        pool = self._ensure_connected()
+        now = datetime.now(UTC)
+
+        async with pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
+                    INSERT INTO checkpoints (step_run_id, data, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE data = VALUES(data), updated_at = VALUES(updated_at)
+                    """,
+                (step_run_id, json.dumps(data), now, now),
+            )
+
+    async def load_checkpoint(self, step_run_id: str) -> dict | None:
+        """Load a checkpoint for a step run, or return None if not found."""
+        pool = self._ensure_connected()
+
+        async with pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute("SELECT data FROM checkpoints WHERE step_run_id = %s", (step_run_id,))
+            row = await cur.fetchone()
+
+        if row is None:
+            return None
+        return json.loads(row[0])
+
+    async def delete_checkpoint(self, step_run_id: str) -> None:
+        """Delete a checkpoint for a step run."""
+        pool = self._ensure_connected()
+
+        async with pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute("DELETE FROM checkpoints WHERE step_run_id = %s", (step_run_id,))
 
     # Continue-As-New Chain Operations
 

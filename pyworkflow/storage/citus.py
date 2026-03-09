@@ -324,6 +324,19 @@ class CitusStorageBackend(PostgresStorageBackend):
                 )
             """)
 
+            # checkpoints — reference table (keyed by step_run_id, not run_id)
+            # Differences vs postgres:
+            #   - No FK constraints (cross-shard FKs unsupported)
+            #   - Distributed as reference table since step_run_id != run_id distribution key
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS checkpoints (
+                    step_run_id TEXT PRIMARY KEY,
+                    data JSONB NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+
         # Step 4: Distribute tables (idempotent — already-distributed tables are skipped)
         await self._distribute_tables(pool)
 
@@ -368,3 +381,7 @@ class CitusStorageBackend(PostgresStorageBackend):
             # schema_versions: reference table (replicated to all workers)
             if "schema_versions" not in distributed:
                 await conn.execute("SELECT create_reference_table('schema_versions')")
+
+            # checkpoints: reference table (keyed by step_run_id, can't co-locate with run_id)
+            if "checkpoints" not in distributed:
+                await conn.execute("SELECT create_reference_table('checkpoints')")

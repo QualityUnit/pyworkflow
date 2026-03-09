@@ -32,6 +32,7 @@ class EventType(Enum):
     STEP_FAILED = "step.failed"
     STEP_RETRYING = "step.retrying"
     STEP_CANCELLED = "step.cancelled"
+    STEP_SUSPENDED = "step.suspended"  # Step suspended via step_hook (waiting for external event)
 
     # Sleep/wait events
     SLEEP_STARTED = "sleep.started"
@@ -52,6 +53,15 @@ class EventType(Enum):
     CHILD_WORKFLOW_COMPLETED = "child_workflow.completed"
     CHILD_WORKFLOW_FAILED = "child_workflow.failed"
     CHILD_WORKFLOW_CANCELLED = "child_workflow.cancelled"
+
+    # Stream signal events
+    SIGNAL_WAIT_STARTED = "signal.wait_started"
+    SIGNAL_RECEIVED = "signal.received"
+    SIGNAL_PUBLISHED = "signal.published"
+    STREAM_STEP_STARTED = "stream_step.started"
+    STREAM_STEP_COMPLETED = "stream_step.completed"
+    CHECKPOINT_SAVED = "checkpoint.saved"
+    CHECKPOINT_LOADED = "checkpoint.loaded"
 
     # Schedule events
     SCHEDULE_CREATED = "schedule.created"
@@ -539,6 +549,25 @@ def create_step_cancelled_event(
     )
 
 
+def create_step_suspended_event(
+    run_id: str,
+    step_id: str,
+    step_name: str,
+    hook_id: str,
+) -> Event:
+    """Create an event indicating a step has suspended via step_hook."""
+    return Event(
+        run_id=run_id,
+        type=EventType.STEP_SUSPENDED,
+        data={
+            "step_id": step_id,
+            "step_name": step_name,
+            "hook_id": hook_id,
+            "suspended_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
 # Child workflow event creation helpers
 
 
@@ -934,5 +963,136 @@ def create_schedule_backfill_completed_event(
             "runs_created": runs_created,
             "run_ids": run_ids,
             "completed_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+# Stream signal event creation helpers
+
+
+def create_signal_wait_started_event(
+    run_id: str,
+    stream_id: str,
+    signal_types: list[str],
+    wait_sequence: int = 0,
+) -> Event:
+    """Create a signal wait started event (stream_step waiting for signals)."""
+    return Event(
+        run_id=run_id,
+        type=EventType.SIGNAL_WAIT_STARTED,
+        data={
+            "stream_id": stream_id,
+            "signal_types": signal_types,
+            "wait_sequence": wait_sequence,
+            "token": f"stream:{stream_id}:{run_id}:{wait_sequence}",
+            "started_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_signal_received_event(
+    run_id: str,
+    signal_id: str,
+    stream_id: str,
+    signal_type: str,
+    payload: Any,
+) -> Event:
+    """Create a signal received event (stream_step received a signal)."""
+    return Event(
+        run_id=run_id,
+        type=EventType.SIGNAL_RECEIVED,
+        data={
+            "signal_id": signal_id,
+            "stream_id": stream_id,
+            "signal_type": signal_type,
+            "payload": payload,
+            "received_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_signal_published_event(
+    run_id: str,
+    signal_id: str,
+    stream_id: str,
+    signal_type: str,
+) -> Event:
+    """Create a signal published event (workflow/step emitted a signal)."""
+    return Event(
+        run_id=run_id,
+        type=EventType.SIGNAL_PUBLISHED,
+        data={
+            "signal_id": signal_id,
+            "stream_id": stream_id,
+            "signal_type": signal_type,
+            "published_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_stream_step_started_event(
+    run_id: str,
+    stream_id: str,
+    step_name: str,
+    signal_types: list[str],
+) -> Event:
+    """Create a stream step started event."""
+    return Event(
+        run_id=run_id,
+        type=EventType.STREAM_STEP_STARTED,
+        data={
+            "stream_id": stream_id,
+            "step_name": step_name,
+            "signal_types": signal_types,
+            "started_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_stream_step_completed_event(
+    run_id: str,
+    stream_id: str,
+    step_name: str,
+    reason: str | None = None,
+) -> Event:
+    """Create a stream step completed event."""
+    return Event(
+        run_id=run_id,
+        type=EventType.STREAM_STEP_COMPLETED,
+        data={
+            "stream_id": stream_id,
+            "step_name": step_name,
+            "reason": reason,
+            "completed_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_checkpoint_saved_event(
+    run_id: str,
+    step_run_id: str,
+) -> Event:
+    """Create a checkpoint saved event."""
+    return Event(
+        run_id=run_id,
+        type=EventType.CHECKPOINT_SAVED,
+        data={
+            "step_run_id": step_run_id,
+            "saved_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def create_checkpoint_loaded_event(
+    run_id: str,
+    step_run_id: str,
+) -> Event:
+    """Create a checkpoint loaded event."""
+    return Event(
+        run_id=run_id,
+        type=EventType.CHECKPOINT_LOADED,
+        data={
+            "step_run_id": step_run_id,
+            "loaded_at": datetime.now(UTC).isoformat(),
         },
     )

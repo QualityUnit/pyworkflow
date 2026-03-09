@@ -279,6 +279,18 @@ def execute_step_task(
                 step_id=step_id,
             )
 
+    # Set up step execution context for checkpoint/hook primitives
+    step_exec_key = f"{run_id}:{step_id}"
+    step_exec_tokens = None
+    try:
+        from pyworkflow.primitives.step_checkpoint import (
+            set_step_execution_context,
+        )
+
+        step_exec_tokens = set_step_execution_context(step_exec_key, storage)
+    except Exception as e:
+        logger.warning(f"Failed to set up step execution context: {e}")
+
     # Execute step function
     try:
         # Get the original function (unwrapped from decorator)
@@ -339,10 +351,29 @@ def execute_step_task(
         raise
 
     except SuspensionSignal as e:
-        # A primitive (sleep, hook, child_workflow) raised SuspensionSignal.
-        # This should not normally happen because primitives detect step worker
-        # context and adjust behavior. Treat as a fatal error rather than
-        # silently retrying, which would re-execute the step from scratch.
+        # Check if this is a step_hook suspension (supported)
+        if e.reason and e.reason.startswith("step_hook:"):
+            hook_id = e.data.get("hook_id")
+            logger.info(
+                f"Step suspended via step_hook: {step_name}",
+                run_id=run_id,
+                step_id=step_id,
+                hook_id=hook_id,
+            )
+            # Record STEP_SUSPENDED event so the workflow knows this step
+            # needs re-dispatch (clears in-progress state during replay)
+            run_async(
+                _record_step_suspended(
+                    storage_config=storage_config,
+                    run_id=run_id,
+                    step_id=step_id,
+                    step_name=step_name,
+                    hook_id=hook_id or "",
+                )
+            )
+            return None
+
+        # Other SuspensionSignals are not supported from steps
         logger.error(
             f"Step raised SuspensionSignal (unsupported from steps): {step_name}",
             run_id=run_id,
@@ -448,6 +479,12 @@ def execute_step_task(
         if _exec_lock_acquired and _exec_lock_backend is not None:
             with contextlib.suppress(Exception):
                 _exec_lock_backend.unlock(_exec_lock_key)
+
+        # Clean up step execution context (checkpoint/hook primitives)
+        if step_exec_tokens is not None:
+            from pyworkflow.primitives.step_checkpoint import reset_step_execution_context
+
+            reset_step_execution_context(step_exec_tokens)
 
         # Clean up workflow context (must be reset before step context)
         if workflow_context_token is not None:
@@ -564,6 +601,63 @@ async def _record_step_completion_and_resume(
         run_id=run_id,
         step_id=step_id,
         step_name=step_name,
+    )
+
+
+async def _record_step_suspended(
+    storage_config: dict[str, Any] | None,
+    run_id: str,
+    step_id: str,
+    step_name: str,
+    hook_id: str,
+) -> None:
+    """
+    Record STEP_SUSPENDED event when a step suspends via step_hook.
+
+    This clears the step's in-progress state during replay so that the
+    workflow re-dispatches the step on resume (instead of thinking it's
+    still running).
+
+    Does NOT schedule workflow resumption — that happens when resume_hook()
+    is called externally.
+    """
+    from pyworkflow.engine.events import create_step_suspended_event
+
+    storage = _get_storage_backend(storage_config)
+    if hasattr(storage, "connect"):
+        await storage.connect()
+
+    # Wait for WORKFLOW_SUSPENDED event to avoid sequence number race
+    max_wait_attempts = 50
+    wait_interval = 0.01
+
+    for _attempt in range(max_wait_attempts):
+        has_suspended = await storage.has_event(
+            run_id, EventType.WORKFLOW_SUSPENDED.value, step_id=step_id
+        )
+        if has_suspended:
+            break
+        await asyncio.sleep(wait_interval)
+    else:
+        logger.warning(
+            "Timeout waiting for WORKFLOW_SUSPENDED before recording STEP_SUSPENDED",
+            run_id=run_id,
+            step_id=step_id,
+        )
+
+    event = create_step_suspended_event(
+        run_id=run_id,
+        step_id=step_id,
+        step_name=step_name,
+        hook_id=hook_id,
+    )
+    await storage.record_event(event)
+    logger.info(
+        "Step suspended event recorded",
+        run_id=run_id,
+        step_id=step_id,
+        step_name=step_name,
+        hook_id=hook_id,
     )
 
 

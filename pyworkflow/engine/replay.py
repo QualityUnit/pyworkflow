@@ -96,6 +96,12 @@ class EventReplayer:
         elif event.type == EventType.CANCELLATION_REQUESTED:
             await self._apply_cancellation_requested(ctx, event)
 
+        elif event.type == EventType.SIGNAL_WAIT_STARTED:
+            await self._apply_signal_wait_started(ctx, event)
+
+        elif event.type == EventType.SIGNAL_RECEIVED:
+            await self._apply_signal_received(ctx, event)
+
         # Other event types don't affect replay state
         # (workflow_started, step_started, step_failed, etc. are informational)
 
@@ -252,6 +258,49 @@ class EventReplayer:
             recovery_attempt=recovery_attempt,
             last_event_sequence=last_event_sequence,
         )
+
+    async def _apply_signal_wait_started(self, ctx: LocalContext, event: Event) -> None:
+        """Apply signal_wait_started event - mark stream step as waiting for signals."""
+        stream_id = event.data.get("stream_id")
+        signal_types = event.data.get("signal_types", [])
+        wait_sequence = event.data.get("wait_sequence", 0)
+
+        if stream_id:
+            # Store signal wait state in context for replay
+            if not hasattr(ctx, "_signal_waits"):
+                ctx._signal_waits = {}
+            ctx._signal_waits[f"{stream_id}:{wait_sequence}"] = {
+                "stream_id": stream_id,
+                "signal_types": signal_types,
+                "wait_sequence": wait_sequence,
+            }
+            logger.debug(
+                f"Signal wait pending: {stream_id} (seq {wait_sequence})",
+                run_id=ctx.run_id,
+                stream_id=stream_id,
+            )
+
+    async def _apply_signal_received(self, ctx: LocalContext, event: Event) -> None:
+        """Apply signal_received event - cache the received signal data."""
+        signal_id = event.data.get("signal_id")
+        stream_id = event.data.get("stream_id")
+        signal_type = event.data.get("signal_type")
+        payload = event.data.get("payload")
+
+        if signal_id:
+            if not hasattr(ctx, "_received_signals"):
+                ctx._received_signals = {}
+            ctx._received_signals[signal_id] = {
+                "signal_id": signal_id,
+                "stream_id": stream_id,
+                "signal_type": signal_type,
+                "payload": payload,
+            }
+            logger.debug(
+                f"Signal received: {signal_id} ({signal_type})",
+                run_id=ctx.run_id,
+                signal_id=signal_id,
+            )
 
     async def _apply_cancellation_requested(self, ctx: LocalContext, event: Event) -> None:
         """

@@ -434,6 +434,16 @@ class PostgresStorageBackend(StorageBackend):
                 )
             """)
 
+            # Checkpoints table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS checkpoints (
+                    step_run_id TEXT PRIMARY KEY,
+                    data JSONB NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+
     async def _get_pool(self) -> asyncpg.Pool:
         """Get the connection pool, connecting/reconnecting if needed.
 
@@ -1130,6 +1140,44 @@ class PostgresStorageBackend(StorageBackend):
         async with pool.acquire() as conn:
             await conn.execute("DELETE FROM cancellation_flags WHERE run_id = $1", run_id)
 
+    # Checkpoint Operations
+
+    async def save_checkpoint(self, step_run_id: str, data: dict) -> None:
+        """Save or update a checkpoint for a step run."""
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO checkpoints (step_run_id, data, created_at, updated_at)
+                VALUES ($1, $2, $3, $3)
+                ON CONFLICT (step_run_id) DO UPDATE SET data = $2, updated_at = $3
+                """,
+                step_run_id,
+                json.dumps(data),
+                datetime.now(UTC),
+            )
+
+    async def load_checkpoint(self, step_run_id: str) -> dict | None:
+        """Load a checkpoint for a step run, or None if not found."""
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT data FROM checkpoints WHERE step_run_id = $1", step_run_id
+            )
+
+        if row is None:
+            return None
+        return json.loads(row["data"])
+
+    async def delete_checkpoint(self, step_run_id: str) -> None:
+        """Delete a checkpoint for a step run."""
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM checkpoints WHERE step_run_id = $1", step_run_id)
+
     # Continue-As-New Chain Operations
 
     async def update_run_continuation(
@@ -1422,6 +1470,12 @@ class PostgresStorageBackend(StorageBackend):
         async with pool.acquire() as conn, conn.transaction():
             subq = "SELECT run_id FROM workflow_runs WHERE status = ANY($1) AND updated_at < $2"
             await conn.execute(f"DELETE FROM events WHERE run_id IN ({subq})", terminal, older_than)
+            step_subq = f"SELECT step_id FROM steps WHERE run_id IN ({subq})"
+            await conn.execute(
+                f"DELETE FROM checkpoints WHERE step_run_id IN ({step_subq})",
+                terminal,
+                older_than,
+            )
             await conn.execute(f"DELETE FROM steps WHERE run_id IN ({subq})", terminal, older_than)
             await conn.execute(f"DELETE FROM hooks WHERE run_id IN ({subq})", terminal, older_than)
             await conn.execute(

@@ -21,13 +21,17 @@ from typing import Any
 from loguru import logger
 
 from pyworkflow.context import get_context, has_context
-from pyworkflow.core.exceptions import FatalError, RetryableError
+from pyworkflow.core.exceptions import FatalError, RetryableError, SuspensionSignal
 from pyworkflow.core.registry import register_step
 from pyworkflow.core.validation import validate_step_parameters
 from pyworkflow.engine.events import (
     create_step_completed_event,
     create_step_failed_event,
     create_step_started_event,
+)
+from pyworkflow.primitives.step_checkpoint import (
+    reset_step_execution_context,
+    set_step_execution_context,
 )
 from pyworkflow.serialization.encoder import serialize, serialize_args, serialize_kwargs
 
@@ -177,8 +181,6 @@ def step(
                     step_id=step_id,
                 )
                 # Re-suspend and wait for existing task to complete
-                from pyworkflow.core.exceptions import SuspensionSignal
-
                 raise SuspensionSignal(
                     reason=f"step_dispatch:{step_id}",
                     step_id=step_id,
@@ -229,8 +231,6 @@ def step(
                             current_attempt=current_attempt,
                             resume_at=resume_at.isoformat(),
                         )
-                        from pyworkflow.core.exceptions import SuspensionSignal
-
                         raise SuspensionSignal(
                             reason=f"retry:{step_id}",
                             resume_at=resume_at,
@@ -268,6 +268,10 @@ def step(
             # Validate parameters before execution
             validate_step_parameters(func, args, kwargs, step_name)
 
+            # Set up step execution context for checkpoint/hook primitives
+            step_exec_key = f"{ctx.run_id}:{step_id}"
+            step_exec_tokens = set_step_execution_context(step_exec_key, ctx.storage)
+
             try:
                 # Execute step function
                 result = await func(*args, **kwargs)
@@ -294,6 +298,15 @@ def step(
                 )
 
                 return result
+
+            except SuspensionSignal:
+                # step_hook() raised SuspensionSignal — propagate to suspend workflow
+                logger.info(
+                    f"Step suspended via step_hook: {step_name}",
+                    run_id=ctx.run_id,
+                    step_id=step_id,
+                )
+                raise
 
             except FatalError as e:
                 # Fatal error - don't retry
@@ -393,8 +406,6 @@ def step(
 
                     # Raise suspension signal to pause workflow
                     # Note: The workflow-level exception handler will schedule automatic resumption
-                    from pyworkflow.core.exceptions import SuspensionSignal
-
                     raise SuspensionSignal(
                         reason=f"retry:{step_id}",
                         resume_at=resume_at,
@@ -433,6 +444,9 @@ def step(
                         ) from e
                     else:
                         raise
+
+            finally:
+                reset_step_execution_context(step_exec_tokens)
 
         # Register step
         register_step(
@@ -645,7 +659,6 @@ async def _dispatch_step_to_celery(
         SuspensionSignal: To pause workflow while step executes on worker
     """
     from pyworkflow.celery.tasks import execute_step_task
-    from pyworkflow.core.exceptions import SuspensionSignal
     from pyworkflow.engine.events import EventType
 
     logger.info(
@@ -657,11 +670,17 @@ async def _dispatch_step_to_celery(
     # Defense-in-depth: check if STEP_STARTED was already recorded for this step.
     # This guards against duplicate dispatch when two resume tasks race and both
     # replay past the same step. If already started, re-suspend to wait.
+    # Exception: if STEP_SUSPENDED was recorded (step_hook suspension), the step
+    # needs re-dispatch so it can re-execute and find the HOOK_RECEIVED event.
     events = await ctx.storage.get_events(ctx.run_id)
     already_started = any(
         evt.type == EventType.STEP_STARTED and evt.data.get("step_id") == step_id for evt in events
     )
-    if already_started:
+    was_suspended = any(
+        evt.type == EventType.STEP_SUSPENDED and evt.data.get("step_id") == step_id
+        for evt in events
+    )
+    if already_started and not was_suspended:
         logger.info(
             f"Step {step_name} already has STEP_STARTED event, re-suspending",
             run_id=ctx.run_id,

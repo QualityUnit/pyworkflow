@@ -94,6 +94,10 @@ class LocalContext(WorkflowContext):
         self._cancellation_blocked: bool = False
         self._cancellation_reason: str | None = None
 
+        # Signal/stream state (used by EventReplayer for stream workflows)
+        self._signal_waits: dict[str, dict[str, Any]] = {}
+        self._received_signals: dict[str, dict[str, Any]] = {}
+
         # Child workflow state
         self._child_results: dict[str, dict[str, Any]] = {}
         self._pending_children: dict[str, str] = {}  # child_id -> child_run_id
@@ -160,6 +164,13 @@ class LocalContext(WorkflowContext):
                 self._step_results[step_id] = result
                 # Step completed - no longer in progress
                 self._steps_in_progress.discard(step_id)
+
+            elif event.type == EventType.STEP_SUSPENDED:
+                step_id = event.data.get("step_id")
+                if step_id:
+                    # Step suspended via step_hook — no longer in progress,
+                    # needs re-dispatch on workflow resume
+                    self._steps_in_progress.discard(step_id)
 
             elif event.type == EventType.SLEEP_COMPLETED:
                 sleep_id = event.data.get("sleep_id")

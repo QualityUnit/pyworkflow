@@ -61,6 +61,7 @@ class FileStorageBackend(StorageBackend):
         self.steps_dir = self.base_path / "steps"
         self.hooks_dir = self.base_path / "hooks"
         self.schedules_dir = self.base_path / "schedules"
+        self.checkpoints_dir = self.base_path / "checkpoints"
         self.locks_dir = self.base_path / ".locks"
         self._token_index_file = self.base_path / "_token_index.json"
 
@@ -71,6 +72,7 @@ class FileStorageBackend(StorageBackend):
             self.steps_dir,
             self.hooks_dir,
             self.schedules_dir,
+            self.checkpoints_dir,
             self.locks_dir,
         ]:
             dir_path.mkdir(parents=True, exist_ok=True)
@@ -996,3 +998,51 @@ class FileStorageBackend(StorageBackend):
             return count
 
         return await asyncio.to_thread(_sync_delete)
+
+    # Checkpoint Operations
+
+    async def save_checkpoint(self, step_run_id: str, data: dict) -> None:
+        """Save checkpoint data for a step execution."""
+        checkpoint_file = self.checkpoints_dir / f"{step_run_id}.json"
+        lock_file = self.locks_dir / f"checkpoint_{step_run_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _write() -> None:
+            with lock:
+                checkpoint_file.write_text(json.dumps(data, indent=2))
+
+        await asyncio.to_thread(_write)
+
+    async def load_checkpoint(self, step_run_id: str) -> dict | None:
+        """Load checkpoint data for a step execution."""
+        checkpoint_file = self.checkpoints_dir / f"{step_run_id}.json"
+
+        if not checkpoint_file.exists():
+            return None
+
+        lock_file = self.locks_dir / f"checkpoint_{step_run_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _read() -> dict | None:
+            with lock:
+                if not checkpoint_file.exists():
+                    return None
+                content = checkpoint_file.read_text()
+                if not content.strip():
+                    return None
+                return json.loads(content)
+
+        return await asyncio.to_thread(_read)
+
+    async def delete_checkpoint(self, step_run_id: str) -> None:
+        """Delete checkpoint data for a step execution."""
+        checkpoint_file = self.checkpoints_dir / f"{step_run_id}.json"
+        lock_file = self.locks_dir / f"checkpoint_{step_run_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _delete() -> None:
+            with lock:
+                if checkpoint_file.exists():
+                    checkpoint_file.unlink()
+
+        await asyncio.to_thread(_delete)

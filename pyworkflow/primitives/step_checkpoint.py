@@ -92,8 +92,7 @@ async def save_step_checkpoint(data: dict) -> None:
 
     if step_id is None or storage is None:
         raise RuntimeError(
-            "save_step_checkpoint() must be called within a @step function "
-            "running in durable mode."
+            "save_step_checkpoint() must be called within a @step function running in durable mode."
         )
 
     await storage.save_checkpoint(step_id, data)
@@ -127,8 +126,7 @@ async def load_step_checkpoint() -> dict | None:
 
     if step_id is None or storage is None:
         raise RuntimeError(
-            "load_step_checkpoint() must be called within a @step function "
-            "running in durable mode."
+            "load_step_checkpoint() must be called within a @step function running in durable mode."
         )
 
     data = await storage.load_checkpoint(step_id)

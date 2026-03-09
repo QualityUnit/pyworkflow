@@ -48,7 +48,7 @@ class DefaultCheckpointBackend(CheckpointBackend):
         config = get_config()
         if config.storage is None:
             raise RuntimeError(
-                "No storage backend configured. " "Call pyworkflow.configure(storage=...) first."
+                "No storage backend configured. Call pyworkflow.configure(storage=...) first."
             )
         return config.storage
 

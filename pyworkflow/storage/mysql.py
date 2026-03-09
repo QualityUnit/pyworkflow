@@ -1032,9 +1032,7 @@ class MySQLStorageBackend(StorageBackend):
         pool = self._ensure_connected()
 
         async with pool.acquire() as conn, conn.cursor() as cur:
-            await cur.execute(
-                "SELECT data FROM checkpoints WHERE step_run_id = %s", (step_run_id,)
-            )
+            await cur.execute("SELECT data FROM checkpoints WHERE step_run_id = %s", (step_run_id,))
             row = await cur.fetchone()
 
         if row is None:

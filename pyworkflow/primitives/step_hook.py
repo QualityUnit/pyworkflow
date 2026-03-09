@@ -78,17 +78,14 @@ async def step_hook(
     """
     if not has_context():
         raise RuntimeError(
-            "step_hook() must be called within a @step function "
-            "running in a workflow context."
+            "step_hook() must be called within a @step function running in a workflow context."
         )
 
     ctx = get_context()
     storage = ctx._storage if hasattr(ctx, "_storage") else None
 
     if storage is None:
-        raise RuntimeError(
-            "step_hook() requires durable mode with a storage backend."
-        )
+        raise RuntimeError("step_hook() requires durable mode with a storage backend.")
 
     # Get step execution context
     step_run_id = get_step_run_id()

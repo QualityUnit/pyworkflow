@@ -1107,9 +1107,11 @@ class SQLiteStorageBackend(StorageBackend):
                 json.dumps(schedule.running_run_ids),
                 json.dumps({}),  # metadata not in schema, store empty
                 schedule.created_at.isoformat(),
-                schedule.updated_at.isoformat()
-                if schedule.updated_at
-                else datetime.now(UTC).isoformat(),
+                (
+                    schedule.updated_at.isoformat()
+                    if schedule.updated_at
+                    else datetime.now(UTC).isoformat()
+                ),
                 None,  # paused_at - derived from status
                 None,  # deleted_at - derived from status
             ),

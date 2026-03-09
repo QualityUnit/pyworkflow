@@ -1852,9 +1852,9 @@ class CassandraStorageBackend(StorageBackend):
             context=json.loads(row.context) if row.context else {},
             recovery_attempts=row.recovery_attempts or 0,
             max_recovery_attempts=row.max_recovery_attempts or 3,
-            recover_on_worker_loss=row.recover_on_worker_loss
-            if row.recover_on_worker_loss is not None
-            else True,
+            recover_on_worker_loss=(
+                row.recover_on_worker_loss if row.recover_on_worker_loss is not None else True
+            ),
             parent_run_id=row.parent_run_id,
             nesting_depth=row.nesting_depth or 0,
             continued_from_run_id=row.continued_from_run_id,

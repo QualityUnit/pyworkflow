@@ -151,9 +151,9 @@ async def list_runs(
                     "Run ID": run.run_id,
                     "Workflow": run.workflow_name,
                     "Status": run.status.value,
-                    "Started": run.started_at.strftime("%Y-%m-%d %H:%M:%S")
-                    if run.started_at
-                    else "-",
+                    "Started": (
+                        run.started_at.strftime("%Y-%m-%d %H:%M:%S") if run.started_at else "-"
+                    ),
                     "Duration": durations.get(run.run_id, "-"),
                 }
                 for run in runs_list
@@ -238,9 +238,9 @@ async def run_status(ctx: click.Context, run_id: str) -> None:
                 "Status": run.status.value,
                 "Created": run.created_at.strftime("%Y-%m-%d %H:%M:%S") if run.created_at else "-",
                 "Started": run.started_at.strftime("%Y-%m-%d %H:%M:%S") if run.started_at else "-",
-                "Completed": run.completed_at.strftime("%Y-%m-%d %H:%M:%S")
-                if run.completed_at
-                else "-",
+                "Completed": (
+                    run.completed_at.strftime("%Y-%m-%d %H:%M:%S") if run.completed_at else "-"
+                ),
                 "Duration": duration_str,
             }
 
@@ -622,9 +622,9 @@ async def list_children(
                     "Workflow": child.workflow_name,
                     "Status": child.status.value,
                     "Depth": child.nesting_depth,
-                    "Started": child.started_at.strftime("%Y-%m-%d %H:%M:%S")
-                    if child.started_at
-                    else "-",
+                    "Started": (
+                        child.started_at.strftime("%Y-%m-%d %H:%M:%S") if child.started_at else "-"
+                    ),
                     "Duration": _calc_duration(child),
                 }
                 for child in children

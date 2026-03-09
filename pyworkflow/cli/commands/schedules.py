@@ -123,9 +123,9 @@ async def list_schedules_cmd(
                     "Workflow": s.workflow_name,
                     "Status": s.status.value,
                     "Schedule": describe_schedule(s.spec),
-                    "Next Run": s.next_run_time.strftime("%Y-%m-%d %H:%M:%S")
-                    if s.next_run_time
-                    else "-",
+                    "Next Run": (
+                        s.next_run_time.strftime("%Y-%m-%d %H:%M:%S") if s.next_run_time else "-"
+                    ),
                     "Runs": f"{s.successful_runs}/{s.total_runs}",
                 }
                 for s in schedules_list
@@ -241,9 +241,9 @@ async def create_schedule_cmd(
                 "status": schedule.status.value,
                 "spec": describe_schedule(schedule.spec),
                 "overlap_policy": schedule.overlap_policy.value,
-                "next_run_time": schedule.next_run_time.isoformat()
-                if schedule.next_run_time
-                else None,
+                "next_run_time": (
+                    schedule.next_run_time.isoformat() if schedule.next_run_time else None
+                ),
             }
             format_json(data)
         else:
@@ -308,9 +308,9 @@ async def show_schedule_cmd(
                     "timezone": schedule.spec.timezone,
                 },
                 "overlap_policy": schedule.overlap_policy.value,
-                "next_run_time": schedule.next_run_time.isoformat()
-                if schedule.next_run_time
-                else None,
+                "next_run_time": (
+                    schedule.next_run_time.isoformat() if schedule.next_run_time else None
+                ),
                 "last_run_at": schedule.last_run_at.isoformat() if schedule.last_run_at else None,
                 "total_runs": schedule.total_runs,
                 "successful_runs": schedule.successful_runs,
@@ -327,19 +327,25 @@ async def show_schedule_cmd(
                 "Status": schedule.status.value,
                 "Schedule": describe_schedule(schedule.spec),
                 "Overlap Policy": schedule.overlap_policy.value,
-                "Next Run": schedule.next_run_time.strftime("%Y-%m-%d %H:%M:%S")
-                if schedule.next_run_time
-                else "-",
-                "Last Run": schedule.last_run_at.strftime("%Y-%m-%d %H:%M:%S")
-                if schedule.last_run_at
-                else "-",
+                "Next Run": (
+                    schedule.next_run_time.strftime("%Y-%m-%d %H:%M:%S")
+                    if schedule.next_run_time
+                    else "-"
+                ),
+                "Last Run": (
+                    schedule.last_run_at.strftime("%Y-%m-%d %H:%M:%S")
+                    if schedule.last_run_at
+                    else "-"
+                ),
                 "Total Runs": schedule.total_runs,
                 "Successful": schedule.successful_runs,
                 "Failed": schedule.failed_runs,
                 "Skipped": schedule.skipped_runs,
-                "Created": schedule.created_at.strftime("%Y-%m-%d %H:%M:%S")
-                if schedule.created_at
-                else "-",
+                "Created": (
+                    schedule.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                    if schedule.created_at
+                    else "-"
+                ),
             }
             format_key_value(data, title=f"Schedule: {schedule_id}")
 
@@ -440,9 +446,9 @@ async def resume_schedule_cmd(
             data = {
                 "schedule_id": schedule.schedule_id,
                 "status": schedule.status.value,
-                "next_run_time": schedule.next_run_time.isoformat()
-                if schedule.next_run_time
-                else None,
+                "next_run_time": (
+                    schedule.next_run_time.isoformat() if schedule.next_run_time else None
+                ),
             }
             format_json(data)
 
@@ -774,9 +780,9 @@ async def update_schedule_cmd(
                 "workflow_name": schedule.workflow_name,
                 "spec": describe_schedule(schedule.spec),
                 "overlap_policy": schedule.overlap_policy.value,
-                "next_run_time": schedule.next_run_time.isoformat()
-                if schedule.next_run_time
-                else None,
+                "next_run_time": (
+                    schedule.next_run_time.isoformat() if schedule.next_run_time else None
+                ),
             }
             format_json(data)
         else:

@@ -444,6 +444,61 @@ class PostgresStorageBackend(StorageBackend):
                 )
             """)
 
+            # Streams table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS streams (
+                    stream_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    metadata JSONB DEFAULT '{}'
+                )
+            """)
+
+            # Signals table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS signals (
+                    signal_id TEXT PRIMARY KEY,
+                    stream_id TEXT NOT NULL REFERENCES streams(stream_id) ON DELETE CASCADE,
+                    signal_type TEXT NOT NULL,
+                    payload JSONB NOT NULL DEFAULT '{}',
+                    published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    sequence INTEGER NOT NULL,
+                    source_run_id TEXT,
+                    metadata JSONB DEFAULT '{}'
+                )
+            """)
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_signals_stream_id_sequence ON signals(stream_id, sequence)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_signals_stream_id_type ON signals(stream_id, signal_type)"
+            )
+
+            # Stream subscriptions table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS stream_subscriptions (
+                    stream_id TEXT NOT NULL REFERENCES streams(stream_id) ON DELETE CASCADE,
+                    step_run_id TEXT NOT NULL,
+                    signal_types JSONB NOT NULL DEFAULT '[]',
+                    status TEXT NOT NULL DEFAULT 'waiting',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (stream_id, step_run_id)
+                )
+            """)
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON stream_subscriptions(stream_id, status)"
+            )
+
+            # Signal acknowledgments table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS signal_acknowledgments (
+                    signal_id TEXT NOT NULL,
+                    step_run_id TEXT NOT NULL,
+                    acknowledged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (signal_id, step_run_id)
+                )
+            """)
+
     async def _get_pool(self) -> asyncpg.Pool:
         """Get the connection pool, connecting/reconnecting if needed.
 
@@ -1581,3 +1636,265 @@ class PostgresStorageBackend(StorageBackend):
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
+
+    # Stream Operations
+
+    async def create_stream(self, stream_id: str, metadata: dict | None = None) -> None:
+        """Create a new stream."""
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO streams (stream_id, status, created_at, metadata)
+                VALUES ($1, $2, $3, $4)
+                """,
+                stream_id,
+                "active",
+                datetime.now(UTC),
+                json.dumps(metadata or {}),
+            )
+
+    async def get_stream(self, stream_id: str) -> dict | None:
+        """Get a stream by ID."""
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT stream_id, status, created_at, metadata FROM streams WHERE stream_id = $1",
+                stream_id,
+            )
+
+        if row is None:
+            return None
+        return {
+            "stream_id": row["stream_id"],
+            "status": row["status"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+        }
+
+    async def publish_signal(
+        self,
+        signal_id: str,
+        stream_id: str,
+        signal_type: str,
+        payload: dict,
+        source_run_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> int:
+        """Publish a signal to a stream."""
+        pool = await self._get_pool()
+        now = datetime.now(UTC)
+
+        async with pool.acquire() as conn:
+            # Get next sequence number
+            row = await conn.fetchrow(
+                "SELECT COALESCE(MAX(sequence), -1) + 1 AS seq FROM signals WHERE stream_id = $1",
+                stream_id,
+            )
+            seq = row["seq"] if row else 0
+
+            await conn.execute(
+                """
+                INSERT INTO signals (signal_id, stream_id, signal_type, payload, published_at, sequence, source_run_id, metadata)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                """,
+                signal_id,
+                stream_id,
+                signal_type,
+                json.dumps(payload),
+                now,
+                seq,
+                source_run_id,
+                json.dumps(metadata or {}),
+            )
+        return seq
+
+    async def get_signals(
+        self,
+        stream_id: str,
+        after_sequence: int = 0,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Get signals from a stream after a given sequence number."""
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT signal_id, stream_id, signal_type, payload, published_at, sequence, source_run_id, metadata
+                FROM signals
+                WHERE stream_id = $1 AND sequence >= $2
+                ORDER BY sequence ASC
+                LIMIT $3
+                """,
+                stream_id,
+                after_sequence,
+                limit,
+            )
+
+        return [
+            {
+                "signal_id": row["signal_id"],
+                "stream_id": row["stream_id"],
+                "signal_type": row["signal_type"],
+                "payload": json.loads(row["payload"]) if row["payload"] else {},
+                "published_at": row["published_at"].isoformat() if row["published_at"] else None,
+                "sequence": row["sequence"],
+                "source_run_id": row["source_run_id"],
+                "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+            }
+            for row in rows
+        ]
+
+    async def register_stream_subscription(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        signal_types: list[str],
+    ) -> None:
+        """Register a stream step's subscription to signal types."""
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO stream_subscriptions (stream_id, step_run_id, signal_types, status, created_at)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (stream_id, step_run_id)
+                DO UPDATE SET signal_types = $3, status = $4
+                """,
+                stream_id,
+                step_run_id,
+                json.dumps(signal_types),
+                "waiting",
+                datetime.now(UTC),
+            )
+
+    async def get_waiting_steps(
+        self,
+        stream_id: str,
+        signal_type: str,
+    ) -> list[dict]:
+        """Get step_run_ids waiting for a specific signal type on a stream."""
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT stream_id, step_run_id, signal_types, status, created_at
+                FROM stream_subscriptions
+                WHERE stream_id = $1 AND status = 'waiting'
+                """,
+                stream_id,
+            )
+
+        result = []
+        for row in rows:
+            signal_types = json.loads(row["signal_types"]) if row["signal_types"] else []
+            if signal_type in signal_types:
+                result.append(
+                    {
+                        "stream_id": row["stream_id"],
+                        "step_run_id": row["step_run_id"],
+                        "signal_types": signal_types,
+                        "status": row["status"],
+                        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    }
+                )
+        return result
+
+    async def update_subscription_status(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        status: str,
+    ) -> None:
+        """Update a subscription's status."""
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE stream_subscriptions SET status = $1
+                WHERE stream_id = $2 AND step_run_id = $3
+                """,
+                status,
+                stream_id,
+                step_run_id,
+            )
+
+    async def acknowledge_signal(
+        self,
+        signal_id: str,
+        step_run_id: str,
+    ) -> None:
+        """Acknowledge that a signal has been processed by a step."""
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO signal_acknowledgments (signal_id, step_run_id, acknowledged_at)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (signal_id, step_run_id) DO NOTHING
+                """,
+                signal_id,
+                step_run_id,
+                datetime.now(UTC),
+            )
+
+    async def get_pending_signals(
+        self,
+        stream_id: str,
+        step_run_id: str,
+    ) -> list[dict]:
+        """Get signals that arrived for a step but haven't been acknowledged."""
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            # Get subscription
+            sub_row = await conn.fetchrow(
+                "SELECT signal_types FROM stream_subscriptions WHERE stream_id = $1 AND step_run_id = $2",
+                stream_id,
+                step_run_id,
+            )
+
+            if not sub_row:
+                return []
+
+            signal_types = json.loads(sub_row["signal_types"]) if sub_row["signal_types"] else []
+            if not signal_types:
+                return []
+
+            rows = await conn.fetch(
+                """
+                SELECT s.signal_id, s.stream_id, s.signal_type, s.payload, s.published_at,
+                       s.sequence, s.source_run_id, s.metadata
+                FROM signals s
+                WHERE s.stream_id = $1 AND s.signal_type = ANY($2)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM signal_acknowledgments a
+                      WHERE a.signal_id = s.signal_id AND a.step_run_id = $3
+                  )
+                ORDER BY s.sequence ASC
+                """,
+                stream_id,
+                signal_types,
+                step_run_id,
+            )
+
+        return [
+            {
+                "signal_id": row["signal_id"],
+                "stream_id": row["stream_id"],
+                "signal_type": row["signal_type"],
+                "payload": json.loads(row["payload"]) if row["payload"] else {},
+                "published_at": row["published_at"].isoformat() if row["published_at"] else None,
+                "sequence": row["sequence"],
+                "source_run_id": row["source_run_id"],
+                "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+            }
+            for row in rows
+        ]

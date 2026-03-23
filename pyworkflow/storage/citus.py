@@ -337,6 +337,70 @@ class CitusStorageBackend(PostgresStorageBackend):
                 )
             """)
 
+            # streams — reference table (independent, keyed by stream_id)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS streams (
+                    stream_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    metadata JSONB DEFAULT '{}'
+                )
+            """)
+
+            # signals — distributed on stream_id
+            # Differences vs postgres:
+            #   - PK: (stream_id, signal_id) to include distribution column
+            #   - No FK constraints (cross-shard FKs unsupported)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS signals (
+                    signal_id TEXT NOT NULL,
+                    stream_id TEXT NOT NULL,
+                    signal_type TEXT NOT NULL,
+                    payload JSONB NOT NULL DEFAULT '{}',
+                    published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    sequence INTEGER NOT NULL,
+                    source_run_id TEXT,
+                    metadata JSONB DEFAULT '{}',
+                    PRIMARY KEY (stream_id, signal_id)
+                )
+            """)
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_signals_stream_id_sequence ON signals(stream_id, sequence)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_signals_stream_id_type ON signals(stream_id, signal_type)"
+            )
+
+            # stream_subscriptions — distributed on stream_id, co-located with signals
+            # Differences vs postgres:
+            #   - PK: (stream_id, step_run_id) to include distribution column
+            #   - No FK constraints (cross-shard FKs unsupported)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS stream_subscriptions (
+                    stream_id TEXT NOT NULL,
+                    step_run_id TEXT NOT NULL,
+                    signal_types JSONB NOT NULL DEFAULT '[]',
+                    status TEXT NOT NULL DEFAULT 'waiting',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (stream_id, step_run_id)
+                )
+            """)
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON stream_subscriptions(stream_id, status)"
+            )
+
+            # signal_acknowledgments — reference table (needs cross-shard joins)
+            # Differences vs postgres:
+            #   - No FK constraints (cross-shard FKs unsupported)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS signal_acknowledgments (
+                    signal_id TEXT NOT NULL,
+                    step_run_id TEXT NOT NULL,
+                    acknowledged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (signal_id, step_run_id)
+                )
+            """)
+
         # Step 4: Distribute tables (idempotent — already-distributed tables are skipped)
         await self._distribute_tables(pool)
 
@@ -385,3 +449,22 @@ class CitusStorageBackend(PostgresStorageBackend):
             # checkpoints: reference table (keyed by step_run_id, can't co-locate with run_id)
             if "checkpoints" not in distributed:
                 await conn.execute("SELECT create_reference_table('checkpoints')")
+
+            # streams: reference table (independent, small)
+            if "streams" not in distributed:
+                await conn.execute("SELECT create_reference_table('streams')")
+
+            # signals: distributed on stream_id, co-located with other signal tables
+            if "signals" not in distributed:
+                await conn.execute("SELECT create_distributed_table('signals', 'stream_id')")
+
+            # stream_subscriptions: distributed on stream_id, co-located with signals
+            if "stream_subscriptions" not in distributed:
+                await conn.execute(
+                    "SELECT create_distributed_table('stream_subscriptions', 'stream_id', "
+                    "colocate_with => 'signals')"
+                )
+
+            # signal_acknowledgments: reference table (needs cross-shard joins)
+            if "signal_acknowledgments" not in distributed:
+                await conn.execute("SELECT create_reference_table('signal_acknowledgments')")

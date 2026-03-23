@@ -1543,3 +1543,303 @@ class DynamoDBStorageBackend(StorageBackend):
             ),
             running_run_ids=json.loads(item.get("running_run_ids", "[]")),
         )
+
+    # Stream Operations
+
+    async def create_stream(self, stream_id: str, metadata: dict | None = None) -> None:
+        """Create a new stream."""
+        async with self._get_client() as client:
+            now = datetime.now(UTC).isoformat()
+            await client.put_item(
+                TableName=self.table_name,
+                Item=self._dict_to_item(
+                    {
+                        "PK": f"STREAM#{stream_id}",
+                        "SK": "#META",
+                        "entity_type": "stream",
+                        "stream_id": stream_id,
+                        "status": "active",
+                        "created_at": now,
+                        "metadata": json.dumps(metadata or {}),
+                    }
+                ),
+                ConditionExpression="attribute_not_exists(PK)",
+            )
+
+    async def get_stream(self, stream_id: str) -> dict | None:
+        """Get a stream by ID."""
+        async with self._get_client() as client:
+            response = await client.get_item(
+                TableName=self.table_name,
+                Key={
+                    "PK": {"S": f"STREAM#{stream_id}"},
+                    "SK": {"S": "#META"},
+                },
+            )
+
+            if "Item" not in response:
+                return None
+
+            item = self._item_to_dict(response["Item"])
+            return {
+                "stream_id": item["stream_id"],
+                "status": item["status"],
+                "created_at": item["created_at"],
+                "metadata": json.loads(item.get("metadata", "{}")),
+            }
+
+    async def publish_signal(
+        self,
+        signal_id: str,
+        stream_id: str,
+        signal_type: str,
+        payload: dict,
+        source_run_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> int:
+        """Publish a signal to a stream."""
+        async with self._get_client() as client:
+            now = datetime.now(UTC).isoformat()
+
+            # Get current max sequence by querying signals for this stream
+            response = await client.query(
+                TableName=self.table_name,
+                KeyConditionExpression="PK = :pk AND begins_with(SK, :prefix)",
+                ExpressionAttributeValues={
+                    ":pk": {"S": f"STREAM#{stream_id}"},
+                    ":prefix": {"S": "SIGNAL#"},
+                },
+                ScanIndexForward=False,
+                Limit=1,
+            )
+
+            if response.get("Items"):
+                last_item = self._item_to_dict(response["Items"][0])
+                seq = int(last_item.get("sequence", -1)) + 1
+            else:
+                seq = 0
+
+            await client.put_item(
+                TableName=self.table_name,
+                Item=self._dict_to_item(
+                    {
+                        "PK": f"STREAM#{stream_id}",
+                        "SK": f"SIGNAL#{seq:08d}",
+                        "entity_type": "signal",
+                        "signal_id": signal_id,
+                        "stream_id": stream_id,
+                        "signal_type": signal_type,
+                        "payload": json.dumps(payload),
+                        "published_at": now,
+                        "sequence": str(seq),
+                        "source_run_id": source_run_id or "",
+                        "metadata": json.dumps(metadata or {}),
+                    }
+                ),
+            )
+            return seq
+
+    async def get_signals(
+        self,
+        stream_id: str,
+        after_sequence: int = 0,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Get signals from a stream after a given sequence number."""
+        async with self._get_client() as client:
+            response = await client.query(
+                TableName=self.table_name,
+                KeyConditionExpression="PK = :pk AND SK >= :sk",
+                ExpressionAttributeValues={
+                    ":pk": {"S": f"STREAM#{stream_id}"},
+                    ":sk": {"S": f"SIGNAL#{after_sequence:08d}"},
+                },
+                ScanIndexForward=True,
+                Limit=limit,
+            )
+
+            results = []
+            for item_raw in response.get("Items", []):
+                item = self._item_to_dict(item_raw)
+                if item.get("entity_type") != "signal":
+                    continue
+                results.append(
+                    {
+                        "signal_id": item["signal_id"],
+                        "stream_id": item["stream_id"],
+                        "signal_type": item["signal_type"],
+                        "payload": json.loads(item.get("payload", "{}")),
+                        "published_at": item["published_at"],
+                        "sequence": int(item["sequence"]),
+                        "source_run_id": item.get("source_run_id") or None,
+                        "metadata": json.loads(item.get("metadata", "{}")),
+                    }
+                )
+            return results
+
+    async def register_stream_subscription(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        signal_types: list[str],
+    ) -> None:
+        """Register a stream step's subscription to signal types."""
+        async with self._get_client() as client:
+            now = datetime.now(UTC).isoformat()
+            await client.put_item(
+                TableName=self.table_name,
+                Item=self._dict_to_item(
+                    {
+                        "PK": f"STREAMSUB#{stream_id}",
+                        "SK": f"STEP#{step_run_id}",
+                        "entity_type": "subscription",
+                        "stream_id": stream_id,
+                        "step_run_id": step_run_id,
+                        "signal_types": json.dumps(signal_types),
+                        "status": "waiting",
+                        "created_at": now,
+                    }
+                ),
+            )
+
+    async def get_waiting_steps(
+        self,
+        stream_id: str,
+        signal_type: str,
+    ) -> list[dict]:
+        """Get step_run_ids waiting for a specific signal type on a stream."""
+        async with self._get_client() as client:
+            response = await client.query(
+                TableName=self.table_name,
+                KeyConditionExpression="PK = :pk AND begins_with(SK, :prefix)",
+                ExpressionAttributeValues={
+                    ":pk": {"S": f"STREAMSUB#{stream_id}"},
+                    ":prefix": {"S": "STEP#"},
+                },
+            )
+
+            result = []
+            for item_raw in response.get("Items", []):
+                item = self._item_to_dict(item_raw)
+                if item.get("status") != "waiting":
+                    continue
+                types = json.loads(item.get("signal_types", "[]"))
+                if signal_type in types:
+                    result.append(
+                        {
+                            "stream_id": item["stream_id"],
+                            "step_run_id": item["step_run_id"],
+                            "signal_types": types,
+                            "status": item["status"],
+                            "created_at": item["created_at"],
+                        }
+                    )
+            return result
+
+    async def update_subscription_status(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        status: str,
+    ) -> None:
+        """Update a subscription's status."""
+        async with self._get_client() as client:
+            await client.update_item(
+                TableName=self.table_name,
+                Key={
+                    "PK": {"S": f"STREAMSUB#{stream_id}"},
+                    "SK": {"S": f"STEP#{step_run_id}"},
+                },
+                UpdateExpression="SET #s = :s",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={":s": {"S": status}},
+            )
+
+    async def acknowledge_signal(
+        self,
+        signal_id: str,
+        step_run_id: str,
+    ) -> None:
+        """Acknowledge that a signal has been processed by a step."""
+        async with self._get_client() as client:
+            now = datetime.now(UTC).isoformat()
+            await client.put_item(
+                TableName=self.table_name,
+                Item=self._dict_to_item(
+                    {
+                        "PK": f"SIGACK#{signal_id}",
+                        "SK": f"STEP#{step_run_id}",
+                        "entity_type": "acknowledgment",
+                        "signal_id": signal_id,
+                        "step_run_id": step_run_id,
+                        "acknowledged_at": now,
+                    }
+                ),
+            )
+
+    async def get_pending_signals(
+        self,
+        stream_id: str,
+        step_run_id: str,
+    ) -> list[dict]:
+        """Get signals that arrived for a step but haven't been acknowledged."""
+        async with self._get_client() as client:
+            # Get subscription
+            response = await client.get_item(
+                TableName=self.table_name,
+                Key={
+                    "PK": {"S": f"STREAMSUB#{stream_id}"},
+                    "SK": {"S": f"STEP#{step_run_id}"},
+                },
+            )
+
+            if "Item" not in response:
+                return []
+
+            sub = self._item_to_dict(response["Item"])
+            signal_types = json.loads(sub.get("signal_types", "[]"))
+            if not signal_types:
+                return []
+
+            # Get all signals for the stream
+            sig_response = await client.query(
+                TableName=self.table_name,
+                KeyConditionExpression="PK = :pk AND begins_with(SK, :prefix)",
+                ExpressionAttributeValues={
+                    ":pk": {"S": f"STREAM#{stream_id}"},
+                    ":prefix": {"S": "SIGNAL#"},
+                },
+                ScanIndexForward=True,
+            )
+
+            pending = []
+            for item_raw in sig_response.get("Items", []):
+                item = self._item_to_dict(item_raw)
+                if item.get("entity_type") != "signal":
+                    continue
+                if item.get("signal_type") not in signal_types:
+                    continue
+
+                # Check if acknowledged
+                ack_response = await client.get_item(
+                    TableName=self.table_name,
+                    Key={
+                        "PK": {"S": f"SIGACK#{item['signal_id']}"},
+                        "SK": {"S": f"STEP#{step_run_id}"},
+                    },
+                )
+                if "Item" not in ack_response:
+                    pending.append(
+                        {
+                            "signal_id": item["signal_id"],
+                            "stream_id": item["stream_id"],
+                            "signal_type": item["signal_type"],
+                            "payload": json.loads(item.get("payload", "{}")),
+                            "published_at": item["published_at"],
+                            "sequence": int(item["sequence"]),
+                            "source_run_id": item.get("source_run_id") or None,
+                            "metadata": json.loads(item.get("metadata", "{}")),
+                        }
+                    )
+
+            return pending

@@ -347,6 +347,63 @@ class SQLiteStorageBackend(StorageBackend):
             )
         """)
 
+        # Streams table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS streams (
+                stream_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TIMESTAMP NOT NULL,
+                metadata TEXT DEFAULT '{}'
+            )
+        """)
+
+        # Signals table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS signals (
+                signal_id TEXT PRIMARY KEY,
+                stream_id TEXT NOT NULL,
+                signal_type TEXT NOT NULL,
+                payload TEXT NOT NULL DEFAULT '{}',
+                published_at TIMESTAMP NOT NULL,
+                sequence INTEGER NOT NULL,
+                source_run_id TEXT,
+                metadata TEXT DEFAULT '{}',
+                FOREIGN KEY (stream_id) REFERENCES streams(stream_id) ON DELETE CASCADE
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_signals_stream_id_sequence ON signals(stream_id, sequence)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_signals_stream_id_type ON signals(stream_id, signal_type)"
+        )
+
+        # Stream subscriptions table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS stream_subscriptions (
+                stream_id TEXT NOT NULL,
+                step_run_id TEXT NOT NULL,
+                signal_types TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL DEFAULT 'waiting',
+                created_at TIMESTAMP NOT NULL,
+                PRIMARY KEY (stream_id, step_run_id),
+                FOREIGN KEY (stream_id) REFERENCES streams(stream_id) ON DELETE CASCADE
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON stream_subscriptions(stream_id, status)"
+        )
+
+        # Signal acknowledgments table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS signal_acknowledgments (
+                signal_id TEXT NOT NULL,
+                step_run_id TEXT NOT NULL,
+                acknowledged_at TIMESTAMP NOT NULL,
+                PRIMARY KEY (signal_id, step_run_id)
+            )
+        """)
+
         await db.commit()
 
     def _ensure_connected(self) -> aiosqlite.Connection:
@@ -1325,6 +1382,267 @@ class SQLiteStorageBackend(StorageBackend):
             count = cur.rowcount
         await db.commit()
         return count if count is not None else 0
+
+    # Stream Operations
+
+    async def create_stream(self, stream_id: str, metadata: dict | None = None) -> None:
+        """Create a new stream."""
+        db = self._ensure_connected()
+        now = datetime.now(UTC).isoformat()
+
+        await db.execute(
+            """
+            INSERT INTO streams (stream_id, status, created_at, metadata)
+            VALUES (?, ?, ?, ?)
+            """,
+            (stream_id, "active", now, json.dumps(metadata or {})),
+        )
+        await db.commit()
+
+    async def get_stream(self, stream_id: str) -> dict | None:
+        """Get a stream by ID."""
+        db = self._ensure_connected()
+
+        async with db.execute(
+            "SELECT stream_id, status, created_at, metadata FROM streams WHERE stream_id = ?",
+            (stream_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        if row is None:
+            return None
+        return {
+            "stream_id": row[0],
+            "status": row[1],
+            "created_at": row[2],
+            "metadata": json.loads(row[3]) if row[3] else {},
+        }
+
+    async def publish_signal(
+        self,
+        signal_id: str,
+        stream_id: str,
+        signal_type: str,
+        payload: dict,
+        source_run_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> int:
+        """Publish a signal to a stream."""
+        db = self._ensure_connected()
+        now = datetime.now(UTC).isoformat()
+
+        # Get next sequence number
+        async with db.execute(
+            "SELECT COALESCE(MAX(sequence), -1) + 1 FROM signals WHERE stream_id = ?",
+            (stream_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            seq = row[0] if row else 0
+
+        await db.execute(
+            """
+            INSERT INTO signals (signal_id, stream_id, signal_type, payload, published_at, sequence, source_run_id, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                signal_id,
+                stream_id,
+                signal_type,
+                json.dumps(payload),
+                now,
+                seq,
+                source_run_id,
+                json.dumps(metadata or {}),
+            ),
+        )
+        await db.commit()
+        return seq
+
+    async def get_signals(
+        self,
+        stream_id: str,
+        after_sequence: int = 0,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Get signals from a stream after a given sequence number."""
+        db = self._ensure_connected()
+
+        async with db.execute(
+            """
+            SELECT signal_id, stream_id, signal_type, payload, published_at, sequence, source_run_id, metadata
+            FROM signals
+            WHERE stream_id = ? AND sequence >= ?
+            ORDER BY sequence ASC
+            LIMIT ?
+            """,
+            (stream_id, after_sequence, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        return [
+            {
+                "signal_id": row[0],
+                "stream_id": row[1],
+                "signal_type": row[2],
+                "payload": json.loads(row[3]) if row[3] else {},
+                "published_at": row[4],
+                "sequence": row[5],
+                "source_run_id": row[6],
+                "metadata": json.loads(row[7]) if row[7] else {},
+            }
+            for row in rows
+        ]
+
+    async def register_stream_subscription(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        signal_types: list[str],
+    ) -> None:
+        """Register a stream step's subscription to signal types."""
+        db = self._ensure_connected()
+        now = datetime.now(UTC).isoformat()
+
+        await db.execute(
+            """
+            INSERT OR REPLACE INTO stream_subscriptions (stream_id, step_run_id, signal_types, status, created_at)
+            VALUES (?, ?, ?, ?, COALESCE(
+                (SELECT created_at FROM stream_subscriptions WHERE stream_id = ? AND step_run_id = ?), ?
+            ))
+            """,
+            (
+                stream_id,
+                step_run_id,
+                json.dumps(signal_types),
+                "waiting",
+                stream_id,
+                step_run_id,
+                now,
+            ),
+        )
+        await db.commit()
+
+    async def get_waiting_steps(
+        self,
+        stream_id: str,
+        signal_type: str,
+    ) -> list[dict]:
+        """Get step_run_ids waiting for a specific signal type on a stream."""
+        db = self._ensure_connected()
+
+        async with db.execute(
+            """
+            SELECT stream_id, step_run_id, signal_types, status, created_at
+            FROM stream_subscriptions
+            WHERE stream_id = ? AND status = 'waiting'
+            """,
+            (stream_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        result = []
+        for row in rows:
+            signal_types = json.loads(row[2]) if row[2] else []
+            if signal_type in signal_types:
+                result.append(
+                    {
+                        "stream_id": row[0],
+                        "step_run_id": row[1],
+                        "signal_types": signal_types,
+                        "status": row[3],
+                        "created_at": row[4],
+                    }
+                )
+        return result
+
+    async def update_subscription_status(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        status: str,
+    ) -> None:
+        """Update a subscription's status."""
+        db = self._ensure_connected()
+
+        await db.execute(
+            """
+            UPDATE stream_subscriptions SET status = ?
+            WHERE stream_id = ? AND step_run_id = ?
+            """,
+            (status, stream_id, step_run_id),
+        )
+        await db.commit()
+
+    async def acknowledge_signal(
+        self,
+        signal_id: str,
+        step_run_id: str,
+    ) -> None:
+        """Acknowledge that a signal has been processed by a step."""
+        db = self._ensure_connected()
+        now = datetime.now(UTC).isoformat()
+
+        await db.execute(
+            """
+            INSERT OR IGNORE INTO signal_acknowledgments (signal_id, step_run_id, acknowledged_at)
+            VALUES (?, ?, ?)
+            """,
+            (signal_id, step_run_id, now),
+        )
+        await db.commit()
+
+    async def get_pending_signals(
+        self,
+        stream_id: str,
+        step_run_id: str,
+    ) -> list[dict]:
+        """Get signals that arrived for a step but haven't been acknowledged."""
+        db = self._ensure_connected()
+
+        # First get the subscription to know which signal types to filter
+        async with db.execute(
+            "SELECT signal_types FROM stream_subscriptions WHERE stream_id = ? AND step_run_id = ?",
+            (stream_id, step_run_id),
+        ) as cursor:
+            sub_row = await cursor.fetchone()
+
+        if not sub_row:
+            return []
+
+        signal_types = json.loads(sub_row[0]) if sub_row[0] else []
+        if not signal_types:
+            return []
+
+        placeholders = ",".join("?" * len(signal_types))
+        async with db.execute(
+            f"""
+            SELECT s.signal_id, s.stream_id, s.signal_type, s.payload, s.published_at,
+                   s.sequence, s.source_run_id, s.metadata
+            FROM signals s
+            WHERE s.stream_id = ? AND s.signal_type IN ({placeholders})
+              AND NOT EXISTS (
+                  SELECT 1 FROM signal_acknowledgments a
+                  WHERE a.signal_id = s.signal_id AND a.step_run_id = ?
+              )
+            ORDER BY s.sequence ASC
+            """,
+            (stream_id, *signal_types, step_run_id),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        return [
+            {
+                "signal_id": row[0],
+                "stream_id": row[1],
+                "signal_type": row[2],
+                "payload": json.loads(row[3]) if row[3] else {},
+                "published_at": row[4],
+                "sequence": row[5],
+                "source_run_id": row[6],
+                "metadata": json.loads(row[7]) if row[7] else {},
+            }
+            for row in rows
+        ]
 
     # Helper methods for converting database rows to domain objects
 

@@ -12,7 +12,7 @@ from typing import Any
 from loguru import logger
 from pydantic import ValidationError
 
-from pyworkflow.streams.registry import list_stream_steps
+from pyworkflow.streams.registry import get_steps_for_stream, list_stream_steps
 from pyworkflow.streams.signal import Signal
 from pyworkflow.streams.step_context import StreamStepContext
 
@@ -32,6 +32,12 @@ async def dispatch_signal(signal: Signal, storage: Any) -> None:
     """
     # Find waiting steps from storage
     waiting_steps = await storage.get_waiting_steps(signal.stream_id, signal.signal_type)
+
+    # Fallback: if no DB subscriptions exist, auto-register from in-memory registry
+    if not waiting_steps:
+        waiting_steps = await _ensure_subscriptions_from_registry(
+            signal.stream_id, signal.signal_type, storage
+        )
 
     if not waiting_steps:
         logger.debug(
@@ -158,12 +164,16 @@ async def _resume_step(
     storage: Any,
 ) -> None:
     """
-    Resume a stream step's lifecycle after on_signal called ctx.resume().
+    Execute a stream step's lifecycle function after on_signal called ctx.resume().
 
-    This follows the same pattern as resume_hook().
+    Unlike workflow resumption, stream steps don't have a WorkflowRun record.
+    Instead, we directly execute the lifecycle function with the proper
+    stream step context (signal, checkpoint, storage).
     """
+    from pyworkflow.streams.context import reset_stream_step_context, set_stream_step_context
+
     logger.info(
-        f"Resuming stream step {step_run_id}",
+        f"Executing stream step {step_run_id}",
         step_run_id=step_run_id,
         signal_type=signal.signal_type,
     )
@@ -171,19 +181,40 @@ async def _resume_step(
     # Update subscription status to running
     await storage.update_subscription_status(signal.stream_id, step_run_id, "running")
 
-    # Schedule workflow resumption via configured runtime
-    try:
-        from pyworkflow.config import get_config
-        from pyworkflow.runtime import get_runtime
-
-        config = get_config()
-        runtime = get_runtime(config.default_runtime)
-        await runtime.schedule_resume(step_run_id, storage)
-    except Exception as e:
+    # Find the step's lifecycle function from the registry
+    step_meta = _find_step_metadata_for_run(step_run_id, signal.stream_id)
+    if step_meta is None:
         logger.warning(
-            f"Failed to schedule stream step resumption: {e}",
+            f"No registered stream step found for run {step_run_id}, cannot execute",
             step_run_id=step_run_id,
         )
+        return
+
+    # Set up stream step context so get_current_signal(), get_checkpoint(),
+    # save_checkpoint() work inside the lifecycle function
+    tokens = set_stream_step_context(
+        step_run_id=step_run_id,
+        stream_id=signal.stream_id,
+        signal=signal,
+        storage=storage,
+    )
+
+    try:
+        await step_meta.func()
+    except Exception as e:
+        logger.error(
+            f"Stream step lifecycle error for {step_run_id}: {e}",
+            step_run_id=step_run_id,
+            exc_info=True,
+        )
+    finally:
+        reset_stream_step_context(tokens)
+
+    # Return subscription to waiting status for next signal
+    try:
+        await storage.update_subscription_status(signal.stream_id, step_run_id, "waiting")
+    except Exception:
+        pass  # Best-effort
 
 
 async def _cancel_step(
@@ -215,6 +246,54 @@ async def _cancel_step(
         await storage.update_run_status(step_run_id, RunStatus.CANCELLED)
     except Exception as e:
         logger.error(f"Error cancelling stream step: {e}", step_run_id=step_run_id)
+
+
+async def _ensure_subscriptions_from_registry(
+    stream_id: str,
+    signal_type: str,
+    storage: Any,
+) -> list[dict]:
+    """Auto-register DB subscriptions from the in-memory registry.
+
+    When @stream_step decorated functions are registered in memory but
+    no corresponding DB subscription exists, create one and return it
+    so dispatch_signal can proceed.
+    """
+    import uuid
+
+    registered_steps = get_steps_for_stream(stream_id)
+    created = []
+
+    for step_meta in registered_steps:
+        if signal_type not in step_meta.signal_types:
+            continue
+
+        step_run_id = f"stream_step_{step_meta.name}_{uuid.uuid4().hex[:12]}"
+
+        try:
+            await storage.register_stream_subscription(
+                stream_id=stream_id,
+                step_run_id=step_run_id,
+                signal_types=step_meta.signal_types,
+            )
+            created.append({
+                "stream_id": stream_id,
+                "step_run_id": step_run_id,
+                "signal_types": step_meta.signal_types,
+                "status": "waiting",
+            })
+            logger.info(
+                f"Auto-registered stream subscription for step '{step_meta.name}' "
+                f"on stream '{stream_id}'",
+                step_run_id=step_run_id,
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to auto-register subscription for step '{step_meta.name}': {e}",
+                stream_id=stream_id,
+            )
+
+    return created
 
 
 def _find_step_metadata_for_run(step_run_id: str, stream_id: str) -> Any:

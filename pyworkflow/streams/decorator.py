@@ -56,10 +56,15 @@ def stream_workflow(
     return decorator
 
 
+async def _auto_resume_on_signal(signal: Any, ctx: Any) -> None:
+    """Default on_signal callback that always resumes the step."""
+    await ctx.resume()
+
+
 def stream_step(
     stream: str,
     signals: list[str] | dict[str, type[BaseModel]],
-    on_signal: Callable[..., Any],
+    on_signal: Callable[..., Any] | None = None,
     name: str | None = None,
 ) -> Callable:
     """
@@ -74,13 +79,15 @@ def stream_step(
         signals: Signal types to subscribe to. Either:
             - list[str]: Signal type names
             - dict[str, BaseModel]: Signal type -> Pydantic schema mapping
-        on_signal: Async callback for signal processing
+        on_signal: Async callback for signal processing. If not provided,
+            the step will automatically resume on every matching signal.
         name: Step name (defaults to function name)
 
     Returns:
         Decorated function with stream step metadata
 
     Examples:
+        # With custom on_signal:
         async def handle_signal(signal, ctx):
             if signal.signal_type == "task.created":
                 await ctx.resume()
@@ -94,7 +101,17 @@ def stream_step(
             signal = await get_current_signal()
             if signal:
                 await process(signal)
+
+        # Without on_signal (auto-resume on every signal):
+        @stream_step(
+            stream="agent_comms",
+            signals={"task.assigned": TaskAssignedPayload},
+        )
+        async def worker():
+            signal = await get_current_signal()
+            ...
     """
+    resolved_on_signal = on_signal or _auto_resume_on_signal
 
     # Parse signal types and schemas
     if isinstance(signals, dict):
@@ -117,7 +134,7 @@ def stream_step(
             original_func=func,
             stream=stream,
             signal_types=signal_types,
-            on_signal=on_signal,
+            on_signal=resolved_on_signal,
             signal_schemas=signal_schemas,
         )
 

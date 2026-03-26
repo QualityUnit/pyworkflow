@@ -917,8 +917,7 @@ def start_workflow_task(
                 )
             else:
                 logger.warning(
-                    "Workflow start already being executed by another worker, "
-                    "skipping duplicate",
+                    "Workflow start already being executed by another worker, skipping duplicate",
                     run_id=run_id,
                     workflow_name=workflow_name,
                     existing_worker_task=_holding_task_id,

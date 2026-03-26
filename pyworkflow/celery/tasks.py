@@ -198,36 +198,14 @@ def execute_step_task(
             _exec_lock_key, self.request.id or "unknown", expiry=self._lock_expiry
         )
         if not _exec_lock_acquired:
-            # Check for worker-loss re-delivery: when a worker dies mid-step
-            # (e.g., spot instance termination), Celery re-delivers the same
-            # message with the same task_id (task_reject_on_worker_lost=True).
-            # The dead worker's lock still exists in Redis (up to 1h TTL).
-            # If the lock holder matches our own task_id, this IS a re-delivery
-            # of the same task — force-acquire and proceed.
-            _holding_task_id = _exec_lock_backend.get(_exec_lock_key)
-            _our_task_id = self.request.id or "unknown"
-            if _holding_task_id == _our_task_id:
-                logger.warning(
-                    "Step lock held by same task_id — worker-loss re-delivery detected, "
-                    "force-acquiring lock",
-                    run_id=run_id,
-                    step_id=step_id,
-                    step_name=step_name,
-                    task_id=_our_task_id,
-                )
-                _exec_lock_backend.unlock(_exec_lock_key)
-                _exec_lock_acquired = _exec_lock_backend.lock(
-                    _exec_lock_key, _our_task_id, expiry=self._lock_expiry
-                )
-            else:
-                logger.warning(
-                    "Step already being executed by another worker, skipping duplicate",
-                    run_id=run_id,
-                    step_id=step_id,
-                    step_name=step_name,
-                    existing_worker_task=_holding_task_id,
-                )
-                return None
+            logger.warning(
+                "Step already being executed by another worker, skipping duplicate",
+                run_id=run_id,
+                step_id=step_id,
+                step_name=step_name,
+                existing_worker_task=_exec_lock_backend.get(_exec_lock_key),
+            )
+            return None
     else:
         _exec_lock_acquired = True  # No Redis = no locking
 
@@ -893,38 +871,18 @@ def start_workflow_task(
     _exec_lock_key = f"pyworkflow:wf_start:{run_id}"
     _exec_lock_backend = self.singleton_backend
     _exec_lock_acquired = False
-    _is_redelivery = False
     if _exec_lock_backend is not None:
         _exec_lock_acquired = _exec_lock_backend.lock(
             _exec_lock_key, self.request.id or "unknown", expiry=self._lock_expiry
         )
         if not _exec_lock_acquired:
-            # Check for worker-loss re-delivery (same logic as step tasks):
-            # if the lock holder matches our task_id, this is the same message
-            # re-delivered after the original worker died.
-            _holding_task_id = _exec_lock_backend.get(_exec_lock_key)
-            _our_task_id = self.request.id or "unknown"
-            if _holding_task_id == _our_task_id:
-                logger.warning(
-                    "Workflow start lock held by same task_id — worker-loss re-delivery "
-                    "detected, force-acquiring lock",
-                    run_id=run_id,
-                    workflow_name=workflow_name,
-                    task_id=_our_task_id,
-                )
-                _exec_lock_backend.unlock(_exec_lock_key)
-                _exec_lock_acquired = _exec_lock_backend.lock(
-                    _exec_lock_key, _our_task_id, expiry=self._lock_expiry
-                )
-                _is_redelivery = True
-            else:
-                logger.warning(
-                    "Workflow start already being executed by another worker, skipping duplicate",
-                    run_id=run_id,
-                    workflow_name=workflow_name,
-                    existing_worker_task=_holding_task_id,
-                )
-                return run_id
+            logger.warning(
+                "Workflow start already being executed by another worker, skipping duplicate",
+                run_id=run_id,
+                workflow_name=workflow_name,
+                existing_worker_task=_exec_lock_backend.get(_exec_lock_key),
+            )
+            return run_id
     else:
         _exec_lock_acquired = True  # No Redis = no locking
 
@@ -951,7 +909,6 @@ def start_workflow_task(
                 storage_config=storage_config,
                 idempotency_key=idempotency_key,
                 run_id=run_id,
-                is_redelivery=_is_redelivery,
             )
         )
 
@@ -1631,7 +1588,6 @@ async def _start_workflow_on_worker(
     storage_config: dict[str, Any] | None = None,
     idempotency_key: str | None = None,
     run_id: str | None = None,
-    is_redelivery: bool = False,
 ) -> str:
     """
     Internal function to start workflow on Celery worker.
@@ -1647,10 +1603,6 @@ async def _start_workflow_on_worker(
         storage_config: Storage configuration for child tasks
         idempotency_key: Optional idempotency key
         run_id: Pre-generated run ID (if None, generates a new one)
-        is_redelivery: True when Celery re-delivered the same task_id after
-            worker loss. Re-deliveries bypass the recovery_attempts counter
-            since they represent the same logical execution, not an additional
-            recovery attempt.
     """
     from pyworkflow.config import get_config
 
@@ -1690,24 +1642,6 @@ async def _start_workflow_on_worker(
                         run_id=existing_run.run_id,
                     )
                     return existing_run.run_id
-
-                if is_redelivery:
-                    # Celery re-delivered the same task after worker loss.
-                    # This is NOT an extra recovery attempt — it is the same
-                    # logical execution being retried by the broker.  Skip the
-                    # recovery-attempts counter and go straight to replay.
-                    logger.info(
-                        "Worker-loss re-delivery: recovering without counting "
-                        "against max_recovery_attempts",
-                        run_id=existing_run.run_id,
-                        workflow_name=existing_run.workflow_name,
-                    )
-                    return await _recover_workflow_on_worker(
-                        run=existing_run,
-                        workflow_meta=workflow_meta,
-                        storage=storage,
-                        storage_config=storage_config,
-                    )
 
                 # This is a recovery scenario - worker crashed while running
                 can_recover = await _handle_workflow_recovery(
@@ -1765,22 +1699,6 @@ async def _start_workflow_on_worker(
         )
 
         if existing_run.status == RunStatus.RUNNING:
-            if is_redelivery:
-                # Celery re-delivered the same task after worker loss.
-                # Skip recovery-attempts counter — same logical execution.
-                logger.info(
-                    "Worker-loss re-delivery: recovering without counting "
-                    "against max_recovery_attempts",
-                    run_id=run_id,
-                    workflow_name=existing_run.workflow_name,
-                )
-                return await _recover_workflow_on_worker(
-                    run=existing_run,
-                    workflow_meta=workflow_meta,
-                    storage=storage,
-                    storage_config=storage_config,
-                )
-
             # Recovery scenario - worker crashed while running
             can_recover = await _handle_workflow_recovery(
                 run=existing_run,

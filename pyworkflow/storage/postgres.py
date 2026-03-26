@@ -1748,6 +1748,95 @@ class PostgresStorageBackend(StorageBackend):
             for row in rows
         ]
 
+    async def query_stream_signals(
+        self,
+        stream_id: str,
+        *,
+        source_run_id: str | None = None,
+        signal_type: str | None = None,
+        after_sequence: int | None = None,
+        before_sequence: int | None = None,
+        last_n: int | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Query signals from a stream with rich filtering."""
+        pool = await self._get_pool()
+
+        # Build WHERE clauses dynamically
+        conditions = ["stream_id = $1"]
+        params: list = [stream_id]
+        idx = 2
+
+        if source_run_id is not None:
+            conditions.append(f"source_run_id = ${idx}")
+            params.append(source_run_id)
+            idx += 1
+
+        if signal_type is not None:
+            conditions.append(f"signal_type = ${idx}")
+            params.append(signal_type)
+            idx += 1
+
+        if last_n is not None:
+            # last_n mode: get the N most recent, ignore after_sequence
+            effective_limit = min(last_n, 200)
+        else:
+            if after_sequence is not None:
+                conditions.append(f"sequence >= ${idx}")
+                params.append(after_sequence)
+                idx += 1
+            if before_sequence is not None:
+                conditions.append(f"sequence <= ${idx}")
+                params.append(before_sequence)
+                idx += 1
+            effective_limit = min(limit, 200)
+
+        where = " AND ".join(conditions)
+
+        if last_n is not None:
+            # Fetch in DESC then reverse for chronological output
+            query = f"""
+                SELECT signal_id, stream_id, signal_type, payload,
+                       published_at, sequence, source_run_id, metadata
+                FROM signals
+                WHERE {where}
+                ORDER BY sequence DESC
+                LIMIT ${idx}
+            """
+        else:
+            query = f"""
+                SELECT signal_id, stream_id, signal_type, payload,
+                       published_at, sequence, source_run_id, metadata
+                FROM signals
+                WHERE {where}
+                ORDER BY sequence ASC
+                LIMIT ${idx}
+            """
+        params.append(effective_limit)
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+
+        results = [
+            {
+                "signal_id": row["signal_id"],
+                "stream_id": row["stream_id"],
+                "signal_type": row["signal_type"],
+                "payload": json.loads(row["payload"]) if row["payload"] else {},
+                "published_at": (row["published_at"].isoformat() if row["published_at"] else None),
+                "sequence": row["sequence"],
+                "source_run_id": row["source_run_id"],
+                "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+            }
+            for row in rows
+        ]
+
+        # Reverse DESC results to chronological order
+        if last_n is not None:
+            results.reverse()
+
+        return results
+
     async def register_stream_subscription(
         self,
         stream_id: str,
@@ -1786,6 +1875,39 @@ class PostgresStorageBackend(StorageBackend):
                 SELECT stream_id, step_run_id, signal_types, status, created_at
                 FROM stream_subscriptions
                 WHERE stream_id = $1 AND status = 'waiting'
+                """,
+                stream_id,
+            )
+
+        result = []
+        for row in rows:
+            signal_types = json.loads(row["signal_types"]) if row["signal_types"] else []
+            if signal_type in signal_types:
+                result.append(
+                    {
+                        "stream_id": row["stream_id"],
+                        "step_run_id": row["step_run_id"],
+                        "signal_types": signal_types,
+                        "status": row["status"],
+                        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    }
+                )
+        return result
+
+    async def get_subscriptions_for_stream(
+        self,
+        stream_id: str,
+        signal_type: str,
+    ) -> list[dict]:
+        """Get ALL subscriptions for a signal type, regardless of status."""
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT stream_id, step_run_id, signal_types, status, created_at
+                FROM stream_subscriptions
+                WHERE stream_id = $1
                 """,
                 stream_id,
             )

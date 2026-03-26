@@ -798,6 +798,38 @@ class StorageBackend(ABC):
         """
         raise NotImplementedError("This storage backend does not support streams")
 
+    async def query_stream_signals(
+        self,
+        stream_id: str,
+        *,
+        source_run_id: str | None = None,
+        signal_type: str | None = None,
+        after_sequence: int | None = None,
+        before_sequence: int | None = None,
+        last_n: int | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """
+        Query signals from a stream with rich filtering.
+
+        Args:
+            stream_id: Stream identifier.
+            source_run_id: Filter to signals from a specific workflow run.
+            signal_type: Filter by signal type (e.g. ``"task.completed"``).
+            after_sequence: Only include signals with ``sequence >= value``.
+            before_sequence: Only include signals with ``sequence <= value``.
+            last_n: Return the N most recent signals (overrides
+                ``after_sequence`` and ``limit``).
+            limit: Maximum number of signals to return.
+
+        Returns:
+            List of signal dicts ordered by sequence ASC.
+
+        Raises:
+            NotImplementedError: If backend doesn't support streams.
+        """
+        raise NotImplementedError("This storage backend does not support streams")
+
     # Subscription Operations
 
     async def register_stream_subscription(
@@ -836,6 +868,28 @@ class StorageBackend(ABC):
 
         Raises:
             NotImplementedError: If backend doesn't support streams
+        """
+        raise NotImplementedError("This storage backend does not support streams")
+
+    async def get_subscriptions_for_stream(
+        self,
+        stream_id: str,
+        signal_type: str,
+    ) -> list[dict]:
+        """
+        Get ALL subscriptions for a signal type on a stream, regardless of status.
+
+        Unlike ``get_waiting_steps`` which only returns ``"waiting"``
+        subscriptions, this returns subscriptions in any status (waiting,
+        running, etc.).  Used to avoid creating duplicate subscriptions
+        when a step is currently executing.
+
+        Args:
+            stream_id: Stream identifier
+            signal_type: Signal type to match
+
+        Returns:
+            List of dicts with step subscription info
         """
         raise NotImplementedError("This storage backend does not support streams")
 

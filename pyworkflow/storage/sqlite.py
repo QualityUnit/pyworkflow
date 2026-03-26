@@ -1493,6 +1493,77 @@ class SQLiteStorageBackend(StorageBackend):
             for row in rows
         ]
 
+    async def query_stream_signals(
+        self,
+        stream_id: str,
+        *,
+        source_run_id: str | None = None,
+        signal_type: str | None = None,
+        after_sequence: int | None = None,
+        before_sequence: int | None = None,
+        last_n: int | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Query signals from a stream with rich filtering."""
+        db = self._ensure_connected()
+
+        conditions = ["stream_id = ?"]
+        params: list = [stream_id]
+
+        if source_run_id is not None:
+            conditions.append("source_run_id = ?")
+            params.append(source_run_id)
+
+        if signal_type is not None:
+            conditions.append("signal_type = ?")
+            params.append(signal_type)
+
+        if last_n is not None:
+            effective_limit = min(last_n, 200)
+        else:
+            if after_sequence is not None:
+                conditions.append("sequence >= ?")
+                params.append(after_sequence)
+            if before_sequence is not None:
+                conditions.append("sequence <= ?")
+                params.append(before_sequence)
+            effective_limit = min(limit, 200)
+
+        where = " AND ".join(conditions)
+        order = "DESC" if last_n is not None else "ASC"
+        params.append(effective_limit)
+
+        query = f"""
+            SELECT signal_id, stream_id, signal_type, payload,
+                   published_at, sequence, source_run_id, metadata
+            FROM signals
+            WHERE {where}
+            ORDER BY sequence {order}
+            LIMIT ?
+        """
+
+        async with db.execute(query, tuple(params)) as cursor:
+            rows = await cursor.fetchall()
+
+        results = [
+            {
+                "signal_id": row[0],
+                "stream_id": row[1],
+                "signal_type": row[2],
+                "payload": json.loads(row[3]) if row[3] else {},
+                "published_at": row[4],
+                "sequence": row[5],
+                "source_run_id": row[6],
+                "metadata": json.loads(row[7]) if row[7] else {},
+            }
+            for row in rows
+        ]
+
+        if last_n is not None:
+            results.reverse()
+
+        return results
+
     async def register_stream_subscription(
         self,
         stream_id: str,

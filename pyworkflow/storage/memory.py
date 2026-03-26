@@ -702,6 +702,39 @@ class InMemoryStorageBackend(StorageBackend):
             filtered.sort(key=lambda s: s.get("sequence", 0))
             return filtered[:limit]
 
+    async def query_stream_signals(
+        self,
+        stream_id: str,
+        *,
+        source_run_id: str | None = None,
+        signal_type: str | None = None,
+        after_sequence: int | None = None,
+        before_sequence: int | None = None,
+        last_n: int | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Query signals from a stream with rich filtering."""
+        with self._lock:
+            signals = list(self._signals.get(stream_id, []))
+
+        # Apply filters
+        filtered = signals
+        if source_run_id is not None:
+            filtered = [s for s in filtered if s.get("source_run_id") == source_run_id]
+        if signal_type is not None:
+            filtered = [s for s in filtered if s.get("signal_type") == signal_type]
+        if last_n is None:
+            if after_sequence is not None:
+                filtered = [s for s in filtered if s.get("sequence", 0) >= after_sequence]
+            if before_sequence is not None:
+                filtered = [s for s in filtered if s.get("sequence", 0) <= before_sequence]
+
+        filtered.sort(key=lambda s: s.get("sequence", 0))
+
+        if last_n is not None:
+            return filtered[-min(last_n, 200) :]
+        return filtered[: min(limit, 200)]
+
     async def register_stream_subscription(
         self,
         stream_id: str,
@@ -731,6 +764,19 @@ class InMemoryStorageBackend(StorageBackend):
                 if sid == stream_id and sub["status"] == "waiting":
                     if signal_type in sub["signal_types"]:
                         result.append(sub)
+            return result
+
+    async def get_subscriptions_for_stream(
+        self,
+        stream_id: str,
+        signal_type: str,
+    ) -> list[dict]:
+        """Get ALL subscriptions for a signal type, regardless of status."""
+        with self._lock:
+            result = []
+            for (sid, _), sub in self._subscriptions.items():
+                if sid == stream_id and signal_type in sub["signal_types"]:
+                    result.append(sub)
             return result
 
     async def update_subscription_status(

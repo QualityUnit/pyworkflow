@@ -33,11 +33,15 @@ async def dispatch_signal(signal: Signal, storage: Any) -> None:
     # Find waiting steps from storage
     waiting_steps = await storage.get_waiting_steps(signal.stream_id, signal.signal_type)
 
-    # Fallback: if no DB subscriptions exist, auto-register from in-memory registry
+    # Fallback: if no DB subscriptions exist, auto-register from in-memory registry.
+    # Only do this if there are also no subscriptions in ANY status (e.g. "running")
+    # to avoid creating duplicate subscriptions when a step is currently executing.
     if not waiting_steps:
-        waiting_steps = await _ensure_subscriptions_from_registry(
-            signal.stream_id, signal.signal_type, storage
-        )
+        all_subs = await storage.get_subscriptions_for_stream(signal.stream_id, signal.signal_type)
+        if not all_subs:
+            waiting_steps = await _ensure_subscriptions_from_registry(
+                signal.stream_id, signal.signal_type, storage
+            )
 
     if not waiting_steps:
         logger.debug(

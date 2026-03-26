@@ -198,14 +198,36 @@ def execute_step_task(
             _exec_lock_key, self.request.id or "unknown", expiry=self._lock_expiry
         )
         if not _exec_lock_acquired:
-            logger.warning(
-                "Step already being executed by another worker, skipping duplicate",
-                run_id=run_id,
-                step_id=step_id,
-                step_name=step_name,
-                existing_worker_task=_exec_lock_backend.get(_exec_lock_key),
-            )
-            return None
+            # Check for worker-loss re-delivery: when a worker dies mid-step
+            # (e.g., spot instance termination), Celery re-delivers the same
+            # message with the same task_id (task_reject_on_worker_lost=True).
+            # The dead worker's lock still exists in Redis (up to 1h TTL).
+            # If the lock holder matches our own task_id, this IS a re-delivery
+            # of the same task — force-acquire and proceed.
+            _holding_task_id = _exec_lock_backend.get(_exec_lock_key)
+            _our_task_id = self.request.id or "unknown"
+            if _holding_task_id == _our_task_id:
+                logger.warning(
+                    "Step lock held by same task_id — worker-loss re-delivery detected, "
+                    "force-acquiring lock",
+                    run_id=run_id,
+                    step_id=step_id,
+                    step_name=step_name,
+                    task_id=_our_task_id,
+                )
+                _exec_lock_backend.unlock(_exec_lock_key)
+                _exec_lock_acquired = _exec_lock_backend.lock(
+                    _exec_lock_key, _our_task_id, expiry=self._lock_expiry
+                )
+            else:
+                logger.warning(
+                    "Step already being executed by another worker, skipping duplicate",
+                    run_id=run_id,
+                    step_id=step_id,
+                    step_name=step_name,
+                    existing_worker_task=_holding_task_id,
+                )
+                return None
     else:
         _exec_lock_acquired = True  # No Redis = no locking
 
@@ -876,13 +898,31 @@ def start_workflow_task(
             _exec_lock_key, self.request.id or "unknown", expiry=self._lock_expiry
         )
         if not _exec_lock_acquired:
-            logger.warning(
-                "Workflow start already being executed by another worker, skipping duplicate",
-                run_id=run_id,
-                workflow_name=workflow_name,
-                existing_worker_task=_exec_lock_backend.get(_exec_lock_key),
-            )
-            return run_id
+            # Check for worker-loss re-delivery (same logic as step tasks):
+            # if the lock holder matches our task_id, this is the same message
+            # re-delivered after the original worker died.
+            _holding_task_id = _exec_lock_backend.get(_exec_lock_key)
+            _our_task_id = self.request.id or "unknown"
+            if _holding_task_id == _our_task_id:
+                logger.warning(
+                    "Workflow start lock held by same task_id — worker-loss re-delivery "
+                    "detected, force-acquiring lock",
+                    run_id=run_id,
+                    workflow_name=workflow_name,
+                    task_id=_our_task_id,
+                )
+                _exec_lock_backend.unlock(_exec_lock_key)
+                _exec_lock_acquired = _exec_lock_backend.lock(
+                    _exec_lock_key, _our_task_id, expiry=self._lock_expiry
+                )
+            else:
+                logger.warning(
+                    "Workflow start already being executed by another worker, skipping duplicate",
+                    run_id=run_id,
+                    workflow_name=workflow_name,
+                    existing_worker_task=_holding_task_id,
+                )
+                return run_id
     else:
         _exec_lock_acquired = True  # No Redis = no locking
 

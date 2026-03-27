@@ -198,10 +198,6 @@ def create_celery_app(
         PYWORKFLOW_CELERY_SENTINEL_MASTER: Sentinel master name (used if sentinel_master_name param not provided)
         PYWORKFLOW_WORKER_MAX_MEMORY: Max memory per worker child (KB) (used if worker_max_memory_per_child param not provided)
         PYWORKFLOW_WORKER_MAX_TASKS: Max tasks per worker child (used if worker_max_tasks_per_child param not provided)
-        PYWORKFLOW_TASK_TIMEOUT: Seconds before broker re-delivers an unacked task AND before the
-                                 execution lock expires. Both values are kept equal to prevent
-                                 duplicate step execution. Set to your longest expected step
-                                 duration. Default: 3600 (1 hour).
 
     Examples:
         # Default configuration (uses env vars if set, otherwise localhost Redis)
@@ -246,15 +242,6 @@ def create_celery_app(
     max_tasks_env = os.getenv("PYWORKFLOW_WORKER_MAX_TASKS")
     max_tasks = worker_max_tasks_per_child or (int(max_tasks_env) if max_tasks_env else None)
 
-    # Task timeout: controls both visibility_timeout (broker re-delivery window) and
-    # singleton_lock_expiry (execution lock TTL). These MUST stay equal to prevent
-    # spurious re-deliveries while a task is still running from force-acquiring the
-    # execution lock and causing duplicate step execution.
-    # Set to the maximum expected step duration. Default: 3600s (1 hour).
-    # PYWORKFLOW_TASK_TIMEOUT env var lets you tune both values together safely.
-    _task_timeout_env = os.getenv("PYWORKFLOW_TASK_TIMEOUT")
-    _task_timeout = int(_task_timeout_env) if _task_timeout_env else 3600
-
     # Detect broker and backend types
     is_sentinel_broker = is_sentinel_url(broker_url)
     is_sentinel_backend = is_sentinel_url(result_backend) if result_backend else False
@@ -270,13 +257,13 @@ def create_celery_app(
         sentinel_broker_opts: dict[str, Any] = {"master_name": master_name}
         # Merge with user options (user takes precedence)
         final_broker_opts: dict[str, Any] = {
-            "visibility_timeout": _task_timeout,
+            "visibility_timeout": 3600,
             **sentinel_broker_opts,
             **(broker_transport_options or {}),
         }
     else:
         final_broker_opts = {
-            "visibility_timeout": _task_timeout,
+            "visibility_timeout": 3600,
             **(broker_transport_options or {}),
         }
 
@@ -284,13 +271,13 @@ def create_celery_app(
     if is_sentinel_backend:
         sentinel_backend_opts: dict[str, Any] = {"master_name": master_name}
         final_backend_opts: dict[str, Any] = {
-            "visibility_timeout": _task_timeout,
+            "visibility_timeout": 3600,
             **sentinel_backend_opts,
             **(result_backend_transport_options or {}),
         }
     else:
         final_backend_opts = {
-            "visibility_timeout": _task_timeout,
+            "visibility_timeout": 3600,
             **(result_backend_transport_options or {}),
         }
 
@@ -404,7 +391,7 @@ def create_celery_app(
             "singleton_backend_is_sentinel": is_sentinel_broker,
             "singleton_sentinel_master": master_name if is_sentinel_broker else None,
             "singleton_key_prefix": "pyworkflow:lock:",
-            "singleton_lock_expiry": _task_timeout,  # must equal visibility_timeout
+            "singleton_lock_expiry": 3600,  # 1 hour TTL (safety net)
         }
         app.conf.update(singleton_config)
 

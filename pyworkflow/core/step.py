@@ -681,15 +681,86 @@ async def _dispatch_step_to_celery(
         for evt in events
     )
     if already_started and not was_suspended:
-        logger.info(
-            f"Step {step_name} already has STEP_STARTED event, re-suspending",
+        # Check whether the execution lock is still held.
+        # If the lock is gone (worker died without completing the step) we
+        # re-dispatch the step so the workflow can self-heal instead of
+        # waiting up to 3600s for the lock to expire.
+        _stale = False
+        try:
+            from pyworkflow.celery.tasks import execute_step_task as _est
+
+            _backend = getattr(_est, "singleton_backend", None)
+            if _backend is not None:
+                _exec_lock_key = f"pyworkflow:step_exec:{ctx.run_id}:{step_id}"
+                _lock_held = _backend.get(_exec_lock_key) is not None
+                _stale = not _lock_held
+        except Exception:
+            pass  # can't check — assume task is still running
+
+        if not _stale:
+            logger.info(
+                f"Step {step_name} already has STEP_STARTED event, re-suspending (task running)",
+                run_id=ctx.run_id,
+                step_id=step_id,
+            )
+            raise SuspensionSignal(
+                reason=f"step_dispatch:{step_id}",
+                step_id=step_id,
+                step_name=step_name,
+            )
+
+        # Execution lock expired without a STEP_COMPLETED event — the step
+        # worker died.  Re-dispatch without recording a second STEP_STARTED
+        # (the existing event is reused), then re-suspend as usual.
+        logger.warning(
+            f"Step {step_name} execution lock not held but no STEP_COMPLETED — "
+            "re-dispatching stale step",
             run_id=ctx.run_id,
             step_id=step_id,
+        )
+
+        args_json = serialize_args(*args)
+        kwargs_json = serialize_kwargs(**kwargs)
+
+        context_data = None
+        context_class_name = None
+        try:
+            from pyworkflow.context.step_context import get_step_context, has_step_context
+
+            if has_step_context():
+                step_ctx = get_step_context()
+                context_data = step_ctx.to_dict()
+                context_class_name = (
+                    f"{step_ctx.__class__.__module__}.{step_ctx.__class__.__name__}"
+                )
+        except Exception:
+            pass
+
+        from pyworkflow.celery.tasks import execute_step_task
+
+        _task_result = execute_step_task.delay(
+            step_name=step_name,
+            args_json=args_json,
+            kwargs_json=kwargs_json,
+            run_id=ctx.run_id,
+            step_id=step_id,
+            max_retries=max_retries,
+            storage_config=ctx.storage_config,
+            context_data=context_data,
+            context_class_name=context_class_name,
+            workflow_name=ctx.workflow_name,
+        )
+        logger.info(
+            f"Stale step re-dispatched to Celery: {step_name}",
+            run_id=ctx.run_id,
+            step_id=step_id,
+            task_id=_task_result.id,
         )
         raise SuspensionSignal(
             reason=f"step_dispatch:{step_id}",
             step_id=step_id,
             step_name=step_name,
+            task_id=_task_result.id,
         )
 
     # Validate event limits before recording step event

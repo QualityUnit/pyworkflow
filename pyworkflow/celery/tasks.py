@@ -193,19 +193,46 @@ def execute_step_task(
     _exec_lock_key = f"pyworkflow:step_exec:{run_id}:{step_id}"
     _exec_lock_backend = self.singleton_backend
     _exec_lock_acquired = False
+    _our_task_id = self.request.id or "unknown"
     if _exec_lock_backend is not None:
         _exec_lock_acquired = _exec_lock_backend.lock(
-            _exec_lock_key, self.request.id or "unknown", expiry=self._lock_expiry
+            _exec_lock_key, _our_task_id, expiry=self._lock_expiry
         )
         if not _exec_lock_acquired:
-            logger.warning(
-                "Step already being executed by another worker, skipping duplicate",
-                run_id=run_id,
-                step_id=step_id,
-                step_name=step_name,
-                existing_worker_task=_exec_lock_backend.get(_exec_lock_key),
-            )
-            return None
+            # Check if this is a re-delivery of the same task (worker-loss scenario).
+            # task_reject_on_worker_lost=True + task_acks_late=True cause the broker to
+            # re-queue the original message with the same task_id after visibility_timeout.
+            # In that case, the lock still holds our own task_id — force-acquire it.
+            _holding_task_id = _exec_lock_backend.get(_exec_lock_key)
+            if _holding_task_id == _our_task_id:
+                logger.warning(
+                    "Same-task-id re-delivery detected (worker-loss), force-acquiring execution lock",
+                    run_id=run_id,
+                    step_id=step_id,
+                    step_name=step_name,
+                    task_id=_our_task_id,
+                )
+                _exec_lock_backend.unlock(_exec_lock_key)
+                _exec_lock_acquired = _exec_lock_backend.lock(
+                    _exec_lock_key, _our_task_id, expiry=self._lock_expiry
+                )
+                if not _exec_lock_acquired:
+                    logger.warning(
+                        "Failed to force-acquire execution lock after re-delivery, skipping",
+                        run_id=run_id,
+                        step_id=step_id,
+                        step_name=step_name,
+                    )
+                    return None
+            else:
+                logger.warning(
+                    "Step already being executed by another worker, skipping duplicate",
+                    run_id=run_id,
+                    step_id=step_id,
+                    step_name=step_name,
+                    existing_worker_task=_holding_task_id,
+                )
+                return None
     else:
         _exec_lock_acquired = True  # No Redis = no locking
 
@@ -316,6 +343,7 @@ def execute_step_task(
                 step_id=step_id,
                 step_name=step_name,
                 result=result,
+                lock_backend=self.singleton_backend,
             )
         )
 
@@ -508,6 +536,7 @@ async def _record_step_completion_and_resume(
     step_id: str,
     step_name: str,
     result: Any,
+    lock_backend: Any | None = None,
 ) -> None:
     """
     Record STEP_COMPLETED event and trigger workflow resumption if safe.
@@ -544,6 +573,26 @@ async def _record_step_completion_and_resume(
             step_name=step_name,
         )
         return
+
+    # Acquire a short-lived completion lock to prevent the TOCTOU race where
+    # two concurrent tasks both pass the idempotency check above (before either
+    # has written the STEP_COMPLETED event) and both schedule a workflow resume.
+    # Only the first to acquire this lock proceeds; the second returns early.
+    # TTL of 30s is a safety net — the critical section takes < 1s in practice.
+    _completion_lock_key = f"pyworkflow:step_complete:{run_id}:{step_id}"
+    if lock_backend is not None:
+        _completion_token = str(uuid.uuid4())
+        _completion_lock_acquired = lock_backend.lock(
+            _completion_lock_key, _completion_token, expiry=30
+        )
+        if not _completion_lock_acquired:
+            logger.info(
+                "Another task is handling step completion (completion lock held), skipping",
+                run_id=run_id,
+                step_id=step_id,
+                step_name=step_name,
+            )
+            return
 
     # Wait for WORKFLOW_SUSPENDED event before recording STEP_COMPLETED
     # This prevents race conditions where both events get the same sequence number

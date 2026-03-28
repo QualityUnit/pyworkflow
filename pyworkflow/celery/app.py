@@ -304,33 +304,17 @@ def create_celery_app(
         # Broker transport options - prevent task redelivery
         # See: https://github.com/celery/celery/issues/5935
         "broker_transport_options": final_broker_opts,
-        # Task routing
+        # Task routing — use direct exchange (each task specifies queue= explicitly)
         "task_default_queue": "pyworkflow.default",
         "task_default_exchange": "pyworkflow",
-        "task_default_exchange_type": "topic",
-        "task_default_routing_key": "workflow.default",
+        "task_default_exchange_type": "direct",
+        "task_default_routing_key": "pyworkflow.default",
         # Task queues
         "task_queues": (
-            Queue(
-                "pyworkflow.default",
-                Exchange("pyworkflow", type="topic"),
-                routing_key="workflow.#",
-            ),
-            Queue(
-                "pyworkflow.steps",
-                Exchange("pyworkflow", type="topic"),
-                routing_key="workflow.step.#",
-            ),
-            Queue(
-                "pyworkflow.workflows",
-                Exchange("pyworkflow", type="topic"),
-                routing_key="workflow.workflow.#",
-            ),
-            Queue(
-                "pyworkflow.schedules",
-                Exchange("pyworkflow", type="topic"),
-                routing_key="workflow.schedule.#",
-            ),
+            Queue("pyworkflow.default", Exchange("pyworkflow", type="direct")),
+            Queue("pyworkflow.steps", Exchange("pyworkflow", type="direct")),
+            Queue("pyworkflow.workflows", Exchange("pyworkflow", type="direct")),
+            Queue("pyworkflow.schedules", Exchange("pyworkflow", type="direct")),
         ),
         # Task execution
         "task_acks_late": True,

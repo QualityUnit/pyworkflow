@@ -669,7 +669,8 @@ async def _dispatch_step_to_celery(
 
     # Defense-in-depth: check if STEP_STARTED was already recorded for this step.
     # This guards against duplicate dispatch when two resume tasks race and both
-    # replay past the same step. If already started, re-suspend to wait.
+    # replay past the same step. If already started, re-suspend to wait for
+    # the running task to complete via task_reject_on_worker_lost re-delivery.
     # Exception: if STEP_SUSPENDED was recorded (step_hook suspension), the step
     # needs re-dispatch so it can re-execute and find the HOOK_RECEIVED event.
     events = await ctx.storage.get_events(ctx.run_id)
@@ -682,7 +683,7 @@ async def _dispatch_step_to_celery(
     )
     if already_started and not was_suspended:
         logger.info(
-            f"Step {step_name} already has STEP_STARTED event, re-suspending",
+            f"Step {step_name} already has STEP_STARTED event, re-suspending (task running)",
             run_id=ctx.run_id,
             step_id=step_id,
         )

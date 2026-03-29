@@ -141,7 +141,7 @@ class PostgresMigrationRunner(MigrationRunner):
                         stream_run_id TEXT NOT NULL,
                         sequence INTEGER NOT NULL,
                         signal_id TEXT NOT NULL,
-                        stream_id TEXT NOT NULL REFERENCES streams(stream_id) ON DELETE CASCADE,
+                        stream_id TEXT NOT NULL,
                         signal_type TEXT NOT NULL,
                         payload JSONB NOT NULL DEFAULT '{}',
                         published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -161,6 +161,14 @@ class PostgresMigrationRunner(MigrationRunner):
                         PRIMARY KEY (signal_id, step_run_id)
                     )
                 """)
+            elif migration.version == 4:
+                # V4: Drop FK constraints on stream_id — streams are code-defined
+                await conn.execute(
+                    "ALTER TABLE IF EXISTS signals DROP CONSTRAINT IF EXISTS signals_stream_id_fkey"
+                )
+                await conn.execute(
+                    "ALTER TABLE IF EXISTS stream_subscriptions DROP CONSTRAINT IF EXISTS stream_subscriptions_stream_id_fkey"
+                )
             elif migration.up_func:
                 await migration.up_func(conn)
             elif migration.up_sql and migration.up_sql != "SELECT 1":
@@ -491,7 +499,7 @@ class PostgresStorageBackend(StorageBackend):
                     stream_run_id TEXT NOT NULL,
                     sequence INTEGER NOT NULL,
                     signal_id TEXT NOT NULL,
-                    stream_id TEXT NOT NULL REFERENCES streams(stream_id) ON DELETE CASCADE,
+                    stream_id TEXT NOT NULL,
                     signal_type TEXT NOT NULL,
                     payload JSONB NOT NULL DEFAULT '{}',
                     published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -507,7 +515,7 @@ class PostgresStorageBackend(StorageBackend):
             # Stream subscriptions table
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS stream_subscriptions (
-                    stream_id TEXT NOT NULL REFERENCES streams(stream_id) ON DELETE CASCADE,
+                    stream_id TEXT NOT NULL,
                     step_run_id TEXT NOT NULL,
                     signal_types JSONB NOT NULL DEFAULT '[]',
                     status TEXT NOT NULL DEFAULT 'waiting',

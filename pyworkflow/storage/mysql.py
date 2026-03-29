@@ -148,7 +148,7 @@ class MySQLMigrationRunner(MigrationRunner):
                                 metadata LONGTEXT DEFAULT '{}',
                                 PRIMARY KEY (stream_id, stream_run_id, sequence),
                                 UNIQUE INDEX idx_signals_signal_id (signal_id),
-                                FOREIGN KEY (stream_id) REFERENCES streams(stream_id) ON DELETE CASCADE
+                                /* stream_id is not FK-constrained — streams are code-defined */
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                         """)
                         await cur.execute("""
@@ -418,7 +418,7 @@ class MySQLStorageBackend(StorageBackend):
                         metadata LONGTEXT DEFAULT '{}',
                         PRIMARY KEY (stream_id, stream_run_id, sequence),
                         UNIQUE INDEX idx_signals_signal_id (signal_id),
-                        FOREIGN KEY (stream_id) REFERENCES streams(stream_id) ON DELETE CASCADE
+                        /* stream_id is not FK-constrained — streams are code-defined */
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """)
 
@@ -432,7 +432,7 @@ class MySQLStorageBackend(StorageBackend):
                         created_at DATETIME(6) NOT NULL,
                         PRIMARY KEY (stream_id, step_run_id),
                         INDEX idx_subscriptions_status (stream_id, status),
-                        FOREIGN KEY (stream_id) REFERENCES streams(stream_id) ON DELETE CASCADE
+                        /* stream_id is not FK-constrained — streams are code-defined */
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """)
 

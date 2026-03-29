@@ -128,7 +128,7 @@ class SQLiteMigrationRunner(MigrationRunner):
                     source_run_id TEXT,
                     metadata TEXT DEFAULT '{}',
                     PRIMARY KEY (stream_id, stream_run_id, sequence),
-                    FOREIGN KEY (stream_id) REFERENCES streams(stream_id) ON DELETE CASCADE
+                    /* stream_id is not FK-constrained — streams are code-defined */
                 )
             """)
             await self._db.execute(
@@ -401,7 +401,7 @@ class SQLiteStorageBackend(StorageBackend):
                 source_run_id TEXT,
                 metadata TEXT DEFAULT '{}',
                 PRIMARY KEY (stream_id, stream_run_id, sequence),
-                FOREIGN KEY (stream_id) REFERENCES streams(stream_id) ON DELETE CASCADE
+                /* stream_id is not FK-constrained — streams are code-defined */
             )
         """)
         await db.execute(
@@ -417,7 +417,7 @@ class SQLiteStorageBackend(StorageBackend):
                 status TEXT NOT NULL DEFAULT 'waiting',
                 created_at TIMESTAMP NOT NULL,
                 PRIMARY KEY (stream_id, step_run_id),
-                FOREIGN KEY (stream_id) REFERENCES streams(stream_id) ON DELETE CASCADE
+                /* stream_id is not FK-constrained — streams are code-defined */
             )
         """)
         await db.execute(

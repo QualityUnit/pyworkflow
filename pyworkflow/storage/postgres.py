@@ -131,6 +131,36 @@ class PostgresMigrationRunner(MigrationRunner):
                           AND (data::jsonb)->>'step_id' IS NOT NULL
                     """)
                 # If table doesn't exist, schema will be created with step_id column
+            elif migration.version == 3:
+                # V3: Restructure signals table — PK changes from signal_id
+                # to (stream_run_id, sequence). Drop and recreate.
+                await conn.execute("DROP TABLE IF EXISTS signal_acknowledgments")
+                await conn.execute("DROP TABLE IF EXISTS signals")
+                await conn.execute("""
+                    CREATE TABLE signals (
+                        stream_run_id TEXT NOT NULL,
+                        sequence INTEGER NOT NULL,
+                        signal_id TEXT NOT NULL,
+                        stream_id TEXT NOT NULL REFERENCES streams(stream_id) ON DELETE CASCADE,
+                        signal_type TEXT NOT NULL,
+                        payload JSONB NOT NULL DEFAULT '{}',
+                        published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        source_run_id TEXT,
+                        metadata JSONB DEFAULT '{}',
+                        PRIMARY KEY (stream_id, stream_run_id, sequence)
+                    )
+                """)
+                await conn.execute(
+                    "CREATE UNIQUE INDEX idx_signals_signal_id ON signals(signal_id)"
+                )
+                await conn.execute("""
+                    CREATE TABLE signal_acknowledgments (
+                        signal_id TEXT NOT NULL,
+                        step_run_id TEXT NOT NULL,
+                        acknowledged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        PRIMARY KEY (signal_id, step_run_id)
+                    )
+                """)
             elif migration.up_func:
                 await migration.up_func(conn)
             elif migration.up_sql and migration.up_sql != "SELECT 1":
@@ -454,24 +484,24 @@ class PostgresStorageBackend(StorageBackend):
                 )
             """)
 
-            # Signals table
+            # Signals table — PK is (stream_id, stream_run_id, sequence) so sequences
+            # restart per stream run and queries by run are index-only scans.
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS signals (
-                    signal_id TEXT PRIMARY KEY,
+                    stream_run_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    signal_id TEXT NOT NULL,
                     stream_id TEXT NOT NULL REFERENCES streams(stream_id) ON DELETE CASCADE,
                     signal_type TEXT NOT NULL,
                     payload JSONB NOT NULL DEFAULT '{}',
                     published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    sequence INTEGER NOT NULL,
                     source_run_id TEXT,
-                    metadata JSONB DEFAULT '{}'
+                    metadata JSONB DEFAULT '{}',
+                    PRIMARY KEY (stream_id, stream_run_id, sequence)
                 )
             """)
             await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_signals_stream_id_sequence ON signals(stream_id, sequence)"
-            )
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_signals_stream_id_type ON signals(stream_id, signal_type)"
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_signals_signal_id ON signals(signal_id)"
             )
 
             # Stream subscriptions table
@@ -1681,6 +1711,7 @@ class PostgresStorageBackend(StorageBackend):
         signal_type: str,
         payload: dict,
         source_run_id: str | None = None,
+        stream_run_id: str | None = None,
         metadata: dict | None = None,
     ) -> int:
         """Publish a signal to a stream."""
@@ -1688,17 +1719,17 @@ class PostgresStorageBackend(StorageBackend):
         now = datetime.now(UTC)
 
         async with pool.acquire() as conn:
-            # Get next sequence number
+            # Get next sequence number (scoped per stream_run_id)
             row = await conn.fetchrow(
-                "SELECT COALESCE(MAX(sequence), -1) + 1 AS seq FROM signals WHERE stream_id = $1",
-                stream_id,
+                "SELECT COALESCE(MAX(sequence), -1) + 1 AS seq FROM signals WHERE stream_run_id = $1",
+                stream_run_id,
             )
             seq = row["seq"] if row else 0
 
             await conn.execute(
                 """
-                INSERT INTO signals (signal_id, stream_id, signal_type, payload, published_at, sequence, source_run_id, metadata)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                INSERT INTO signals (signal_id, stream_id, signal_type, payload, published_at, sequence, source_run_id, stream_run_id, metadata)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 """,
                 signal_id,
                 stream_id,
@@ -1707,6 +1738,7 @@ class PostgresStorageBackend(StorageBackend):
                 now,
                 seq,
                 source_run_id,
+                stream_run_id,
                 json.dumps(metadata or {}),
             )
         return seq
@@ -1723,7 +1755,7 @@ class PostgresStorageBackend(StorageBackend):
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT signal_id, stream_id, signal_type, payload, published_at, sequence, source_run_id, metadata
+                SELECT signal_id, stream_id, signal_type, payload, published_at, sequence, source_run_id, stream_run_id, metadata
                 FROM signals
                 WHERE stream_id = $1 AND sequence >= $2
                 ORDER BY sequence ASC
@@ -1743,6 +1775,7 @@ class PostgresStorageBackend(StorageBackend):
                 "published_at": row["published_at"].isoformat() if row["published_at"] else None,
                 "sequence": row["sequence"],
                 "source_run_id": row["source_run_id"],
+                "stream_run_id": row.get("stream_run_id"),
                 "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
             }
             for row in rows
@@ -1751,6 +1784,7 @@ class PostgresStorageBackend(StorageBackend):
     async def query_stream_signals(
         self,
         stream_id: str,
+        stream_run_id: str,
         *,
         source_run_id: str | None = None,
         signal_type: str | None = None,
@@ -1763,9 +1797,9 @@ class PostgresStorageBackend(StorageBackend):
         pool = await self._get_pool()
 
         # Build WHERE clauses dynamically
-        conditions = ["stream_id = $1"]
-        params: list = [stream_id]
-        idx = 2
+        conditions = ["stream_id = $1", "stream_run_id = $2"]
+        params: list = [stream_id, stream_run_id]
+        idx = 3
 
         if source_run_id is not None:
             conditions.append(f"source_run_id = ${idx}")
@@ -1797,7 +1831,7 @@ class PostgresStorageBackend(StorageBackend):
             # Fetch in DESC then reverse for chronological output
             query = f"""
                 SELECT signal_id, stream_id, signal_type, payload,
-                       published_at, sequence, source_run_id, metadata
+                       published_at, sequence, source_run_id, stream_run_id, metadata
                 FROM signals
                 WHERE {where}
                 ORDER BY sequence DESC
@@ -1806,7 +1840,7 @@ class PostgresStorageBackend(StorageBackend):
         else:
             query = f"""
                 SELECT signal_id, stream_id, signal_type, payload,
-                       published_at, sequence, source_run_id, metadata
+                       published_at, sequence, source_run_id, stream_run_id, metadata
                 FROM signals
                 WHERE {where}
                 ORDER BY sequence ASC
@@ -1826,6 +1860,7 @@ class PostgresStorageBackend(StorageBackend):
                 "published_at": (row["published_at"].isoformat() if row["published_at"] else None),
                 "sequence": row["sequence"],
                 "source_run_id": row["source_run_id"],
+                "stream_run_id": row.get("stream_run_id"),
                 "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
             }
             for row in rows
@@ -1993,7 +2028,7 @@ class PostgresStorageBackend(StorageBackend):
             rows = await conn.fetch(
                 """
                 SELECT s.signal_id, s.stream_id, s.signal_type, s.payload, s.published_at,
-                       s.sequence, s.source_run_id, s.metadata
+                       s.sequence, s.source_run_id, s.stream_run_id, s.metadata
                 FROM signals s
                 WHERE s.stream_id = $1 AND s.signal_type = ANY($2)
                   AND NOT EXISTS (
@@ -2016,6 +2051,7 @@ class PostgresStorageBackend(StorageBackend):
                 "published_at": row["published_at"].isoformat() if row["published_at"] else None,
                 "sequence": row["sequence"],
                 "source_run_id": row["source_run_id"],
+                "stream_run_id": row.get("stream_run_id"),
                 "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
             }
             for row in rows

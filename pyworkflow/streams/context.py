@@ -16,6 +16,7 @@ _current_signal: ContextVar[Signal | None] = ContextVar("_current_signal", defau
 _current_step_run_id: ContextVar[str | None] = ContextVar("_current_step_run_id", default=None)
 _current_stream_id: ContextVar[str | None] = ContextVar("_current_stream_id", default=None)
 _current_storage: ContextVar[Any] = ContextVar("_current_storage", default=None)
+_current_stream_run_id: ContextVar[str | None] = ContextVar("_current_stream_run_id", default=None)
 
 
 def set_stream_step_context(
@@ -23,6 +24,7 @@ def set_stream_step_context(
     stream_id: str,
     signal: Signal | None = None,
     storage: Any = None,
+    stream_run_id: str | None = None,
 ) -> tuple:
     """
     Set the stream step context variables.
@@ -33,16 +35,18 @@ def set_stream_step_context(
     t2 = _current_step_run_id.set(step_run_id)
     t3 = _current_stream_id.set(stream_id)
     t4 = _current_storage.set(storage)
-    return (t1, t2, t3, t4)
+    t5 = _current_stream_run_id.set(stream_run_id)
+    return (t1, t2, t3, t4, t5)
 
 
 def reset_stream_step_context(tokens: tuple) -> None:
     """Reset the stream step context variables."""
-    t1, t2, t3, t4 = tokens
+    t1, t2, t3, t4, t5 = tokens
     _current_signal.reset(t1)
     _current_step_run_id.reset(t2)
     _current_stream_id.reset(t3)
     _current_storage.reset(t4)
+    _current_stream_run_id.reset(t5)
 
 
 async def get_current_signal() -> Signal | None:
@@ -89,3 +93,17 @@ async def save_checkpoint(data: dict) -> None:
     storage = _current_storage.get()
     backend = get_checkpoint_backend(storage=storage)
     await backend.save(step_run_id, data)
+
+
+def get_stream_run_id() -> str | None:
+    """Get the current stream run ID from context."""
+    return _current_stream_run_id.get()
+
+
+def set_stream_run_id(stream_run_id: str | None) -> Any:
+    """
+    Set the stream run ID in context.
+
+    Returns a token that can be used to reset the value.
+    """
+    return _current_stream_run_id.set(stream_run_id)

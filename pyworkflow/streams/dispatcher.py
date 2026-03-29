@@ -201,6 +201,7 @@ async def _resume_step(
         stream_id=signal.stream_id,
         signal=signal,
         storage=storage,
+        stream_run_id=signal.stream_run_id,
     )
 
     try:

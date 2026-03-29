@@ -1595,18 +1595,20 @@ class DynamoDBStorageBackend(StorageBackend):
         signal_type: str,
         payload: dict,
         source_run_id: str | None = None,
+        stream_run_id: str | None = None,
         metadata: dict | None = None,
     ) -> int:
         """Publish a signal to a stream."""
         async with self._get_client() as client:
             now = datetime.now(UTC).isoformat()
 
-            # Get current max sequence by querying signals for this stream
+            # Get current max sequence by querying signals for this stream_run_id
+            run_key = stream_run_id
             response = await client.query(
                 TableName=self.table_name,
                 KeyConditionExpression="PK = :pk AND begins_with(SK, :prefix)",
                 ExpressionAttributeValues={
-                    ":pk": {"S": f"STREAM#{stream_id}"},
+                    ":pk": {"S": f"STREAM_RUN#{run_key}"},
                     ":prefix": {"S": "SIGNAL#"},
                 },
                 ScanIndexForward=False,
@@ -1623,7 +1625,7 @@ class DynamoDBStorageBackend(StorageBackend):
                 TableName=self.table_name,
                 Item=self._dict_to_item(
                     {
-                        "PK": f"STREAM#{stream_id}",
+                        "PK": f"STREAM_RUN#{run_key}",
                         "SK": f"SIGNAL#{seq:08d}",
                         "entity_type": "signal",
                         "signal_id": signal_id,
@@ -1633,6 +1635,7 @@ class DynamoDBStorageBackend(StorageBackend):
                         "published_at": now,
                         "sequence": str(seq),
                         "source_run_id": source_run_id or "",
+                        "stream_run_id": run_key,
                         "metadata": json.dumps(metadata or {}),
                     }
                 ),
@@ -1672,6 +1675,7 @@ class DynamoDBStorageBackend(StorageBackend):
                         "published_at": item["published_at"],
                         "sequence": int(item["sequence"]),
                         "source_run_id": item.get("source_run_id") or None,
+                        "stream_run_id": item.get("stream_run_id") or None,
                         "metadata": json.loads(item.get("metadata", "{}")),
                     }
                 )

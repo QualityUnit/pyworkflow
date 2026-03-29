@@ -297,3 +297,13 @@ _v2_migration = Migration(
     up_sql="SELECT 1",  # Placeholder, actual migration is in backend runners
 )
 register_migration(_v2_migration)
+
+
+# Version 3: Restructure signals table — PK changes from signal_id to
+# (stream_run_id, sequence). Drops and recreates the table.
+_v3_migration = Migration(
+    version=3,
+    description="Restructure signals table: PK (stream_id, stream_run_id, sequence), drop and recreate",
+    up_sql="SELECT 1",  # Placeholder, actual migration is in backend runners
+)
+register_migration(_v3_migration)

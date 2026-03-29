@@ -339,15 +339,16 @@ class CassandraStorageBackend(StorageBackend):
 
         session.execute("""
             CREATE TABLE IF NOT EXISTS signals (
-                stream_id TEXT,
+                stream_run_id TEXT,
                 sequence INT,
                 signal_id TEXT,
+                stream_id TEXT,
                 signal_type TEXT,
                 payload TEXT,
                 published_at TIMESTAMP,
                 source_run_id TEXT,
                 metadata TEXT,
-                PRIMARY KEY (stream_id, sequence)
+                PRIMARY KEY ((stream_id, stream_run_id), sequence)
             ) WITH CLUSTERING ORDER BY (sequence ASC)
         """)
 
@@ -2023,33 +2024,36 @@ class CassandraStorageBackend(StorageBackend):
         signal_type: str,
         payload: dict,
         source_run_id: str | None = None,
+        stream_run_id: str | None = None,
         metadata: dict | None = None,
     ) -> int:
         """Publish a signal to a stream."""
         session = self._ensure_connected()
         now = datetime.now(UTC)
 
-        # Get next sequence number
+        # Get next sequence number (scoped per stream_run_id)
+        run_key = stream_run_id
         row = session.execute(
             SimpleStatement(
-                "SELECT MAX(sequence) AS max_seq FROM signals WHERE stream_id = %s",
+                "SELECT MAX(sequence) AS max_seq FROM signals WHERE stream_run_id = %s",
                 consistency_level=self.read_consistency,
             ),
-            (stream_id,),
+            (run_key,),
         ).one()
 
         seq = (row.max_seq + 1) if row and row.max_seq is not None else 0
 
         session.execute(
             SimpleStatement(
-                "INSERT INTO signals (stream_id, sequence, signal_id, signal_type, payload, "
-                "published_at, source_run_id, metadata) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                "INSERT INTO signals (stream_run_id, sequence, signal_id, stream_id, signal_type, payload, "
+                "published_at, source_run_id, metadata) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 consistency_level=self.write_consistency,
             ),
             (
-                stream_id,
+                run_key,
                 seq,
                 signal_id,
+                stream_id,
                 signal_type,
                 json.dumps(payload),
                 now,
@@ -2071,8 +2075,8 @@ class CassandraStorageBackend(StorageBackend):
         rows = session.execute(
             SimpleStatement(
                 "SELECT signal_id, stream_id, signal_type, payload, published_at, "
-                "sequence, source_run_id, metadata FROM signals "
-                "WHERE stream_id = %s AND sequence >= %s LIMIT %s",
+                "sequence, source_run_id, stream_run_id, metadata FROM signals "
+                "WHERE stream_id = %s AND sequence >= %s LIMIT %s ALLOW FILTERING",
                 consistency_level=self.read_consistency,
             ),
             (stream_id, after_sequence, limit),
@@ -2087,6 +2091,7 @@ class CassandraStorageBackend(StorageBackend):
                 "published_at": row.published_at.isoformat() if row.published_at else None,
                 "sequence": row.sequence,
                 "source_run_id": row.source_run_id,
+                "stream_run_id": row.stream_run_id,
                 "metadata": json.loads(row.metadata) if row.metadata else {},
             }
             for row in rows

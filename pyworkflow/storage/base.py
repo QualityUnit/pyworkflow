@@ -755,6 +755,7 @@ class StorageBackend(ABC):
         signal_type: str,
         payload: dict,
         source_run_id: str | None = None,
+        stream_run_id: str | None = None,
         metadata: dict | None = None,
     ) -> int:
         """
@@ -766,6 +767,7 @@ class StorageBackend(ABC):
             signal_type: Signal type (e.g., "task.created")
             payload: Signal payload data
             source_run_id: Optional source workflow run ID
+            stream_run_id: Optional stream run identifier for grouping signals
             metadata: Optional signal metadata
 
         Returns:
@@ -801,6 +803,7 @@ class StorageBackend(ABC):
     async def query_stream_signals(
         self,
         stream_id: str,
+        stream_run_id: str,
         *,
         source_run_id: str | None = None,
         signal_type: str | None = None,
@@ -815,6 +818,7 @@ class StorageBackend(ABC):
         Args:
             stream_id: Stream identifier.
             source_run_id: Filter to signals from a specific workflow run.
+            stream_run_id: Filter to signals from a specific stream run.
             signal_type: Filter by signal type (e.g. ``"task.completed"``).
             after_sequence: Only include signals with ``sequence >= value``.
             before_sequence: Only include signals with ``sequence <= value``.

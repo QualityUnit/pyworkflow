@@ -1105,6 +1105,7 @@ class FileStorageBackend(StorageBackend):
         signal_type: str,
         payload: dict,
         source_run_id: str | None = None,
+        stream_run_id: str | None = None,
         metadata: dict | None = None,
     ) -> int:
         """Publish a signal to a stream."""
@@ -1121,7 +1122,12 @@ class FileStorageBackend(StorageBackend):
                     if content.strip():
                         signals = json.loads(content)
 
-                seq = max((s.get("sequence", -1) for s in signals), default=-1) + 1
+                # Sequence scoped per stream_run_id
+                run_key = stream_run_id
+                seq = max(
+                    (s.get("sequence", -1) for s in signals if s.get("stream_run_id", "") == run_key),
+                    default=-1,
+                ) + 1
 
                 signal_data = {
                     "signal_id": signal_id,
@@ -1131,6 +1137,7 @@ class FileStorageBackend(StorageBackend):
                     "published_at": datetime.now(UTC).isoformat(),
                     "sequence": seq,
                     "source_run_id": source_run_id,
+                    "stream_run_id": stream_run_id,
                     "metadata": metadata or {},
                 }
                 signals.append(signal_data)

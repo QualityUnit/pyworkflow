@@ -131,6 +131,34 @@ class MySQLMigrationRunner(MigrationRunner):
                                   AND JSON_EXTRACT(data, '$.step_id') IS NOT NULL
                             """)
                         # If table doesn't exist, schema will be created with step_id column
+                    elif migration.version == 3:
+                        # V3: Restructure signals table — PK changes to (stream_id, stream_run_id, sequence).
+                        await cur.execute("DROP TABLE IF EXISTS signal_acknowledgments")
+                        await cur.execute("DROP TABLE IF EXISTS signals")
+                        await cur.execute("""
+                            CREATE TABLE signals (
+                                stream_run_id VARCHAR(255) NOT NULL,
+                                sequence INT NOT NULL,
+                                signal_id VARCHAR(255) NOT NULL,
+                                stream_id VARCHAR(255) NOT NULL,
+                                signal_type VARCHAR(255) NOT NULL,
+                                payload LONGTEXT NOT NULL DEFAULT '{}',
+                                published_at DATETIME(6) NOT NULL,
+                                source_run_id VARCHAR(255),
+                                metadata LONGTEXT DEFAULT '{}',
+                                PRIMARY KEY (stream_id, stream_run_id, sequence),
+                                UNIQUE INDEX idx_signals_signal_id (signal_id),
+                                FOREIGN KEY (stream_id) REFERENCES streams(stream_id) ON DELETE CASCADE
+                            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                        """)
+                        await cur.execute("""
+                            CREATE TABLE signal_acknowledgments (
+                                signal_id VARCHAR(255) NOT NULL,
+                                step_run_id VARCHAR(255) NOT NULL,
+                                acknowledged_at DATETIME(6) NOT NULL,
+                                PRIMARY KEY (signal_id, step_run_id)
+                            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                        """)
                     elif migration.up_func:
                         await migration.up_func(conn)
                     elif migration.up_sql and migration.up_sql != "SELECT 1":
@@ -379,16 +407,17 @@ class MySQLStorageBackend(StorageBackend):
             # Signals table
             await cur.execute("""
                     CREATE TABLE IF NOT EXISTS signals (
-                        signal_id VARCHAR(255) PRIMARY KEY,
+                        stream_run_id VARCHAR(255) NOT NULL,
+                        sequence INT NOT NULL,
+                        signal_id VARCHAR(255) NOT NULL,
                         stream_id VARCHAR(255) NOT NULL,
                         signal_type VARCHAR(255) NOT NULL,
                         payload LONGTEXT NOT NULL DEFAULT '{}',
                         published_at DATETIME(6) NOT NULL,
-                        sequence INT NOT NULL,
                         source_run_id VARCHAR(255),
                         metadata LONGTEXT DEFAULT '{}',
-                        INDEX idx_signals_stream_id_sequence (stream_id, sequence),
-                        INDEX idx_signals_stream_id_type (stream_id, signal_type),
+                        PRIMARY KEY (stream_id, stream_run_id, sequence),
+                        UNIQUE INDEX idx_signals_signal_id (signal_id),
                         FOREIGN KEY (stream_id) REFERENCES streams(stream_id) ON DELETE CASCADE
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """)
@@ -1540,6 +1569,7 @@ class MySQLStorageBackend(StorageBackend):
         signal_type: str,
         payload: dict,
         source_run_id: str | None = None,
+        stream_run_id: str | None = None,
         metadata: dict | None = None,
     ) -> int:
         """Publish a signal to a stream."""
@@ -1547,18 +1577,18 @@ class MySQLStorageBackend(StorageBackend):
         now = datetime.now(UTC)
 
         async with pool.acquire() as conn, conn.cursor() as cur:
-            # Get next sequence number
+            # Get next sequence number (scoped per stream_run_id)
             await cur.execute(
-                "SELECT COALESCE(MAX(sequence), -1) + 1 FROM signals WHERE stream_id = %s",
-                (stream_id,),
+                "SELECT COALESCE(MAX(sequence), -1) + 1 FROM signals WHERE stream_run_id = %s",
+                (stream_run_id,),
             )
             row = await cur.fetchone()
             seq = row[0] if row else 0
 
             await cur.execute(
                 """
-                    INSERT INTO signals (signal_id, stream_id, signal_type, payload, published_at, sequence, source_run_id, metadata)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO signals (signal_id, stream_id, signal_type, payload, published_at, sequence, source_run_id, stream_run_id, metadata)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                 (
                     signal_id,
@@ -1568,6 +1598,7 @@ class MySQLStorageBackend(StorageBackend):
                     now,
                     seq,
                     source_run_id,
+                    stream_run_id,
                     json.dumps(metadata or {}),
                 ),
             )
@@ -1586,7 +1617,7 @@ class MySQLStorageBackend(StorageBackend):
             await cur.execute(
                 """
                     SELECT signal_id, stream_id, signal_type, payload, published_at,
-                           sequence, source_run_id, metadata
+                           sequence, source_run_id, stream_run_id, metadata
                     FROM signals
                     WHERE stream_id = %s AND sequence >= %s
                     ORDER BY sequence ASC
@@ -1605,7 +1636,8 @@ class MySQLStorageBackend(StorageBackend):
                 "published_at": row[4].isoformat() if row[4] else None,
                 "sequence": row[5],
                 "source_run_id": row[6],
-                "metadata": json.loads(row[7]) if row[7] else {},
+                "stream_run_id": row[7],
+                "metadata": json.loads(row[8]) if row[8] else {},
             }
             for row in rows
         ]
@@ -1727,7 +1759,7 @@ class MySQLStorageBackend(StorageBackend):
             await cur.execute(
                 f"""
                     SELECT s.signal_id, s.stream_id, s.signal_type, s.payload, s.published_at,
-                           s.sequence, s.source_run_id, s.metadata
+                           s.sequence, s.source_run_id, s.stream_run_id, s.metadata
                     FROM signals s
                     WHERE s.stream_id = %s AND s.signal_type IN ({placeholders})
                       AND NOT EXISTS (
@@ -1749,7 +1781,8 @@ class MySQLStorageBackend(StorageBackend):
                 "published_at": row[4].isoformat() if row[4] else None,
                 "sequence": row[5],
                 "source_run_id": row[6],
-                "metadata": json.loads(row[7]) if row[7] else {},
+                "stream_run_id": row[7],
+                "metadata": json.loads(row[8]) if row[8] else {},
             }
             for row in rows
         ]

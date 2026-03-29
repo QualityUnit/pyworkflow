@@ -112,6 +112,37 @@ class SQLiteMigrationRunner(MigrationRunner):
 
                 await self._db.commit()
             # If table doesn't exist, schema will be created with step_id column
+        elif migration.version == 3:
+            # V3: Restructure signals table — PK changes to (stream_id, stream_run_id, sequence).
+            await self._db.execute("DROP TABLE IF EXISTS signal_acknowledgments")
+            await self._db.execute("DROP TABLE IF EXISTS signals")
+            await self._db.execute("""
+                CREATE TABLE signals (
+                    stream_run_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    signal_id TEXT NOT NULL,
+                    stream_id TEXT NOT NULL,
+                    signal_type TEXT NOT NULL,
+                    payload TEXT NOT NULL DEFAULT '{}',
+                    published_at TIMESTAMP NOT NULL,
+                    source_run_id TEXT,
+                    metadata TEXT DEFAULT '{}',
+                    PRIMARY KEY (stream_id, stream_run_id, sequence),
+                    FOREIGN KEY (stream_id) REFERENCES streams(stream_id) ON DELETE CASCADE
+                )
+            """)
+            await self._db.execute(
+                "CREATE UNIQUE INDEX idx_signals_signal_id ON signals(signal_id)"
+            )
+            await self._db.execute("""
+                CREATE TABLE signal_acknowledgments (
+                    signal_id TEXT NOT NULL,
+                    step_run_id TEXT NOT NULL,
+                    acknowledged_at TIMESTAMP NOT NULL,
+                    PRIMARY KEY (signal_id, step_run_id)
+                )
+            """)
+            await self._db.commit()
         elif migration.up_func:
             await migration.up_func(self._db)
         elif migration.up_sql and migration.up_sql != "SELECT 1":
@@ -360,22 +391,21 @@ class SQLiteStorageBackend(StorageBackend):
         # Signals table
         await db.execute("""
             CREATE TABLE IF NOT EXISTS signals (
-                signal_id TEXT PRIMARY KEY,
+                stream_run_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                signal_id TEXT NOT NULL,
                 stream_id TEXT NOT NULL,
                 signal_type TEXT NOT NULL,
                 payload TEXT NOT NULL DEFAULT '{}',
                 published_at TIMESTAMP NOT NULL,
-                sequence INTEGER NOT NULL,
                 source_run_id TEXT,
                 metadata TEXT DEFAULT '{}',
+                PRIMARY KEY (stream_id, stream_run_id, sequence),
                 FOREIGN KEY (stream_id) REFERENCES streams(stream_id) ON DELETE CASCADE
             )
         """)
         await db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_signals_stream_id_sequence ON signals(stream_id, sequence)"
-        )
-        await db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_signals_stream_id_type ON signals(stream_id, signal_type)"
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_signals_signal_id ON signals(signal_id)"
         )
 
         # Stream subscriptions table
@@ -1425,24 +1455,25 @@ class SQLiteStorageBackend(StorageBackend):
         signal_type: str,
         payload: dict,
         source_run_id: str | None = None,
+        stream_run_id: str | None = None,
         metadata: dict | None = None,
     ) -> int:
         """Publish a signal to a stream."""
         db = self._ensure_connected()
         now = datetime.now(UTC).isoformat()
 
-        # Get next sequence number
+        # Get next sequence number (scoped per stream_run_id)
         async with db.execute(
-            "SELECT COALESCE(MAX(sequence), -1) + 1 FROM signals WHERE stream_id = ?",
-            (stream_id,),
+            "SELECT COALESCE(MAX(sequence), -1) + 1 FROM signals WHERE stream_run_id = ?",
+            (stream_run_id,),
         ) as cursor:
             row = await cursor.fetchone()
             seq = row[0] if row else 0
 
         await db.execute(
             """
-            INSERT INTO signals (signal_id, stream_id, signal_type, payload, published_at, sequence, source_run_id, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO signals (signal_id, stream_id, signal_type, payload, published_at, sequence, source_run_id, stream_run_id, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 signal_id,
@@ -1452,6 +1483,7 @@ class SQLiteStorageBackend(StorageBackend):
                 now,
                 seq,
                 source_run_id,
+                stream_run_id,
                 json.dumps(metadata or {}),
             ),
         )
@@ -1469,7 +1501,7 @@ class SQLiteStorageBackend(StorageBackend):
 
         async with db.execute(
             """
-            SELECT signal_id, stream_id, signal_type, payload, published_at, sequence, source_run_id, metadata
+            SELECT signal_id, stream_id, signal_type, payload, published_at, sequence, source_run_id, stream_run_id, metadata
             FROM signals
             WHERE stream_id = ? AND sequence >= ?
             ORDER BY sequence ASC
@@ -1488,7 +1520,8 @@ class SQLiteStorageBackend(StorageBackend):
                 "published_at": row[4],
                 "sequence": row[5],
                 "source_run_id": row[6],
-                "metadata": json.loads(row[7]) if row[7] else {},
+                "stream_run_id": row[7],
+                "metadata": json.loads(row[8]) if row[8] else {},
             }
             for row in rows
         ]
@@ -1496,6 +1529,7 @@ class SQLiteStorageBackend(StorageBackend):
     async def query_stream_signals(
         self,
         stream_id: str,
+        stream_run_id: str,
         *,
         source_run_id: str | None = None,
         signal_type: str | None = None,
@@ -1507,8 +1541,8 @@ class SQLiteStorageBackend(StorageBackend):
         """Query signals from a stream with rich filtering."""
         db = self._ensure_connected()
 
-        conditions = ["stream_id = ?"]
-        params: list = [stream_id]
+        conditions = ["stream_id = ?", "stream_run_id = ?"]
+        params: list = [stream_id, stream_run_id]
 
         if source_run_id is not None:
             conditions.append("source_run_id = ?")
@@ -1535,7 +1569,7 @@ class SQLiteStorageBackend(StorageBackend):
 
         query = f"""
             SELECT signal_id, stream_id, signal_type, payload,
-                   published_at, sequence, source_run_id, metadata
+                   published_at, sequence, source_run_id, stream_run_id, metadata
             FROM signals
             WHERE {where}
             ORDER BY sequence {order}
@@ -1554,7 +1588,8 @@ class SQLiteStorageBackend(StorageBackend):
                 "published_at": row[4],
                 "sequence": row[5],
                 "source_run_id": row[6],
-                "metadata": json.loads(row[7]) if row[7] else {},
+                "stream_run_id": row[7],
+                "metadata": json.loads(row[8]) if row[8] else {},
             }
             for row in rows
         ]
@@ -1688,7 +1723,7 @@ class SQLiteStorageBackend(StorageBackend):
         async with db.execute(
             f"""
             SELECT s.signal_id, s.stream_id, s.signal_type, s.payload, s.published_at,
-                   s.sequence, s.source_run_id, s.metadata
+                   s.sequence, s.source_run_id, s.stream_run_id, s.metadata
             FROM signals s
             WHERE s.stream_id = ? AND s.signal_type IN ({placeholders})
               AND NOT EXISTS (
@@ -1710,7 +1745,8 @@ class SQLiteStorageBackend(StorageBackend):
                 "published_at": row[4],
                 "sequence": row[5],
                 "source_run_id": row[6],
-                "metadata": json.loads(row[7]) if row[7] else {},
+                "stream_run_id": row[7],
+                "metadata": json.loads(row[8]) if row[8] else {},
             }
             for row in rows
         ]

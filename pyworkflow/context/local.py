@@ -151,7 +151,16 @@ class LocalContext(WorkflowContext):
         from pyworkflow.engine.events import EventType
         from pyworkflow.serialization.decoder import deserialize
 
+        max_counter = 0
         for event in events:
+            # Track step counter from sleep and hook IDs to avoid collisions
+            for key in ("sleep_id", "hook_id"):
+                id_val = event.data.get(key) if event.data else None
+                if id_val:
+                    c = self._extract_counter_from_id(id_val)
+                    if c > max_counter:
+                        max_counter = c
+
             if event.type == EventType.STEP_STARTED:
                 # Track step as in-progress (dispatched but not completed)
                 step_id = event.data.get("step_id")
@@ -270,6 +279,10 @@ class LocalContext(WorkflowContext):
                         "__failed__": True,
                     }
                     self._pending_children.pop(child_id, None)
+
+        # Restore step counter so new sleeps/hooks don't collide with replayed ones
+        if max_counter > self._step_counter:
+            self._step_counter = max_counter
 
     @property
     def is_durable(self) -> bool:

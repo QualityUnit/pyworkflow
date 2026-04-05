@@ -226,7 +226,7 @@ class TestMigrationIdempotency:
             rows = await cursor.fetchall()
 
         versions = [row[0] for row in rows]
-        assert versions == [1, 2], "Each migration should only be recorded once"
+        assert versions == [1, 2, 3, 4], "Each migration should only be recorded once"
 
         await backend.disconnect()
 

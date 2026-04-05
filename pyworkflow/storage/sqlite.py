@@ -127,7 +127,7 @@ class SQLiteMigrationRunner(MigrationRunner):
                     published_at TIMESTAMP NOT NULL,
                     source_run_id TEXT,
                     metadata TEXT DEFAULT '{}',
-                    PRIMARY KEY (stream_id, stream_run_id, sequence),
+                    PRIMARY KEY (stream_id, stream_run_id, sequence)
                     /* stream_id is not FK-constrained — streams are code-defined */
                 )
             """)
@@ -400,7 +400,7 @@ class SQLiteStorageBackend(StorageBackend):
                 published_at TIMESTAMP NOT NULL,
                 source_run_id TEXT,
                 metadata TEXT DEFAULT '{}',
-                PRIMARY KEY (stream_id, stream_run_id, sequence),
+                PRIMARY KEY (stream_id, stream_run_id, sequence)
                 /* stream_id is not FK-constrained — streams are code-defined */
             )
         """)
@@ -416,7 +416,7 @@ class SQLiteStorageBackend(StorageBackend):
                 signal_types TEXT NOT NULL DEFAULT '[]',
                 status TEXT NOT NULL DEFAULT 'waiting',
                 created_at TIMESTAMP NOT NULL,
-                PRIMARY KEY (stream_id, step_run_id),
+                PRIMARY KEY (stream_id, step_run_id)
                 /* stream_id is not FK-constrained — streams are code-defined */
             )
         """)

@@ -121,46 +121,12 @@ class LocalContext(WorkflowContext):
             self._replay_events(event_log)
             self._is_replaying = False
 
-    def _extract_counter_from_id(self, id_string: str) -> int:
-        """Extract counter value from hook_id or sleep_id.
-
-        Formats:
-        - hook_{name}_{counter}
-        - sleep_{counter}_{duration}s
-
-        Args:
-            id_string: The hook_id or sleep_id string
-
-        Returns:
-            The counter value, or 0 if parsing fails
-        """
-        try:
-            parts = id_string.split("_")
-            if id_string.startswith("hook_"):
-                # hook_{name}_{counter} - counter is last part
-                return int(parts[-1])
-            elif id_string.startswith("sleep_"):
-                # sleep_{counter}_{duration}s - counter is second part
-                return int(parts[1])
-        except (ValueError, IndexError):
-            pass
-        return 0
-
     def _replay_events(self, events: list[Any]) -> None:
         """Replay events to restore state."""
         from pyworkflow.engine.events import EventType
         from pyworkflow.serialization.decoder import deserialize
 
-        max_counter = 0
         for event in events:
-            # Track step counter from sleep and hook IDs to avoid collisions
-            for key in ("sleep_id", "hook_id"):
-                id_val = event.data.get(key) if event.data else None
-                if id_val:
-                    c = self._extract_counter_from_id(id_val)
-                    if c > max_counter:
-                        max_counter = c
-
             if event.type == EventType.STEP_STARTED:
                 # Track step as in-progress (dispatched but not completed)
                 step_id = event.data.get("step_id")
@@ -279,10 +245,6 @@ class LocalContext(WorkflowContext):
                         "__failed__": True,
                     }
                     self._pending_children.pop(child_id, None)
-
-        # Restore step counter so new sleeps/hooks don't collide with replayed ones
-        if max_counter > self._step_counter:
-            self._step_counter = max_counter
 
     @property
     def is_durable(self) -> bool:

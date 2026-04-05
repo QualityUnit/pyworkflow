@@ -98,9 +98,7 @@ class CitusMigrationRunner(PostgresMigrationRunner):
                         PRIMARY KEY (stream_id, stream_run_id, sequence)
                     )
                 """)
-                await conn.execute(
-                    "CREATE INDEX idx_signals_signal_id ON signals(signal_id)"
-                )
+                await conn.execute("CREATE INDEX idx_signals_signal_id ON signals(signal_id)")
                 await conn.execute("""
                     CREATE TABLE signal_acknowledgments (
                         signal_id TEXT NOT NULL,
@@ -110,12 +108,8 @@ class CitusMigrationRunner(PostgresMigrationRunner):
                     )
                 """)
                 # Re-distribute the new tables
-                await conn.execute(
-                    "SELECT create_distributed_table('signals', 'stream_run_id')"
-                )
-                await conn.execute(
-                    "SELECT create_reference_table('signal_acknowledgments')"
-                )
+                await conn.execute("SELECT create_distributed_table('signals', 'stream_run_id')")
+                await conn.execute("SELECT create_reference_table('signal_acknowledgments')")
             elif migration.up_func:
                 await migration.up_func(conn)
             elif migration.up_sql and migration.up_sql != "SELECT 1":

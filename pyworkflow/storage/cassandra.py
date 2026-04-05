@@ -2001,8 +2001,7 @@ class CassandraStorageBackend(StorageBackend):
 
         row = session.execute(
             SimpleStatement(
-                "SELECT stream_id, status, created_at, metadata FROM streams "
-                "WHERE stream_id = %s",
+                "SELECT stream_id, status, created_at, metadata FROM streams WHERE stream_id = %s",
                 consistency_level=self.read_consistency,
             ),
             (stream_id,),

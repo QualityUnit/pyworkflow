@@ -280,12 +280,14 @@ async def _ensure_subscriptions_from_registry(
                 step_run_id=step_run_id,
                 signal_types=step_meta.signal_types,
             )
-            created.append({
-                "stream_id": stream_id,
-                "step_run_id": step_run_id,
-                "signal_types": step_meta.signal_types,
-                "status": "waiting",
-            })
+            created.append(
+                {
+                    "stream_id": stream_id,
+                    "step_run_id": step_run_id,
+                    "signal_types": step_meta.signal_types,
+                    "status": "waiting",
+                }
+            )
             logger.info(
                 f"Auto-registered stream subscription for step '{step_meta.name}' "
                 f"on stream '{stream_id}'",

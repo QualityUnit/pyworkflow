@@ -1124,10 +1124,17 @@ class FileStorageBackend(StorageBackend):
 
                 # Sequence scoped per stream_run_id
                 run_key = stream_run_id
-                seq = max(
-                    (s.get("sequence", -1) for s in signals if s.get("stream_run_id", "") == run_key),
-                    default=-1,
-                ) + 1
+                seq = (
+                    max(
+                        (
+                            s.get("sequence", -1)
+                            for s in signals
+                            if s.get("stream_run_id", "") == run_key
+                        ),
+                        default=-1,
+                    )
+                    + 1
+                )
 
                 signal_data = {
                     "signal_id": signal_id,

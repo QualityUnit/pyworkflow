@@ -7,6 +7,7 @@ When a signal is published, the dispatcher:
 3. If ctx.resume() was called, triggers workflow resume
 """
 
+import contextlib
 from typing import Any
 
 from loguru import logger
@@ -216,10 +217,8 @@ async def _resume_step(
         reset_stream_step_context(tokens)
 
     # Return subscription to waiting status for next signal
-    try:
+    with contextlib.suppress(Exception):
         await storage.update_subscription_status(signal.stream_id, step_run_id, "waiting")
-    except Exception:
-        pass  # Best-effort
 
 
 async def _cancel_step(

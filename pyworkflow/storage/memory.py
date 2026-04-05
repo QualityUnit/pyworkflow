@@ -673,7 +673,7 @@ class InMemoryStorageBackend(StorageBackend):
                 self._signals[stream_id] = []
 
             # Sequence scoped per stream_run_id
-            run_key = stream_run_id
+            run_key = stream_run_id or stream_id
             if run_key not in self._signal_sequences:
                 self._signal_sequences[run_key] = 0
 

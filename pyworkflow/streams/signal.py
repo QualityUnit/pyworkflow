@@ -37,6 +37,7 @@ class Signal:
     published_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     sequence: int | None = None  # Assigned by storage layer
     source_run_id: str | None = None
+    stream_run_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

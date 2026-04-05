@@ -20,6 +20,7 @@ async def emit(
     *,
     storage: Any = None,
     metadata: dict[str, Any] | None = None,
+    stream_run_id: str | None = None,
 ) -> Signal:
     """
     Publish a signal to a stream.
@@ -67,6 +68,10 @@ async def emit(
     # Resolve source run_id from context if available
     source_run_id = _get_source_run_id()
 
+    # Resolve stream_run_id from context if not explicitly provided
+    if stream_run_id is None:
+        stream_run_id = _get_stream_run_id()
+
     # Create signal
     signal_id = f"sig_{uuid.uuid4().hex[:16]}"
 
@@ -77,6 +82,7 @@ async def emit(
         signal_type=signal_type,
         payload=payload_data,
         source_run_id=source_run_id,
+        stream_run_id=stream_run_id,
         metadata=metadata,
     )
 
@@ -87,6 +93,7 @@ async def emit(
         payload=payload_data,
         sequence=sequence,
         source_run_id=source_run_id,
+        stream_run_id=stream_run_id,
         metadata=metadata or {},
     )
 
@@ -152,6 +159,17 @@ def _get_source_run_id() -> str | None:
         if has_context():
             ctx = get_context()
             return ctx.run_id
+    except Exception:
+        pass
+    return None
+
+
+def _get_stream_run_id() -> str | None:
+    """Try to get the current stream_run_id from stream step context."""
+    try:
+        from pyworkflow.streams.context import get_stream_run_id
+
+        return get_stream_run_id()
     except Exception:
         pass
     return None

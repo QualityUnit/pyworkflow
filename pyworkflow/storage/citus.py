@@ -79,6 +79,37 @@ class CitusMigrationRunner(PostgresMigrationRunner):
                     """)
                 # NOTE: No UNIQUE constraints added here — Citus requires distribution
                 # column in every unique constraint, which V2 doesn't add.
+            elif migration.version == 3:
+                # V3: Restructure signals table — PK changes to (stream_id, stream_run_id, sequence).
+                # Must undistribute before dropping on Citus.
+                await conn.execute("DROP TABLE IF EXISTS signal_acknowledgments")
+                await conn.execute("DROP TABLE IF EXISTS signals")
+                await conn.execute("""
+                    CREATE TABLE signals (
+                        stream_run_id TEXT NOT NULL,
+                        sequence INTEGER NOT NULL,
+                        signal_id TEXT NOT NULL,
+                        stream_id TEXT NOT NULL,
+                        signal_type TEXT NOT NULL,
+                        payload JSONB NOT NULL DEFAULT '{}',
+                        published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        source_run_id TEXT,
+                        metadata JSONB DEFAULT '{}',
+                        PRIMARY KEY (stream_id, stream_run_id, sequence)
+                    )
+                """)
+                await conn.execute("CREATE INDEX idx_signals_signal_id ON signals(signal_id)")
+                await conn.execute("""
+                    CREATE TABLE signal_acknowledgments (
+                        signal_id TEXT NOT NULL,
+                        step_run_id TEXT NOT NULL,
+                        acknowledged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        PRIMARY KEY (signal_id, step_run_id)
+                    )
+                """)
+                # Re-distribute the new tables
+                await conn.execute("SELECT create_distributed_table('signals', 'stream_run_id')")
+                await conn.execute("SELECT create_reference_table('signal_acknowledgments')")
             elif migration.up_func:
                 await migration.up_func(conn)
             elif migration.up_sql and migration.up_sql != "SELECT 1":
@@ -337,6 +368,68 @@ class CitusStorageBackend(PostgresStorageBackend):
                 )
             """)
 
+            # streams — reference table (independent, keyed by stream_id)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS streams (
+                    stream_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    metadata JSONB DEFAULT '{}'
+                )
+            """)
+
+            # signals — distributed on stream_run_id
+            # Differences vs postgres:
+            #   - PK: (stream_id, stream_run_id, sequence) — distribution column is stream_run_id
+            #   - No FK constraints (cross-shard FKs unsupported)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS signals (
+                    stream_run_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    signal_id TEXT NOT NULL,
+                    stream_id TEXT NOT NULL,
+                    signal_type TEXT NOT NULL,
+                    payload JSONB NOT NULL DEFAULT '{}',
+                    published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    source_run_id TEXT,
+                    metadata JSONB DEFAULT '{}',
+                    PRIMARY KEY (stream_id, stream_run_id, sequence)
+                )
+            """)
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_signals_signal_id ON signals(signal_id)"
+            )
+
+            # stream_subscriptions — distributed on stream_id, co-located with signals
+            # Differences vs postgres:
+            #   - PK: (stream_id, step_run_id) to include distribution column
+            #   - No FK constraints (cross-shard FKs unsupported)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS stream_subscriptions (
+                    stream_id TEXT NOT NULL,
+                    step_run_id TEXT NOT NULL,
+                    signal_types JSONB NOT NULL DEFAULT '[]',
+                    status TEXT NOT NULL DEFAULT 'waiting',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (stream_id, step_run_id)
+                )
+            """)
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON stream_subscriptions(stream_id, status)"
+            )
+
+            # signal_acknowledgments — reference table (needs cross-shard joins)
+            # Differences vs postgres:
+            #   - No FK constraints (cross-shard FKs unsupported)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS signal_acknowledgments (
+                    signal_id TEXT NOT NULL,
+                    step_run_id TEXT NOT NULL,
+                    acknowledged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (signal_id, step_run_id)
+                )
+            """)
+
         # Step 4: Distribute tables (idempotent — already-distributed tables are skipped)
         await self._distribute_tables(pool)
 
@@ -385,3 +478,21 @@ class CitusStorageBackend(PostgresStorageBackend):
             # checkpoints: reference table (keyed by step_run_id, can't co-locate with run_id)
             if "checkpoints" not in distributed:
                 await conn.execute("SELECT create_reference_table('checkpoints')")
+
+            # streams: reference table (independent, small)
+            if "streams" not in distributed:
+                await conn.execute("SELECT create_reference_table('streams')")
+
+            # signals: distributed on stream_run_id
+            if "signals" not in distributed:
+                await conn.execute("SELECT create_distributed_table('signals', 'stream_run_id')")
+
+            # stream_subscriptions: distributed on stream_id (independent from signals)
+            if "stream_subscriptions" not in distributed:
+                await conn.execute(
+                    "SELECT create_distributed_table('stream_subscriptions', 'stream_id')"
+                )
+
+            # signal_acknowledgments: reference table (needs cross-shard joins)
+            if "signal_acknowledgments" not in distributed:
+                await conn.execute("SELECT create_reference_table('signal_acknowledgments')")

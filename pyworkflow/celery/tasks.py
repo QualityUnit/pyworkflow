@@ -2462,6 +2462,9 @@ async def _resume_workflow_on_worker(
                     run_id=run_id,
                     step_id=step_id,
                 )
+                resume_workflow_task.release_lock(
+                    task_args=[run_id], task_kwargs={"storage_config": storage_config}
+                )
                 schedule_workflow_resumption(
                     run_id,
                     datetime.now(UTC),
@@ -2481,6 +2484,9 @@ async def _resume_workflow_on_worker(
                     run_id=run_id,
                     hook_id=hook_id,
                 )
+                resume_workflow_task.release_lock(
+                    task_args=[run_id], task_kwargs={"storage_config": storage_config}
+                )
                 schedule_workflow_resumption(
                     run_id,
                     datetime.now(UTC),
@@ -2492,6 +2498,13 @@ async def _resume_workflow_on_worker(
         # Schedule automatic resumption if we have a resume_at time
         resume_at = e.data.get("resume_at") if e.data else None
         if resume_at:
+            # Release the singleton lock BEFORE scheduling the next resume.
+            # Without this, the new resume_workflow_task.apply_async() sees
+            # the lock still held by the current (calling) task and silently
+            # drops the schedule as a duplicate.
+            resume_workflow_task.release_lock(
+                task_args=[run_id], task_kwargs={"storage_config": storage_config}
+            )
             schedule_workflow_resumption(
                 run_id, resume_at, storage_config=storage_config, triggered_by="start_sleep_hook"
             )

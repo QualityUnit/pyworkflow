@@ -297,3 +297,23 @@ _v2_migration = Migration(
     up_sql="SELECT 1",  # Placeholder, actual migration is in backend runners
 )
 register_migration(_v2_migration)
+
+
+# Version 3: Restructure signals table — PK changes from signal_id to
+# (stream_run_id, sequence). Drops and recreates the table.
+_v3_migration = Migration(
+    version=3,
+    description="Restructure signals table: PK (stream_id, stream_run_id, sequence), drop and recreate",
+    up_sql="SELECT 1",  # Placeholder, actual migration is in backend runners
+)
+register_migration(_v3_migration)
+
+
+# Version 4: Drop FK constraints on stream_id — streams are code-defined
+# via @stream_workflow decorators, so the streams table is not the source of truth.
+_v4_migration = Migration(
+    version=4,
+    description="Drop FK constraints referencing streams table — streams are code-defined",
+    up_sql="SELECT 1",  # Placeholder, actual migration is in backend runners
+)
+register_migration(_v4_migration)

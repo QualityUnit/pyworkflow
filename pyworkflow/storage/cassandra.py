@@ -179,6 +179,7 @@ class CassandraStorageBackend(StorageBackend):
         await self._create_hooks_tables(session)
         await self._create_cancellation_flags_table(session)
         await self._create_checkpoints_table(session)
+        await self._create_streams_tables(session)
         await self._create_schedules_tables(session)
 
         # Create query pattern tables
@@ -322,6 +323,52 @@ class CassandraStorageBackend(StorageBackend):
                 data TEXT,
                 created_at TIMESTAMP,
                 updated_at TIMESTAMP
+            )
+        """)
+
+    async def _create_streams_tables(self, session: Session) -> None:
+        """Create stream-related tables."""
+        session.execute("""
+            CREATE TABLE IF NOT EXISTS streams (
+                stream_id TEXT PRIMARY KEY,
+                status TEXT,
+                created_at TIMESTAMP,
+                metadata TEXT
+            )
+        """)
+
+        session.execute("""
+            CREATE TABLE IF NOT EXISTS signals (
+                stream_run_id TEXT,
+                sequence INT,
+                signal_id TEXT,
+                stream_id TEXT,
+                signal_type TEXT,
+                payload TEXT,
+                published_at TIMESTAMP,
+                source_run_id TEXT,
+                metadata TEXT,
+                PRIMARY KEY ((stream_id, stream_run_id), sequence)
+            ) WITH CLUSTERING ORDER BY (sequence ASC)
+        """)
+
+        session.execute("""
+            CREATE TABLE IF NOT EXISTS stream_subscriptions (
+                stream_id TEXT,
+                step_run_id TEXT,
+                signal_types TEXT,
+                status TEXT,
+                created_at TIMESTAMP,
+                PRIMARY KEY (stream_id, step_run_id)
+            )
+        """)
+
+        session.execute("""
+            CREATE TABLE IF NOT EXISTS signal_acknowledgments (
+                signal_id TEXT,
+                step_run_id TEXT,
+                acknowledged_at TIMESTAMP,
+                PRIMARY KEY (signal_id, step_run_id)
             )
         """)
 
@@ -1931,3 +1978,276 @@ class CassandraStorageBackend(StorageBackend):
             running_run_ids=json.loads(row.running_run_ids) if row.running_run_ids else [],
             buffered_count=row.buffered_count or 0,
         )
+
+    # Stream Operations
+
+    async def create_stream(self, stream_id: str, metadata: dict | None = None) -> None:
+        """Create a new stream."""
+        session = self._ensure_connected()
+        now = datetime.now(UTC)
+
+        session.execute(
+            SimpleStatement(
+                "INSERT INTO streams (stream_id, status, created_at, metadata) "
+                "VALUES (%s, %s, %s, %s)",
+                consistency_level=self.write_consistency,
+            ),
+            (stream_id, "active", now, json.dumps(metadata or {})),
+        )
+
+    async def get_stream(self, stream_id: str) -> dict | None:
+        """Get a stream by ID."""
+        session = self._ensure_connected()
+
+        row = session.execute(
+            SimpleStatement(
+                "SELECT stream_id, status, created_at, metadata FROM streams WHERE stream_id = %s",
+                consistency_level=self.read_consistency,
+            ),
+            (stream_id,),
+        ).one()
+
+        if row is None:
+            return None
+        return {
+            "stream_id": row.stream_id,
+            "status": row.status,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "metadata": json.loads(row.metadata) if row.metadata else {},
+        }
+
+    async def publish_signal(
+        self,
+        signal_id: str,
+        stream_id: str,
+        signal_type: str,
+        payload: dict,
+        source_run_id: str | None = None,
+        stream_run_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> int:
+        """Publish a signal to a stream."""
+        session = self._ensure_connected()
+        now = datetime.now(UTC)
+
+        # Get next sequence number (scoped per stream_run_id)
+        run_key = stream_run_id
+        row = session.execute(
+            SimpleStatement(
+                "SELECT MAX(sequence) AS max_seq FROM signals WHERE stream_run_id = %s",
+                consistency_level=self.read_consistency,
+            ),
+            (run_key,),
+        ).one()
+
+        seq = (row.max_seq + 1) if row and row.max_seq is not None else 0
+
+        session.execute(
+            SimpleStatement(
+                "INSERT INTO signals (stream_run_id, sequence, signal_id, stream_id, signal_type, payload, "
+                "published_at, source_run_id, metadata) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                consistency_level=self.write_consistency,
+            ),
+            (
+                run_key,
+                seq,
+                signal_id,
+                stream_id,
+                signal_type,
+                json.dumps(payload),
+                now,
+                source_run_id,
+                json.dumps(metadata or {}),
+            ),
+        )
+        return seq
+
+    async def get_signals(
+        self,
+        stream_id: str,
+        after_sequence: int = 0,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Get signals from a stream after a given sequence number."""
+        session = self._ensure_connected()
+
+        rows = session.execute(
+            SimpleStatement(
+                "SELECT signal_id, stream_id, signal_type, payload, published_at, "
+                "sequence, source_run_id, stream_run_id, metadata FROM signals "
+                "WHERE stream_id = %s AND sequence >= %s LIMIT %s ALLOW FILTERING",
+                consistency_level=self.read_consistency,
+            ),
+            (stream_id, after_sequence, limit),
+        )
+
+        return [
+            {
+                "signal_id": row.signal_id,
+                "stream_id": row.stream_id,
+                "signal_type": row.signal_type,
+                "payload": json.loads(row.payload) if row.payload else {},
+                "published_at": row.published_at.isoformat() if row.published_at else None,
+                "sequence": row.sequence,
+                "source_run_id": row.source_run_id,
+                "stream_run_id": row.stream_run_id,
+                "metadata": json.loads(row.metadata) if row.metadata else {},
+            }
+            for row in rows
+        ]
+
+    async def register_stream_subscription(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        signal_types: list[str],
+    ) -> None:
+        """Register a stream step's subscription to signal types."""
+        session = self._ensure_connected()
+        now = datetime.now(UTC)
+
+        session.execute(
+            SimpleStatement(
+                "INSERT INTO stream_subscriptions (stream_id, step_run_id, signal_types, "
+                "status, created_at) VALUES (%s, %s, %s, %s, %s)",
+                consistency_level=self.write_consistency,
+            ),
+            (stream_id, step_run_id, json.dumps(signal_types), "waiting", now),
+        )
+
+    async def get_waiting_steps(
+        self,
+        stream_id: str,
+        signal_type: str,
+    ) -> list[dict]:
+        """Get step_run_ids waiting for a specific signal type on a stream."""
+        session = self._ensure_connected()
+
+        rows = session.execute(
+            SimpleStatement(
+                "SELECT stream_id, step_run_id, signal_types, status, created_at "
+                "FROM stream_subscriptions WHERE stream_id = %s",
+                consistency_level=self.read_consistency,
+            ),
+            (stream_id,),
+        )
+
+        result = []
+        for row in rows:
+            if row.status != "waiting":
+                continue
+            types = json.loads(row.signal_types) if row.signal_types else []
+            if signal_type in types:
+                result.append(
+                    {
+                        "stream_id": row.stream_id,
+                        "step_run_id": row.step_run_id,
+                        "signal_types": types,
+                        "status": row.status,
+                        "created_at": row.created_at.isoformat() if row.created_at else None,
+                    }
+                )
+        return result
+
+    async def update_subscription_status(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        status: str,
+    ) -> None:
+        """Update a subscription's status."""
+        session = self._ensure_connected()
+
+        session.execute(
+            SimpleStatement(
+                "UPDATE stream_subscriptions SET status = %s "
+                "WHERE stream_id = %s AND step_run_id = %s",
+                consistency_level=self.write_consistency,
+            ),
+            (status, stream_id, step_run_id),
+        )
+
+    async def acknowledge_signal(
+        self,
+        signal_id: str,
+        step_run_id: str,
+    ) -> None:
+        """Acknowledge that a signal has been processed by a step."""
+        session = self._ensure_connected()
+        now = datetime.now(UTC)
+
+        session.execute(
+            SimpleStatement(
+                "INSERT INTO signal_acknowledgments (signal_id, step_run_id, acknowledged_at) "
+                "VALUES (%s, %s, %s)",
+                consistency_level=self.write_consistency,
+            ),
+            (signal_id, step_run_id, now),
+        )
+
+    async def get_pending_signals(
+        self,
+        stream_id: str,
+        step_run_id: str,
+    ) -> list[dict]:
+        """Get signals that arrived for a step but haven't been acknowledged."""
+        session = self._ensure_connected()
+
+        # Get subscription
+        sub_row = session.execute(
+            SimpleStatement(
+                "SELECT signal_types FROM stream_subscriptions "
+                "WHERE stream_id = %s AND step_run_id = %s",
+                consistency_level=self.read_consistency,
+            ),
+            (stream_id, step_run_id),
+        ).one()
+
+        if not sub_row:
+            return []
+
+        signal_types = json.loads(sub_row.signal_types) if sub_row.signal_types else []
+        if not signal_types:
+            return []
+
+        # Get all signals for the stream
+        signals = session.execute(
+            SimpleStatement(
+                "SELECT signal_id, stream_id, signal_type, payload, published_at, "
+                "sequence, source_run_id, metadata FROM signals "
+                "WHERE stream_id = %s ORDER BY sequence ASC",
+                consistency_level=self.read_consistency,
+            ),
+            (stream_id,),
+        )
+
+        pending = []
+        for sig in signals:
+            if sig.signal_type not in signal_types:
+                continue
+
+            # Check if acknowledged
+            ack = session.execute(
+                SimpleStatement(
+                    "SELECT signal_id FROM signal_acknowledgments "
+                    "WHERE signal_id = %s AND step_run_id = %s",
+                    consistency_level=self.read_consistency,
+                ),
+                (sig.signal_id, step_run_id),
+            ).one()
+
+            if ack is None:
+                pending.append(
+                    {
+                        "signal_id": sig.signal_id,
+                        "stream_id": sig.stream_id,
+                        "signal_type": sig.signal_type,
+                        "payload": json.loads(sig.payload) if sig.payload else {},
+                        "published_at": sig.published_at.isoformat() if sig.published_at else None,
+                        "sequence": sig.sequence,
+                        "source_run_id": sig.source_run_id,
+                        "metadata": json.loads(sig.metadata) if sig.metadata else {},
+                    }
+                )
+
+        return pending

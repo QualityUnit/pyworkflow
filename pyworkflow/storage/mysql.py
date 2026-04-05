@@ -131,6 +131,34 @@ class MySQLMigrationRunner(MigrationRunner):
                                   AND JSON_EXTRACT(data, '$.step_id') IS NOT NULL
                             """)
                         # If table doesn't exist, schema will be created with step_id column
+                    elif migration.version == 3:
+                        # V3: Restructure signals table — PK changes to (stream_id, stream_run_id, sequence).
+                        await cur.execute("DROP TABLE IF EXISTS signal_acknowledgments")
+                        await cur.execute("DROP TABLE IF EXISTS signals")
+                        await cur.execute("""
+                            CREATE TABLE signals (
+                                stream_run_id VARCHAR(255) NOT NULL,
+                                sequence INT NOT NULL,
+                                signal_id VARCHAR(255) NOT NULL,
+                                stream_id VARCHAR(255) NOT NULL,
+                                signal_type VARCHAR(255) NOT NULL,
+                                payload LONGTEXT NOT NULL DEFAULT '{}',
+                                published_at DATETIME(6) NOT NULL,
+                                source_run_id VARCHAR(255),
+                                metadata LONGTEXT DEFAULT '{}',
+                                PRIMARY KEY (stream_id, stream_run_id, sequence),
+                                UNIQUE INDEX idx_signals_signal_id (signal_id),
+                                /* stream_id is not FK-constrained — streams are code-defined */
+                            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                        """)
+                        await cur.execute("""
+                            CREATE TABLE signal_acknowledgments (
+                                signal_id VARCHAR(255) NOT NULL,
+                                step_run_id VARCHAR(255) NOT NULL,
+                                acknowledged_at DATETIME(6) NOT NULL,
+                                PRIMARY KEY (signal_id, step_run_id)
+                            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                        """)
                     elif migration.up_func:
                         await migration.up_func(conn)
                     elif migration.up_sql and migration.up_sql != "SELECT 1":
@@ -363,6 +391,58 @@ class MySQLStorageBackend(StorageBackend):
                         data LONGTEXT NOT NULL,
                         created_at DATETIME(6) NOT NULL,
                         updated_at DATETIME(6) NOT NULL
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """)
+
+            # Streams table
+            await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS streams (
+                        stream_id VARCHAR(255) PRIMARY KEY,
+                        status VARCHAR(50) NOT NULL DEFAULT 'active',
+                        created_at DATETIME(6) NOT NULL,
+                        metadata LONGTEXT DEFAULT '{}'
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """)
+
+            # Signals table
+            await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS signals (
+                        stream_run_id VARCHAR(255) NOT NULL,
+                        sequence INT NOT NULL,
+                        signal_id VARCHAR(255) NOT NULL,
+                        stream_id VARCHAR(255) NOT NULL,
+                        signal_type VARCHAR(255) NOT NULL,
+                        payload LONGTEXT NOT NULL DEFAULT '{}',
+                        published_at DATETIME(6) NOT NULL,
+                        source_run_id VARCHAR(255),
+                        metadata LONGTEXT DEFAULT '{}',
+                        PRIMARY KEY (stream_id, stream_run_id, sequence),
+                        UNIQUE INDEX idx_signals_signal_id (signal_id),
+                        /* stream_id is not FK-constrained — streams are code-defined */
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """)
+
+            # Stream subscriptions table
+            await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS stream_subscriptions (
+                        stream_id VARCHAR(255) NOT NULL,
+                        step_run_id VARCHAR(255) NOT NULL,
+                        signal_types LONGTEXT NOT NULL DEFAULT '[]',
+                        status VARCHAR(50) NOT NULL DEFAULT 'waiting',
+                        created_at DATETIME(6) NOT NULL,
+                        PRIMARY KEY (stream_id, step_run_id),
+                        INDEX idx_subscriptions_status (stream_id, status),
+                        /* stream_id is not FK-constrained — streams are code-defined */
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """)
+
+            # Signal acknowledgments table
+            await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS signal_acknowledgments (
+                        signal_id VARCHAR(255) NOT NULL,
+                        step_run_id VARCHAR(255) NOT NULL,
+                        acknowledged_at DATETIME(6) NOT NULL,
+                        PRIMARY KEY (signal_id, step_run_id)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """)
 
@@ -1445,3 +1525,264 @@ class MySQLStorageBackend(StorageBackend):
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
+
+    # Stream Operations
+
+    async def create_stream(self, stream_id: str, metadata: dict | None = None) -> None:
+        """Create a new stream."""
+        pool = self._ensure_connected()
+        now = datetime.now(UTC)
+
+        async with pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
+                    INSERT INTO streams (stream_id, status, created_at, metadata)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                (stream_id, "active", now, json.dumps(metadata or {})),
+            )
+
+    async def get_stream(self, stream_id: str) -> dict | None:
+        """Get a stream by ID."""
+        pool = self._ensure_connected()
+
+        async with pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute(
+                "SELECT stream_id, status, created_at, metadata FROM streams WHERE stream_id = %s",
+                (stream_id,),
+            )
+            row = await cur.fetchone()
+
+        if row is None:
+            return None
+        return {
+            "stream_id": row[0],
+            "status": row[1],
+            "created_at": row[2].isoformat() if row[2] else None,
+            "metadata": json.loads(row[3]) if row[3] else {},
+        }
+
+    async def publish_signal(
+        self,
+        signal_id: str,
+        stream_id: str,
+        signal_type: str,
+        payload: dict,
+        source_run_id: str | None = None,
+        stream_run_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> int:
+        """Publish a signal to a stream."""
+        pool = self._ensure_connected()
+        now = datetime.now(UTC)
+
+        async with pool.acquire() as conn, conn.cursor() as cur:
+            # Get next sequence number (scoped per stream_run_id)
+            await cur.execute(
+                "SELECT COALESCE(MAX(sequence), -1) + 1 FROM signals WHERE stream_run_id = %s",
+                (stream_run_id,),
+            )
+            row = await cur.fetchone()
+            seq = row[0] if row else 0
+
+            await cur.execute(
+                """
+                    INSERT INTO signals (signal_id, stream_id, signal_type, payload, published_at, sequence, source_run_id, stream_run_id, metadata)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                (
+                    signal_id,
+                    stream_id,
+                    signal_type,
+                    json.dumps(payload),
+                    now,
+                    seq,
+                    source_run_id,
+                    stream_run_id,
+                    json.dumps(metadata or {}),
+                ),
+            )
+        return seq
+
+    async def get_signals(
+        self,
+        stream_id: str,
+        after_sequence: int = 0,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Get signals from a stream after a given sequence number."""
+        pool = self._ensure_connected()
+
+        async with pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
+                    SELECT signal_id, stream_id, signal_type, payload, published_at,
+                           sequence, source_run_id, stream_run_id, metadata
+                    FROM signals
+                    WHERE stream_id = %s AND sequence >= %s
+                    ORDER BY sequence ASC
+                    LIMIT %s
+                    """,
+                (stream_id, after_sequence, limit),
+            )
+            rows = await cur.fetchall()
+
+        return [
+            {
+                "signal_id": row[0],
+                "stream_id": row[1],
+                "signal_type": row[2],
+                "payload": json.loads(row[3]) if row[3] else {},
+                "published_at": row[4].isoformat() if row[4] else None,
+                "sequence": row[5],
+                "source_run_id": row[6],
+                "stream_run_id": row[7],
+                "metadata": json.loads(row[8]) if row[8] else {},
+            }
+            for row in rows
+        ]
+
+    async def register_stream_subscription(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        signal_types: list[str],
+    ) -> None:
+        """Register a stream step's subscription to signal types."""
+        pool = self._ensure_connected()
+        now = datetime.now(UTC)
+
+        async with pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
+                    INSERT INTO stream_subscriptions (stream_id, step_run_id, signal_types, status, created_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE signal_types = VALUES(signal_types), status = VALUES(status)
+                    """,
+                (stream_id, step_run_id, json.dumps(signal_types), "waiting", now),
+            )
+
+    async def get_waiting_steps(
+        self,
+        stream_id: str,
+        signal_type: str,
+    ) -> list[dict]:
+        """Get step_run_ids waiting for a specific signal type on a stream."""
+        pool = self._ensure_connected()
+
+        async with pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
+                    SELECT stream_id, step_run_id, signal_types, status, created_at
+                    FROM stream_subscriptions
+                    WHERE stream_id = %s AND status = 'waiting'
+                    """,
+                (stream_id,),
+            )
+            rows = await cur.fetchall()
+
+        result = []
+        for row in rows:
+            types = json.loads(row[2]) if row[2] else []
+            if signal_type in types:
+                result.append(
+                    {
+                        "stream_id": row[0],
+                        "step_run_id": row[1],
+                        "signal_types": types,
+                        "status": row[3],
+                        "created_at": row[4].isoformat() if row[4] else None,
+                    }
+                )
+        return result
+
+    async def update_subscription_status(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        status: str,
+    ) -> None:
+        """Update a subscription's status."""
+        pool = self._ensure_connected()
+
+        async with pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
+                    UPDATE stream_subscriptions SET status = %s
+                    WHERE stream_id = %s AND step_run_id = %s
+                    """,
+                (status, stream_id, step_run_id),
+            )
+
+    async def acknowledge_signal(
+        self,
+        signal_id: str,
+        step_run_id: str,
+    ) -> None:
+        """Acknowledge that a signal has been processed by a step."""
+        pool = self._ensure_connected()
+        now = datetime.now(UTC)
+
+        async with pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
+                    INSERT IGNORE INTO signal_acknowledgments (signal_id, step_run_id, acknowledged_at)
+                    VALUES (%s, %s, %s)
+                    """,
+                (signal_id, step_run_id, now),
+            )
+
+    async def get_pending_signals(
+        self,
+        stream_id: str,
+        step_run_id: str,
+    ) -> list[dict]:
+        """Get signals that arrived for a step but haven't been acknowledged."""
+        pool = self._ensure_connected()
+
+        async with pool.acquire() as conn, conn.cursor() as cur:
+            # Get subscription
+            await cur.execute(
+                "SELECT signal_types FROM stream_subscriptions WHERE stream_id = %s AND step_run_id = %s",
+                (stream_id, step_run_id),
+            )
+            sub_row = await cur.fetchone()
+
+            if not sub_row:
+                return []
+
+            signal_types = json.loads(sub_row[0]) if sub_row[0] else []
+            if not signal_types:
+                return []
+
+            placeholders = ",".join("%s" for _ in signal_types)
+            await cur.execute(
+                f"""
+                    SELECT s.signal_id, s.stream_id, s.signal_type, s.payload, s.published_at,
+                           s.sequence, s.source_run_id, s.stream_run_id, s.metadata
+                    FROM signals s
+                    WHERE s.stream_id = %s AND s.signal_type IN ({placeholders})
+                      AND NOT EXISTS (
+                          SELECT 1 FROM signal_acknowledgments a
+                          WHERE a.signal_id = s.signal_id AND a.step_run_id = %s
+                      )
+                    ORDER BY s.sequence ASC
+                    """,
+                (stream_id, *signal_types, step_run_id),
+            )
+            rows = await cur.fetchall()
+
+        return [
+            {
+                "signal_id": row[0],
+                "stream_id": row[1],
+                "signal_type": row[2],
+                "payload": json.loads(row[3]) if row[3] else {},
+                "published_at": row[4].isoformat() if row[4] else None,
+                "sequence": row[5],
+                "source_run_id": row[6],
+                "stream_run_id": row[7],
+                "metadata": json.loads(row[8]) if row[8] else {},
+            }
+            for row in rows
+        ]

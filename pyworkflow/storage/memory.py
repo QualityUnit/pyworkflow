@@ -54,7 +54,7 @@ class InMemoryStorageBackend(StorageBackend):
         # Stream storage
         self._streams: dict[str, dict] = {}  # stream_id -> stream data
         self._signals: dict[str, list[dict]] = {}  # stream_id -> list of signal dicts
-        self._signal_sequences: dict[str, int] = {}  # stream_id -> next sequence
+        self._signal_sequences: dict[str, int] = {}  # stream_run_id -> next sequence
         self._subscriptions: dict[tuple[str, str], dict] = {}  # (stream_id, step_run_id) -> sub
         self._acknowledgments: set[tuple[str, str]] = set()  # (signal_id, step_run_id)
         self._checkpoints: dict[str, dict] = {}  # step_run_id -> checkpoint data
@@ -651,7 +651,6 @@ class InMemoryStorageBackend(StorageBackend):
                 "metadata": metadata or {},
             }
             self._signals[stream_id] = []
-            self._signal_sequences[stream_id] = 0
 
     async def get_stream(self, stream_id: str) -> dict | None:
         """Get a stream by ID."""
@@ -665,16 +664,21 @@ class InMemoryStorageBackend(StorageBackend):
         signal_type: str,
         payload: dict,
         source_run_id: str | None = None,
+        stream_run_id: str | None = None,
         metadata: dict | None = None,
     ) -> int:
         """Publish a signal to a stream."""
         with self._lock:
             if stream_id not in self._signals:
                 self._signals[stream_id] = []
-                self._signal_sequences[stream_id] = 0
 
-            seq = self._signal_sequences[stream_id]
-            self._signal_sequences[stream_id] += 1
+            # Sequence scoped per stream_run_id
+            run_key = stream_run_id or stream_id
+            if run_key not in self._signal_sequences:
+                self._signal_sequences[run_key] = 0
+
+            seq = self._signal_sequences[run_key]
+            self._signal_sequences[run_key] += 1
 
             signal_data = {
                 "signal_id": signal_id,
@@ -684,6 +688,7 @@ class InMemoryStorageBackend(StorageBackend):
                 "published_at": datetime.now(UTC).isoformat(),
                 "sequence": seq,
                 "source_run_id": source_run_id,
+                "stream_run_id": stream_run_id,
                 "metadata": metadata or {},
             }
             self._signals[stream_id].append(signal_data)
@@ -701,6 +706,40 @@ class InMemoryStorageBackend(StorageBackend):
             filtered = [s for s in signals if (s.get("sequence", 0)) >= after_sequence]
             filtered.sort(key=lambda s: s.get("sequence", 0))
             return filtered[:limit]
+
+    async def query_stream_signals(
+        self,
+        stream_id: str,
+        stream_run_id: str,
+        *,
+        source_run_id: str | None = None,
+        signal_type: str | None = None,
+        after_sequence: int | None = None,
+        before_sequence: int | None = None,
+        last_n: int | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Query signals from a stream with rich filtering."""
+        with self._lock:
+            signals = list(self._signals.get(stream_id, []))
+
+        # Apply filters
+        filtered = [s for s in signals if s.get("stream_run_id") == stream_run_id]
+        if source_run_id is not None:
+            filtered = [s for s in filtered if s.get("source_run_id") == source_run_id]
+        if signal_type is not None:
+            filtered = [s for s in filtered if s.get("signal_type") == signal_type]
+        if last_n is None:
+            if after_sequence is not None:
+                filtered = [s for s in filtered if s.get("sequence", 0) >= after_sequence]
+            if before_sequence is not None:
+                filtered = [s for s in filtered if s.get("sequence", 0) <= before_sequence]
+
+        filtered.sort(key=lambda s: s.get("sequence", 0))
+
+        if last_n is not None:
+            return filtered[-min(last_n, 200) :]
+        return filtered[: min(limit, 200)]
 
     async def register_stream_subscription(
         self,
@@ -731,6 +770,19 @@ class InMemoryStorageBackend(StorageBackend):
                 if sid == stream_id and sub["status"] == "waiting":
                     if signal_type in sub["signal_types"]:
                         result.append(sub)
+            return result
+
+    async def get_subscriptions_for_stream(
+        self,
+        stream_id: str,
+        signal_type: str,
+    ) -> list[dict]:
+        """Get ALL subscriptions for a signal type, regardless of status."""
+        with self._lock:
+            result = []
+            for (sid, _), sub in self._subscriptions.items():
+                if sid == stream_id and signal_type in sub["signal_types"]:
+                    result.append(sub)
             return result
 
     async def update_subscription_status(

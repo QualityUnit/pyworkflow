@@ -64,6 +64,10 @@ class FileStorageBackend(StorageBackend):
         self.checkpoints_dir = self.base_path / "checkpoints"
         self.locks_dir = self.base_path / ".locks"
         self._token_index_file = self.base_path / "_token_index.json"
+        self.streams_dir = self.base_path / "streams"
+        self.signals_dir = self.base_path / "signals"
+        self.subscriptions_dir = self.base_path / "subscriptions"
+        self.acknowledgments_dir = self.base_path / "acknowledgments"
 
         # Create directories
         for dir_path in [
@@ -74,6 +78,10 @@ class FileStorageBackend(StorageBackend):
             self.schedules_dir,
             self.checkpoints_dir,
             self.locks_dir,
+            self.streams_dir,
+            self.signals_dir,
+            self.subscriptions_dir,
+            self.acknowledgments_dir,
         ]:
             dir_path.mkdir(parents=True, exist_ok=True)
 
@@ -1046,3 +1054,261 @@ class FileStorageBackend(StorageBackend):
                     checkpoint_file.unlink()
 
         await asyncio.to_thread(_delete)
+
+    # Stream Operations
+
+    async def create_stream(self, stream_id: str, metadata: dict | None = None) -> None:
+        """Create a new stream."""
+        stream_file = self.streams_dir / f"{stream_id}.json"
+        lock_file = self.locks_dir / f"stream_{stream_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _write() -> None:
+            with lock:
+                if stream_file.exists():
+                    raise ValueError(f"Stream {stream_id} already exists")
+                stream_data = {
+                    "stream_id": stream_id,
+                    "status": "active",
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "metadata": metadata or {},
+                }
+                stream_file.write_text(json.dumps(stream_data, indent=2))
+
+        await asyncio.to_thread(_write)
+
+    async def get_stream(self, stream_id: str) -> dict | None:
+        """Get a stream by ID."""
+        stream_file = self.streams_dir / f"{stream_id}.json"
+
+        if not stream_file.exists():
+            return None
+
+        lock_file = self.locks_dir / f"stream_{stream_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _read() -> dict | None:
+            with lock:
+                if not stream_file.exists():
+                    return None
+                content = stream_file.read_text()
+                if not content.strip():
+                    return None
+                return json.loads(content)
+
+        return await asyncio.to_thread(_read)
+
+    async def publish_signal(
+        self,
+        signal_id: str,
+        stream_id: str,
+        signal_type: str,
+        payload: dict,
+        source_run_id: str | None = None,
+        stream_run_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> int:
+        """Publish a signal to a stream."""
+        lock_file = self.locks_dir / f"signals_{stream_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _write() -> int:
+            with lock:
+                # Read existing signals for this stream to get next sequence
+                signals_file = self.signals_dir / f"{stream_id}.json"
+                signals = []
+                if signals_file.exists():
+                    content = signals_file.read_text()
+                    if content.strip():
+                        signals = json.loads(content)
+
+                # Sequence scoped per stream_run_id
+                run_key = stream_run_id
+                seq = (
+                    max(
+                        (
+                            s.get("sequence", -1)
+                            for s in signals
+                            if s.get("stream_run_id", "") == run_key
+                        ),
+                        default=-1,
+                    )
+                    + 1
+                )
+
+                signal_data = {
+                    "signal_id": signal_id,
+                    "stream_id": stream_id,
+                    "signal_type": signal_type,
+                    "payload": payload,
+                    "published_at": datetime.now(UTC).isoformat(),
+                    "sequence": seq,
+                    "source_run_id": source_run_id,
+                    "stream_run_id": stream_run_id,
+                    "metadata": metadata or {},
+                }
+                signals.append(signal_data)
+                signals_file.write_text(json.dumps(signals, indent=2))
+                return seq
+
+        return await asyncio.to_thread(_write)
+
+    async def get_signals(
+        self,
+        stream_id: str,
+        after_sequence: int = 0,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Get signals from a stream after a given sequence number."""
+        signals_file = self.signals_dir / f"{stream_id}.json"
+
+        if not signals_file.exists():
+            return []
+
+        lock_file = self.locks_dir / f"signals_{stream_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _read() -> list[dict]:
+            with lock:
+                if not signals_file.exists():
+                    return []
+                content = signals_file.read_text()
+                if not content.strip():
+                    return []
+                signals = json.loads(content)
+                filtered = [s for s in signals if s.get("sequence", 0) >= after_sequence]
+                filtered.sort(key=lambda s: s.get("sequence", 0))
+                return filtered[:limit]
+
+        return await asyncio.to_thread(_read)
+
+    async def register_stream_subscription(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        signal_types: list[str],
+    ) -> None:
+        """Register a stream step's subscription to signal types."""
+        sub_file = self.subscriptions_dir / f"{stream_id}__{step_run_id}.json"
+        lock_file = self.locks_dir / f"sub_{stream_id}_{step_run_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _write() -> None:
+            with lock:
+                sub_data = {
+                    "stream_id": stream_id,
+                    "step_run_id": step_run_id,
+                    "signal_types": signal_types,
+                    "status": "waiting",
+                    "created_at": datetime.now(UTC).isoformat(),
+                }
+                sub_file.write_text(json.dumps(sub_data, indent=2))
+
+        await asyncio.to_thread(_write)
+
+    async def get_waiting_steps(
+        self,
+        stream_id: str,
+        signal_type: str,
+    ) -> list[dict]:
+        """Get step_run_ids waiting for a specific signal type on a stream."""
+
+        def _read() -> list[dict]:
+            result = []
+            for sub_file in self.subscriptions_dir.glob(f"{stream_id}__*.json"):
+                content = sub_file.read_text()
+                if not content.strip():
+                    continue
+                sub = json.loads(content)
+                if sub.get("status") == "waiting" and signal_type in sub.get("signal_types", []):
+                    result.append(sub)
+            return result
+
+        return await asyncio.to_thread(_read)
+
+    async def update_subscription_status(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        status: str,
+    ) -> None:
+        """Update a subscription's status."""
+        sub_file = self.subscriptions_dir / f"{stream_id}__{step_run_id}.json"
+        lock_file = self.locks_dir / f"sub_{stream_id}_{step_run_id}.lock"
+        lock = FileLock(str(lock_file))
+
+        def _update() -> None:
+            with lock:
+                if not sub_file.exists():
+                    return
+                content = sub_file.read_text()
+                if not content.strip():
+                    return
+                sub = json.loads(content)
+                sub["status"] = status
+                sub_file.write_text(json.dumps(sub, indent=2))
+
+        await asyncio.to_thread(_update)
+
+    async def acknowledge_signal(
+        self,
+        signal_id: str,
+        step_run_id: str,
+    ) -> None:
+        """Acknowledge that a signal has been processed by a step."""
+        ack_file = self.acknowledgments_dir / f"{signal_id}__{step_run_id}.json"
+
+        def _write() -> None:
+            ack_data = {
+                "signal_id": signal_id,
+                "step_run_id": step_run_id,
+                "acknowledged_at": datetime.now(UTC).isoformat(),
+            }
+            ack_file.write_text(json.dumps(ack_data, indent=2))
+
+        await asyncio.to_thread(_write)
+
+    async def get_pending_signals(
+        self,
+        stream_id: str,
+        step_run_id: str,
+    ) -> list[dict]:
+        """Get signals that arrived for a step but haven't been acknowledged."""
+
+        def _read() -> list[dict]:
+            # Get subscription
+            sub_file = self.subscriptions_dir / f"{stream_id}__{step_run_id}.json"
+            if not sub_file.exists():
+                return []
+
+            content = sub_file.read_text()
+            if not content.strip():
+                return []
+            sub = json.loads(content)
+            signal_types = sub.get("signal_types", [])
+            if not signal_types:
+                return []
+
+            # Get all signals for stream
+            signals_file = self.signals_dir / f"{stream_id}.json"
+            if not signals_file.exists():
+                return []
+
+            sig_content = signals_file.read_text()
+            if not sig_content.strip():
+                return []
+            signals = json.loads(sig_content)
+
+            # Filter by type and check acknowledgments
+            pending = []
+            for sig in signals:
+                if sig.get("signal_type") not in signal_types:
+                    continue
+                ack_file = self.acknowledgments_dir / f"{sig['signal_id']}__{step_run_id}.json"
+                if not ack_file.exists():
+                    pending.append(sig)
+
+            pending.sort(key=lambda s: s.get("sequence", 0))
+            return pending
+
+        return await asyncio.to_thread(_read)

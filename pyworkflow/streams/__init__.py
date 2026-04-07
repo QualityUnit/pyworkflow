@@ -31,6 +31,7 @@ from pyworkflow.streams.context import (  # noqa: F401
     get_checkpoint,
     get_current_signal,
     save_checkpoint,
+    set_result,
     suspend,
     terminate,
 )
@@ -64,6 +65,7 @@ __all__ = [
     "StreamWorkflowResult",
     "terminate",
     "suspend",
+    "set_result",
     "Signal",
     "Stream",
     "StreamStepContext",

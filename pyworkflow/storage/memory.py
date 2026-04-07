@@ -851,7 +851,7 @@ class InMemoryStorageBackend(StorageBackend):
         with self._lock:
             result = []
             for (sid, _), sub in self._subscriptions.items():
-                if sid == stream_id and sub["status"] == "waiting":
+                if sid == stream_id and sub["status"] in ("waiting", "suspended"):
                     if signal_type in sub["signal_types"]:
                         result.append(sub)
             return result

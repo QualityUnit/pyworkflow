@@ -31,7 +31,28 @@ async def terminate() -> None:
     The dispatcher will set the subscription status to ``terminated`` after
     the lifecycle function returns, and will not invoke this step again.
     """
-    _post_return_state.set({"status": "terminated"})
+    state = _post_return_state.get() or {}
+    state = dict(state)
+    state["status"] = "terminated"
+    _post_return_state.set(state)
+
+
+async def set_result(value: Any) -> None:
+    """Attach a result payload to the current stream step.
+
+    The dispatcher persists this payload to the subscription row after the
+    lifecycle function returns. ``run_stream_workflow`` exposes it on
+    ``StreamWorkflowResult.step_results`` so the parent ``@workflow`` can
+    read step output without going through a checkpoint.
+
+    Replaces ``save_checkpoint`` for the "communicate completion to parent"
+    use case. Plain ``dict``-shaped values serialize via the storage
+    backend's JSON column.
+    """
+    state = _post_return_state.get() or {}
+    state = dict(state)
+    state["result"] = value
+    _post_return_state.set(state)
 
 
 async def suspend(
@@ -53,13 +74,16 @@ async def suspend(
             the step back to ``waiting``. Defaults to the step's existing
             ``signals=`` map.
     """
-    _post_return_state.set(
+    state = _post_return_state.get() or {}
+    state = dict(state)
+    state.update(
         {
             "status": "suspended",
             "reason": reason,
             "resume_signals": list(resume_signals) if resume_signals else None,
         }
     )
+    _post_return_state.set(state)
 
 
 def consume_post_return_state() -> dict | None:

@@ -120,10 +120,39 @@ async def emit(
         except Exception:
             pass  # Non-critical: event logging is best-effort from caller context
 
-    # Dispatch signal to waiting steps
-    from pyworkflow.streams.dispatcher import dispatch_signal
+    # Dispatch signal to waiting steps. Prefer enqueueing a celery task so
+    # the parent worker (the one that called emit() from inside a workflow)
+    # is not held while step lifecycles run; fall back to inline dispatch
+    # for in-process / test environments where celery is unavailable.
+    dispatched_via_celery = False
+    try:
+        from pyworkflow.celery.tasks import dispatch_stream_signal_task
+        from pyworkflow.storage.config import storage_to_config
 
-    await dispatch_signal(signal, storage)
+        storage_config = storage_to_config(storage)
+        dispatch_stream_signal_task.apply_async(
+            kwargs={
+                "signal_id": signal_id,
+                "stream_id": stream_id,
+                "signal_type": signal_type,
+                "payload": payload_data,
+                "sequence": sequence,
+                "source_run_id": source_run_id,
+                "stream_run_id": stream_run_id,
+                "metadata": metadata or {},
+                "storage_config": storage_config,
+            }
+        )
+        dispatched_via_celery = True
+    except Exception as e:  # noqa: BLE001
+        logger.debug(
+            f"[emit] celery dispatch unavailable, falling back to inline: {e}"
+        )
+
+    if not dispatched_via_celery:
+        from pyworkflow.streams.dispatcher import dispatch_signal
+
+        await dispatch_signal(signal, storage)
 
     return signal
 

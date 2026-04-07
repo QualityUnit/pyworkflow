@@ -207,6 +207,45 @@ class PostgresMigrationRunner(MigrationRunner):
                     "CREATE INDEX IF NOT EXISTS idx_scheduled_signals_due "
                     "ON scheduled_signals(delivered, due_at)"
                 )
+            elif migration.version == 6:
+                # V6: parent linkage columns on stream_subscriptions so the
+                # stream-step dispatcher can resume the parent @workflow via
+                # resume_hook() instead of pinning a worker on an asyncio.Event.
+                await conn.execute("""
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT FROM information_schema.tables
+                            WHERE table_name = 'stream_subscriptions'
+                        ) AND NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'stream_subscriptions'
+                              AND column_name = 'parent_run_id'
+                        ) THEN
+                            ALTER TABLE stream_subscriptions
+                                ADD COLUMN parent_run_id TEXT NULL,
+                                ADD COLUMN parent_hook_token TEXT NULL;
+                        END IF;
+                    END $$
+                """)
+            elif migration.version == 7:
+                # V7: result column on stream_subscriptions for step output payloads.
+                await conn.execute("""
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT FROM information_schema.tables
+                            WHERE table_name = 'stream_subscriptions'
+                        ) AND NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'stream_subscriptions'
+                              AND column_name = 'result'
+                        ) THEN
+                            ALTER TABLE stream_subscriptions
+                                ADD COLUMN result JSONB NULL;
+                        END IF;
+                    END $$
+                """)
             elif migration.up_func:
                 await migration.up_func(conn)
             elif migration.up_sql and migration.up_sql != "SELECT 1":
@@ -558,6 +597,9 @@ class PostgresStorageBackend(StorageBackend):
                     signal_types JSONB NOT NULL DEFAULT '[]',
                     status TEXT NOT NULL DEFAULT 'waiting',
                     stream_run_id TEXT,
+                    parent_run_id TEXT,
+                    parent_hook_token TEXT,
+                    result JSONB,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     PRIMARY KEY (stream_id, step_run_id)
                 )
@@ -1974,6 +2016,73 @@ class PostgresStorageBackend(StorageBackend):
                 datetime.now(UTC),
             )
 
+    async def set_subscription_result(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        result: Any,
+    ) -> None:
+        """Persist a stream step's result payload on its subscription row."""
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE stream_subscriptions
+                   SET result = $3::jsonb
+                 WHERE stream_id = $1 AND step_run_id = $2
+                """,
+                stream_id,
+                step_run_id,
+                json.dumps(result),
+            )
+
+    async def set_stream_parent_link(
+        self,
+        stream_id: str,
+        stream_run_id: str,
+        parent_run_id: str,
+        parent_hook_token: str,
+    ) -> None:
+        """Record (parent_run_id, parent_hook_token) on every subscription
+        for this stream run so the dispatcher can call resume_hook() when
+        the stream reaches a terminal aggregate state."""
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE stream_subscriptions
+                   SET parent_run_id = $3, parent_hook_token = $4
+                 WHERE stream_id = $1 AND stream_run_id = $2
+                """,
+                stream_id,
+                stream_run_id,
+                parent_run_id,
+                parent_hook_token,
+            )
+
+    async def get_stream_parent_link(
+        self,
+        stream_id: str,
+        stream_run_id: str,
+    ) -> tuple[str, str] | None:
+        """Return (parent_run_id, parent_hook_token) for a stream run, if set."""
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT parent_run_id, parent_hook_token
+                  FROM stream_subscriptions
+                 WHERE stream_id = $1 AND stream_run_id = $2
+                   AND parent_run_id IS NOT NULL
+                 LIMIT 1
+                """,
+                stream_id,
+                stream_run_id,
+            )
+            if row and row["parent_run_id"] and row["parent_hook_token"]:
+                return (row["parent_run_id"], row["parent_hook_token"])
+            return None
+
     async def get_subscription_states(
         self,
         stream_id: str,
@@ -1986,7 +2095,7 @@ class PostgresStorageBackend(StorageBackend):
             if stream_run_id is None:
                 rows = await conn.fetch(
                     """
-                    SELECT stream_id, step_run_id, status, stream_run_id
+                    SELECT stream_id, step_run_id, status, stream_run_id, result
                     FROM stream_subscriptions
                     WHERE stream_id = $1
                     """,
@@ -1995,10 +2104,10 @@ class PostgresStorageBackend(StorageBackend):
             else:
                 rows = await conn.fetch(
                     """
-                    SELECT stream_id, step_run_id, status, stream_run_id
+                    SELECT stream_id, step_run_id, status, stream_run_id, result
                     FROM stream_subscriptions
                     WHERE stream_id = $1
-                      AND (stream_run_id = $2 OR stream_run_id IS NULL)
+                      AND stream_run_id = $2
                     """,
                     stream_id,
                     stream_run_id,
@@ -2010,6 +2119,7 @@ class PostgresStorageBackend(StorageBackend):
                 "step_run_id": row["step_run_id"],
                 "status": row["status"],
                 "stream_run_id": row["stream_run_id"],
+                "result": json.loads(row["result"]) if row["result"] else None,
             }
             for row in rows
         ]
@@ -2092,19 +2202,32 @@ class PostgresStorageBackend(StorageBackend):
         self,
         stream_id: str,
         signal_type: str,
+        stream_run_id: str | None = None,
     ) -> list[dict]:
         """Get step_run_ids waiting for a specific signal type on a stream."""
         pool = await self._get_pool()
 
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT stream_id, step_run_id, signal_types, status, created_at
-                FROM stream_subscriptions
-                WHERE stream_id = $1 AND status = 'waiting'
-                """,
-                stream_id,
-            )
+            if stream_run_id is not None:
+                rows = await conn.fetch(
+                    """
+                    SELECT stream_id, step_run_id, signal_types, status, created_at
+                    FROM stream_subscriptions
+                    WHERE stream_id = $1 AND status IN ('waiting', 'suspended')
+                      AND stream_run_id = $2
+                    """,
+                    stream_id,
+                    stream_run_id,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT stream_id, step_run_id, signal_types, status, created_at
+                    FROM stream_subscriptions
+                    WHERE stream_id = $1 AND status IN ('waiting', 'suspended')
+                    """,
+                    stream_id,
+                )
 
         result = []
         for row in rows:
@@ -2125,19 +2248,31 @@ class PostgresStorageBackend(StorageBackend):
         self,
         stream_id: str,
         signal_type: str,
+        stream_run_id: str | None = None,
     ) -> list[dict]:
         """Get ALL subscriptions for a signal type, regardless of status."""
         pool = await self._get_pool()
 
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT stream_id, step_run_id, signal_types, status, created_at
-                FROM stream_subscriptions
-                WHERE stream_id = $1
-                """,
-                stream_id,
-            )
+            if stream_run_id is not None:
+                rows = await conn.fetch(
+                    """
+                    SELECT stream_id, step_run_id, signal_types, status, created_at
+                    FROM stream_subscriptions
+                    WHERE stream_id = $1 AND stream_run_id = $2
+                    """,
+                    stream_id,
+                    stream_run_id,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT stream_id, step_run_id, signal_types, status, created_at
+                    FROM stream_subscriptions
+                    WHERE stream_id = $1
+                    """,
+                    stream_id,
+                )
 
         result = []
         for row in rows:

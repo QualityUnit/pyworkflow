@@ -110,6 +110,97 @@ class CitusMigrationRunner(PostgresMigrationRunner):
                 # Re-distribute the new tables
                 await conn.execute("SELECT create_distributed_table('signals', 'stream_run_id')")
                 await conn.execute("SELECT create_reference_table('signal_acknowledgments')")
+            elif migration.version == 4:
+                # V4: Drop FK constraints referencing streams table.
+                # Citus never created these FKs (cross-shard FKs unsupported),
+                # so this is a no-op but we still record the version.
+                pass
+            elif migration.version == 5:
+                # V5: Add stream_run_id to stream_subscriptions + scheduled_signals table
+                await conn.execute("""
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT FROM information_schema.tables
+                            WHERE table_name = 'stream_subscriptions'
+                        ) AND NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'stream_subscriptions'
+                              AND column_name = 'stream_run_id'
+                        ) THEN
+                            ALTER TABLE stream_subscriptions ADD COLUMN stream_run_id TEXT NULL;
+                        END IF;
+                    END $$
+                """)
+                await conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_subscriptions_stream_run "
+                    "ON stream_subscriptions(stream_id, stream_run_id)"
+                )
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS scheduled_signals (
+                        id TEXT PRIMARY KEY,
+                        stream_id TEXT NOT NULL,
+                        signal_type TEXT NOT NULL,
+                        payload JSONB NOT NULL DEFAULT '{}',
+                        due_at TIMESTAMPTZ NOT NULL,
+                        stream_run_id TEXT,
+                        metadata JSONB DEFAULT '{}',
+                        delivered BOOLEAN NOT NULL DEFAULT FALSE,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """)
+                await conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_scheduled_signals_due "
+                    "ON scheduled_signals(delivered, due_at)"
+                )
+                # Distribute as reference table if not already distributed
+                already = await conn.fetchval("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM pg_dist_partition dp
+                        JOIN pg_class c ON dp.logicalrelid = c.oid
+                        WHERE c.relname = 'scheduled_signals'
+                    )
+                """)
+                if not already:
+                    await conn.execute(
+                        "SELECT create_reference_table('scheduled_signals')"
+                    )
+            elif migration.version == 6:
+                # V6: Add parent_run_id + parent_hook_token to stream_subscriptions
+                await conn.execute("""
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT FROM information_schema.tables
+                            WHERE table_name = 'stream_subscriptions'
+                        ) AND NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'stream_subscriptions'
+                              AND column_name = 'parent_run_id'
+                        ) THEN
+                            ALTER TABLE stream_subscriptions
+                                ADD COLUMN parent_run_id TEXT NULL,
+                                ADD COLUMN parent_hook_token TEXT NULL;
+                        END IF;
+                    END $$
+                """)
+            elif migration.version == 7:
+                await conn.execute("""
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT FROM information_schema.tables
+                            WHERE table_name = 'stream_subscriptions'
+                        ) AND NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'stream_subscriptions'
+                              AND column_name = 'result'
+                        ) THEN
+                            ALTER TABLE stream_subscriptions
+                                ADD COLUMN result JSONB NULL;
+                        END IF;
+                    END $$
+                """)
             elif migration.up_func:
                 await migration.up_func(conn)
             elif migration.up_sql and migration.up_sql != "SELECT 1":
@@ -410,12 +501,39 @@ class CitusStorageBackend(PostgresStorageBackend):
                     step_run_id TEXT NOT NULL,
                     signal_types JSONB NOT NULL DEFAULT '[]',
                     status TEXT NOT NULL DEFAULT 'waiting',
+                    stream_run_id TEXT NULL,
+                    parent_run_id TEXT NULL,
+                    parent_hook_token TEXT NULL,
+                    result JSONB NULL,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     PRIMARY KEY (stream_id, step_run_id)
                 )
             """)
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON stream_subscriptions(stream_id, status)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_subscriptions_stream_run "
+                "ON stream_subscriptions(stream_id, stream_run_id)"
+            )
+
+            # scheduled_signals — reference table (polled globally by runtime)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS scheduled_signals (
+                    id TEXT PRIMARY KEY,
+                    stream_id TEXT NOT NULL,
+                    signal_type TEXT NOT NULL,
+                    payload JSONB NOT NULL DEFAULT '{}',
+                    due_at TIMESTAMPTZ NOT NULL,
+                    stream_run_id TEXT,
+                    metadata JSONB DEFAULT '{}',
+                    delivered BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_scheduled_signals_due "
+                "ON scheduled_signals(delivered, due_at)"
             )
 
             # signal_acknowledgments — reference table (needs cross-shard joins)
@@ -496,3 +614,7 @@ class CitusStorageBackend(PostgresStorageBackend):
             # signal_acknowledgments: reference table (needs cross-shard joins)
             if "signal_acknowledgments" not in distributed:
                 await conn.execute("SELECT create_reference_table('signal_acknowledgments')")
+
+            # scheduled_signals: reference table (polled globally by runtime)
+            if "scheduled_signals" not in distributed:
+                await conn.execute("SELECT create_reference_table('scheduled_signals')")

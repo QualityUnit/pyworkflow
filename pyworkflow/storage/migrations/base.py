@@ -330,3 +330,28 @@ _v5_migration = Migration(
     up_sql="SELECT 1",  # Placeholder, actual migration is in backend runners
 )
 register_migration(_v5_migration)
+
+
+# Version 6: Add parent linkage columns to stream_subscriptions so that
+# stream-step dispatchers running in separate Celery tasks can resume
+# the parent @workflow via resume_hook() instead of pinning a worker.
+_v6_migration = Migration(
+    version=6,
+    description=(
+        "Add parent_run_id + parent_hook_token to stream_subscriptions "
+        "for hook-based parent workflow resumption"
+    ),
+    up_sql="SELECT 1",  # Placeholder, actual migration is in backend runners
+)
+register_migration(_v6_migration)
+
+
+# Version 7: Add result JSONB column to stream_subscriptions so stream
+# steps can publish their output payload back to the parent @workflow
+# via run_stream_workflow's return value (no checkpoint round-trip).
+_v7_migration = Migration(
+    version=7,
+    description="Add result column to stream_subscriptions for step output payloads",
+    up_sql="SELECT 1",  # Placeholder, actual migration is in backend runners
+)
+register_migration(_v7_migration)

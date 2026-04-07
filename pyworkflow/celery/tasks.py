@@ -2840,3 +2840,106 @@ def run_data_retention_task(self: SingletonWorkflowTask) -> dict[str, Any]:
     count = run_async(backend.delete_old_runs(cutoff))
     logger.info("Data retention complete: deleted {} runs", count)
     return {"deleted": count, "skipped": False}
+
+
+# =============================================================================
+# Stream-only celery tasks (private to pyworkflow.streams)
+# =============================================================================
+
+
+@celery_app.task(
+    name="pyworkflow.streams.dispatch_signal",
+    queue="pyworkflow.default",
+)
+def dispatch_stream_signal_task(
+    signal_id: str,
+    stream_id: str,
+    signal_type: str,
+    payload: dict[str, Any],
+    sequence: int,
+    source_run_id: str | None,
+    stream_run_id: str | None,
+    metadata: dict[str, Any] | None,
+    storage_config: dict[str, Any] | None = None,
+) -> None:
+    """Dispatch a previously persisted signal to its subscribed stream steps.
+
+    Reconstructs the Signal from inline kwargs (avoids a DB round-trip),
+    runs the dispatcher logic on the worker, and after step execution
+    completes calls _maybe_resume_stream_parent so the parent @workflow
+    can be resumed via resume_hook() if the aggregate is now terminal.
+    """
+    from pyworkflow.celery.app import _configure_worker_logging
+
+    _configure_worker_logging()
+
+    storage = _get_storage_backend(storage_config)
+
+    from pyworkflow.streams.dispatcher import dispatch_signal
+    from pyworkflow.streams.signal import Signal
+
+    signal = Signal(
+        signal_id=signal_id,
+        stream_id=stream_id,
+        signal_type=signal_type,
+        payload=payload or {},
+        sequence=sequence,
+        source_run_id=source_run_id,
+        stream_run_id=stream_run_id,
+        metadata=metadata or {},
+    )
+
+    run_async(dispatch_signal(signal, storage))
+
+
+@celery_app.task(
+    name="pyworkflow.streams.drain_scheduled_signals",
+    base=SingletonWorkflowTask,
+    bind=True,
+    queue="pyworkflow.default",
+    release_lock_on_failure=True,
+    lock_expiry=300,
+)
+def drain_scheduled_signals_task(self: SingletonWorkflowTask) -> dict[str, Any]:
+    """Periodic task: deliver any due rows from the ``scheduled_signals``
+    table by calling :func:`pyworkflow.streams.emit.emit`. Replaces the
+    in-process poller that previously ran inside ``run_stream_workflow``."""
+    from pyworkflow.celery.app import _configure_worker_logging
+    from pyworkflow.config import get_config
+
+    _configure_worker_logging()
+
+    config = get_config()
+    storage = config.storage
+    if storage is None:
+        return {"delivered": 0, "skipped": True}
+
+    async def _drain() -> int:
+        from pyworkflow.streams.emit import emit
+
+        try:
+            due = await storage.fetch_due_scheduled_signals(datetime.now(UTC), limit=100)
+        except NotImplementedError:
+            return 0
+        delivered = 0
+        for row in due or []:
+            try:
+                await emit(
+                    stream_id=row["stream_id"],
+                    signal_type=row["signal_type"],
+                    payload=row.get("payload") or {},
+                    storage=storage,
+                    stream_run_id=row.get("stream_run_id"),
+                    metadata=row.get("metadata") or {},
+                )
+                await storage.mark_scheduled_signal_delivered(row["id"])
+                delivered += 1
+            except Exception as e:  # noqa: BLE001
+                logger.error(
+                    f"[drain_scheduled_signals] failed to deliver "
+                    f"{row.get('id')}: {e}"
+                )
+        return delivered
+
+    count = run_async(_drain())
+    return {"delivered": count, "skipped": False}

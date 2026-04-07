@@ -31,13 +31,6 @@ async def _set_subscription_status(
     """
     await storage.update_subscription_status(stream_id, step_run_id, status)
 
-    try:
-        from pyworkflow.streams.runtime import notify_runtime
-
-        notify_runtime(stream_run_id)
-    except Exception:  # noqa: BLE001 — notification is best-effort
-        pass
-
 
 async def dispatch_signal(signal: Signal, storage: Any) -> None:
     """
@@ -53,25 +46,40 @@ async def dispatch_signal(signal: Signal, storage: Any) -> None:
         storage: Storage backend
     """
     # Find waiting steps from storage
-    waiting_steps = await storage.get_waiting_steps(signal.stream_id, signal.signal_type)
+    waiting_steps = await storage.get_waiting_steps(
+        signal.stream_id, signal.signal_type, stream_run_id=signal.stream_run_id
+    )
 
     # Fallback: if no DB subscriptions exist, auto-register from in-memory registry.
     # Only do this if there are also no subscriptions in ANY status (e.g. "running")
     # to avoid creating duplicate subscriptions when a step is currently executing.
     if not waiting_steps:
-        all_subs = await storage.get_subscriptions_for_stream(signal.stream_id, signal.signal_type)
+        all_subs = await storage.get_subscriptions_for_stream(
+            signal.stream_id, signal.signal_type, stream_run_id=signal.stream_run_id
+        )
         if not all_subs:
             waiting_steps = await _ensure_subscriptions_from_registry(
-                signal.stream_id, signal.signal_type, storage
+                signal.stream_id,
+                signal.signal_type,
+                storage,
+                stream_run_id=signal.stream_run_id,
             )
 
     if not waiting_steps:
-        logger.debug(
-            f"No waiting steps for {signal.signal_type} on {signal.stream_id}",
+        logger.warning(
+            f"No waiting steps for {signal.signal_type} on {signal.stream_id} "
+            f"(stream_run_id={signal.stream_run_id})",
             stream_id=signal.stream_id,
             signal_type=signal.signal_type,
+            stream_run_id=signal.stream_run_id,
         )
         return
+
+    logger.info(
+        f"Dispatching {signal.signal_type} on {signal.stream_id} "
+        f"(stream_run_id={signal.stream_run_id}) to "
+        f"{[s['step_run_id'] for s in waiting_steps]}"
+    )
 
     for step_info in waiting_steps:
         # Skip terminated subscriptions entirely (dispatcher contract).
@@ -87,6 +95,69 @@ async def dispatch_signal(signal: Signal, storage: Any) -> None:
                 signal_id=signal.signal_id,
                 step_run_id=step_run_id,
             )
+
+    # After all step dispatches for this signal, check if the stream
+    # aggregate became terminal and resume the parent @workflow via hook.
+    await _maybe_resume_stream_parent(
+        signal.stream_id, signal.stream_run_id, storage
+    )
+
+
+async def _maybe_resume_stream_parent(
+    stream_id: str,
+    stream_run_id: str | None,
+    storage: Any,
+) -> None:
+    """Resume the parent @workflow via resume_hook() when the stream
+    aggregate has reached a terminal (completed/suspended) state.
+
+    No-op if no parent linkage has been recorded yet (the parent will
+    self-resume from its own ``on_created`` race-check) or if the
+    aggregate is still running.
+    """
+    if not stream_run_id or stream_run_id == "__none__":
+        return
+    try:
+        from pyworkflow.streams.runtime import _compute_aggregate
+
+        states = await storage.get_subscription_states(stream_id, stream_run_id)
+    except NotImplementedError:
+        return
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[_maybe_resume_stream_parent] aggregate read failed: {e}")
+        return
+
+    aggregate, _suspended = _compute_aggregate(states)
+    if aggregate not in ("completed", "suspended"):
+        return
+
+    try:
+        link = await storage.get_stream_parent_link(stream_id, stream_run_id)
+    except NotImplementedError:
+        return
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[_maybe_resume_stream_parent] link read failed: {e}")
+        return
+
+    if not link:
+        # Parent hasn't recorded its hook token yet — its on_created
+        # callback will see the terminal aggregate and self-resume.
+        return
+
+    parent_run_id, hook_token = link
+    try:
+        from pyworkflow.primitives.resume_hook import resume_hook
+
+        await resume_hook(hook_token, {"aggregate": aggregate}, storage=storage)
+        logger.info(
+            f"[_maybe_resume_stream_parent] resumed parent {parent_run_id} "
+            f"(stream_run_id={stream_run_id}, aggregate={aggregate})"
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            f"[_maybe_resume_stream_parent] resume_hook failed for "
+            f"{parent_run_id}: {e}"
+        )
 
 
 async def _dispatch_to_step(
@@ -129,6 +200,7 @@ async def _dispatch_to_step(
                 published_at=signal.published_at,
                 sequence=signal.sequence,
                 source_run_id=signal.source_run_id,
+                stream_run_id=signal.stream_run_id,
                 metadata=signal.metadata,
             )
         except ValidationError as e:
@@ -263,6 +335,20 @@ async def _resume_step(
     )
     state_token = _post_return_state.set(None)
 
+    # Set up a transient pyworkflow workflow context so emit() can resolve
+    # source_run_id and tools that call get_context() (e.g. query_run_events)
+    # see the parent workflow's run_id and storage.
+    from pyworkflow.context import reset_context, set_context
+    from pyworkflow.context.local import LocalContext
+
+    wf_ctx = LocalContext(
+        run_id=signal.source_run_id or step_run_id,
+        workflow_name=signal.stream_id,
+        storage=storage,
+        durable=False,
+    )
+    wf_ctx_token = set_context(wf_ctx)
+
     post_state: dict | None = None
     try:
         await step_meta.func()
@@ -274,6 +360,8 @@ async def _resume_step(
             exc_info=True,
         )
     finally:
+        with contextlib.suppress(Exception):
+            reset_context(wf_ctx_token)
         _post_return_state.reset(state_token)
         reset_stream_step_context(tokens)
 
@@ -285,6 +373,14 @@ async def _resume_step(
         if requested in ("terminated", "suspended"):
             next_status = requested
 
+    # Persist any result the lifecycle published via set_result(), so the
+    # parent @workflow can read it from StreamWorkflowResult.step_results.
+    if post_state is not None and "result" in post_state:
+        with contextlib.suppress(Exception):
+            await storage.set_subscription_result(
+                signal.stream_id, step_run_id, post_state["result"]
+            )
+
     with contextlib.suppress(Exception):
         await _set_subscription_status(
             signal.stream_id,
@@ -293,6 +389,57 @@ async def _resume_step(
             storage,
             stream_run_id=signal.stream_run_id,
         )
+
+    # Drain any signals that arrived while this step was running. Without
+    # this, a worker that emits e.g. task.completed mid-supervisor-turn would
+    # be silently dropped (no waiting subscription at delivery time, no
+    # redelivery on transition back to waiting).
+    if next_status == "waiting":
+        with contextlib.suppress(Exception):
+            await _drain_pending_signals_for_step(
+                signal.stream_id, step_run_id, signal.stream_run_id, storage
+            )
+
+
+async def _drain_pending_signals_for_step(
+    stream_id: str,
+    step_run_id: str,
+    stream_run_id: str | None,
+    storage: Any,
+) -> None:
+    """Re-dispatch any unacknowledged signals for this step that were
+    published while it was in ``running`` state."""
+    try:
+        pending = await storage.get_pending_signals(stream_id, step_run_id)
+    except NotImplementedError:
+        return
+    if not pending:
+        return
+    for row in pending:
+        # Only signals belonging to the same stream_run_id should re-fire
+        # this step instance.
+        if stream_run_id is not None and row.get("stream_run_id") != stream_run_id:
+            continue
+        try:
+            pending_signal = Signal(
+                signal_id=row["signal_id"],
+                stream_id=row["stream_id"],
+                signal_type=row["signal_type"],
+                payload=row.get("payload") or {},
+                sequence=row.get("sequence", 0),
+                source_run_id=row.get("source_run_id"),
+                stream_run_id=row.get("stream_run_id"),
+                metadata=row.get("metadata") or {},
+            )
+            logger.info(
+                f"[drain_pending] redelivering {pending_signal.signal_type} "
+                f"to {step_run_id} (stream_run_id={stream_run_id})"
+            )
+            await dispatch_signal(pending_signal, storage)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                f"[drain_pending] failed to redeliver {row.get('signal_id')}: {e}"
+            )
 
 
 async def _cancel_step(
@@ -330,6 +477,7 @@ async def _ensure_subscriptions_from_registry(
     stream_id: str,
     signal_type: str,
     storage: Any,
+    stream_run_id: str | None = None,
 ) -> list[dict]:
     """Auto-register DB subscriptions from the in-memory registry.
 
@@ -346,13 +494,20 @@ async def _ensure_subscriptions_from_registry(
         if signal_type not in step_meta.signal_types:
             continue
 
-        step_run_id = f"stream_step_{step_meta.name}_{uuid.uuid4().hex[:12]}"
+        # Deterministic per (stream_run_id, step_name) so replays of the
+        # same stream run reuse the same subscription row instead of
+        # piling up new ones.
+        if stream_run_id:
+            step_run_id = f"stream_step_{step_meta.name}_{stream_run_id}"
+        else:
+            step_run_id = f"stream_step_{step_meta.name}_{uuid.uuid4().hex[:12]}"
 
         try:
             await storage.register_stream_subscription(
                 stream_id=stream_id,
                 step_run_id=step_run_id,
                 signal_types=step_meta.signal_types,
+                stream_run_id=stream_run_id,
             )
             created.append(
                 {

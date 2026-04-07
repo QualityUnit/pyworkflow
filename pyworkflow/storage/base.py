@@ -7,6 +7,7 @@ across different backends (File, Redis, SQLite, PostgreSQL).
 
 from abc import ABC, abstractmethod
 from datetime import datetime
+from typing import Any
 
 from pyworkflow.engine.events import Event
 from pyworkflow.storage.schemas import (
@@ -860,6 +861,7 @@ class StorageBackend(ABC):
         self,
         stream_id: str,
         signal_type: str,
+        stream_run_id: str | None = None,
     ) -> list[dict]:
         """
         Get step_run_ids waiting for a specific signal type on a stream.
@@ -880,6 +882,7 @@ class StorageBackend(ABC):
         self,
         stream_id: str,
         signal_type: str,
+        stream_run_id: str | None = None,
     ) -> list[dict]:
         """
         Get ALL subscriptions for a signal type on a stream, regardless of status.
@@ -896,6 +899,40 @@ class StorageBackend(ABC):
         Returns:
             List of dicts with step subscription info
         """
+        raise NotImplementedError("This storage backend does not support streams")
+
+    async def set_subscription_result(
+        self,
+        stream_id: str,
+        step_run_id: str,
+        result: Any,
+    ) -> None:
+        """Persist a stream step's result payload on its subscription row.
+
+        Returned to the parent ``@workflow`` via
+        ``StreamWorkflowResult.step_results`` so it doesn't have to fish
+        through checkpoints to read step output.
+        """
+        raise NotImplementedError("This storage backend does not support streams")
+
+    async def set_stream_parent_link(
+        self,
+        stream_id: str,
+        stream_run_id: str,
+        parent_run_id: str,
+        parent_hook_token: str,
+    ) -> None:
+        """Record (parent_run_id, parent_hook_token) for a stream run so the
+        stream-step dispatcher can resume the parent @workflow via resume_hook()
+        once the stream reaches a terminal aggregate state."""
+        raise NotImplementedError("This storage backend does not support streams")
+
+    async def get_stream_parent_link(
+        self,
+        stream_id: str,
+        stream_run_id: str,
+    ) -> tuple[str, str] | None:
+        """Return the (parent_run_id, parent_hook_token) recorded for a stream run."""
         raise NotImplementedError("This storage backend does not support streams")
 
     async def update_subscription_status(

@@ -18,6 +18,27 @@ from pyworkflow.streams.signal import Signal
 from pyworkflow.streams.step_context import StreamStepContext
 
 
+async def _set_subscription_status(
+    stream_id: str,
+    step_run_id: str,
+    status: str,
+    storage: Any,
+    stream_run_id: str | None = None,
+) -> None:
+    """Update a subscription status AND notify any in-process runtime waiter.
+
+    Single write path for status transitions: storage + asyncio.Event.
+    """
+    await storage.update_subscription_status(stream_id, step_run_id, status)
+
+    try:
+        from pyworkflow.streams.runtime import notify_runtime
+
+        notify_runtime(stream_run_id)
+    except Exception:  # noqa: BLE001 — notification is best-effort
+        pass
+
+
 async def dispatch_signal(signal: Signal, storage: Any) -> None:
     """
     Dispatch a signal to all subscribed stream steps.
@@ -53,6 +74,9 @@ async def dispatch_signal(signal: Signal, storage: Any) -> None:
         return
 
     for step_info in waiting_steps:
+        # Skip terminated subscriptions entirely (dispatcher contract).
+        if step_info.get("status") in ("terminated", "completed"):
+            continue
         step_run_id = step_info["step_run_id"]
 
         try:
@@ -158,6 +182,29 @@ async def _dispatch_to_step(
         await _cancel_step(step_run_id, ctx.cancel_reason, storage)
         return
 
+    # If on_signal called ctx.terminate() / ctx.suspend() without resume,
+    # apply it directly (no lifecycle re-entry needed).
+    if ctx.terminate_requested and not ctx.should_resume:
+        with contextlib.suppress(Exception):
+            await _set_subscription_status(
+                signal.stream_id,
+                step_run_id,
+                "terminated",
+                storage,
+                stream_run_id=signal.stream_run_id,
+            )
+        return
+    if ctx.suspend_requested and not ctx.should_resume:
+        with contextlib.suppress(Exception):
+            await _set_subscription_status(
+                signal.stream_id,
+                step_run_id,
+                "suspended",
+                storage,
+                stream_run_id=signal.stream_run_id,
+            )
+        return
+
     # If resume was requested, trigger workflow resume
     if ctx.should_resume:
         await _resume_step(step_run_id, validated_signal, storage)
@@ -175,7 +222,11 @@ async def _resume_step(
     Instead, we directly execute the lifecycle function with the proper
     stream step context (signal, checkpoint, storage).
     """
-    from pyworkflow.streams.context import reset_stream_step_context, set_stream_step_context
+    from pyworkflow.streams.context import (
+        _post_return_state,
+        reset_stream_step_context,
+        set_stream_step_context,
+    )
 
     logger.info(
         f"Executing stream step {step_run_id}",
@@ -183,8 +234,14 @@ async def _resume_step(
         signal_type=signal.signal_type,
     )
 
-    # Update subscription status to running
-    await storage.update_subscription_status(signal.stream_id, step_run_id, "running")
+    # Update subscription status to running (notify runtime waiter)
+    await _set_subscription_status(
+        signal.stream_id,
+        step_run_id,
+        "running",
+        storage,
+        stream_run_id=signal.stream_run_id,
+    )
 
     # Find the step's lifecycle function from the registry
     step_meta = _find_step_metadata_for_run(step_run_id, signal.stream_id)
@@ -204,9 +261,12 @@ async def _resume_step(
         storage=storage,
         stream_run_id=signal.stream_run_id,
     )
+    state_token = _post_return_state.set(None)
 
+    post_state: dict | None = None
     try:
         await step_meta.func()
+        post_state = _post_return_state.get()
     except Exception as e:
         logger.error(
             f"Stream step lifecycle error for {step_run_id}: {e}",
@@ -214,11 +274,25 @@ async def _resume_step(
             exc_info=True,
         )
     finally:
+        _post_return_state.reset(state_token)
         reset_stream_step_context(tokens)
 
-    # Return subscription to waiting status for next signal
+    # Decide the post-return subscription status based on terminate()/suspend()
+    # ContextVar writes from the lifecycle body.
+    next_status = "waiting"
+    if post_state is not None:
+        requested = post_state.get("status")
+        if requested in ("terminated", "suspended"):
+            next_status = requested
+
     with contextlib.suppress(Exception):
-        await storage.update_subscription_status(signal.stream_id, step_run_id, "waiting")
+        await _set_subscription_status(
+            signal.stream_id,
+            step_run_id,
+            next_status,
+            storage,
+            stream_run_id=signal.stream_run_id,
+        )
 
 
 async def _cancel_step(

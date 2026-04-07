@@ -128,6 +128,65 @@ async def emit(
     return signal
 
 
+async def schedule_signal(
+    *,
+    stream_id: str,
+    signal_type: str,
+    payload: Any = None,
+    delay_seconds: float,
+    stream_run_id: str | None = None,
+    storage: Any = None,
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    """
+    Schedule a signal for future delivery.
+
+    The signal row is persisted with a ``due_at`` timestamp; the
+    :class:`StreamConsumer` polls ``fetch_due_scheduled_signals`` and calls
+    :func:`emit` on each due row.
+
+    Returns:
+        The scheduled-signal ID.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    if storage is None:
+        storage = _resolve_storage()
+    if storage is None:
+        raise RuntimeError(
+            "No storage backend available for schedule_signal(). "
+            "Either pass storage= or call pyworkflow.configure(storage=...)"
+        )
+
+    if isinstance(payload, BaseModel):
+        payload_data = payload.model_dump()
+    elif payload is None:
+        payload_data = {}
+    else:
+        payload_data = payload
+
+    if stream_run_id is None:
+        stream_run_id = _get_stream_run_id()
+
+    due_at = datetime.now(UTC) + timedelta(seconds=max(0.0, float(delay_seconds)))
+
+    sched_id = await storage.schedule_signal(
+        stream_id=stream_id,
+        signal_type=signal_type,
+        payload=payload_data,
+        due_at=due_at,
+        stream_run_id=stream_run_id,
+        metadata=metadata,
+    )
+    logger.info(
+        f"Signal scheduled: {signal_type} → {stream_id} in {delay_seconds}s",
+        sched_id=sched_id,
+        stream_id=stream_id,
+        signal_type=signal_type,
+    )
+    return sched_id
+
+
 def _resolve_storage() -> Any:
     """Try to resolve storage from workflow context or global config."""
     # Try workflow context first

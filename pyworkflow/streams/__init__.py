@@ -31,9 +31,11 @@ from pyworkflow.streams.context import (  # noqa: F401
     get_checkpoint,
     get_current_signal,
     save_checkpoint,
+    suspend,
+    terminate,
 )
 from pyworkflow.streams.decorator import stream_step, stream_workflow  # noqa: F401
-from pyworkflow.streams.emit import emit  # noqa: F401
+from pyworkflow.streams.emit import emit, schedule_signal  # noqa: F401
 from pyworkflow.streams.registry import (  # noqa: F401
     StreamMetadata,
     StreamStepMetadata,
@@ -44,6 +46,10 @@ from pyworkflow.streams.registry import (  # noqa: F401
     list_stream_steps,
     list_streams,
 )
+from pyworkflow.streams.runtime import (  # noqa: F401
+    StreamWorkflowResult,
+    run_stream_workflow,
+)
 from pyworkflow.streams.signal import Signal, Stream  # noqa: F401
 from pyworkflow.streams.step_context import StreamStepContext  # noqa: F401
 
@@ -53,6 +59,11 @@ __all__ = [
     "stream_step",
     # Core
     "emit",
+    "schedule_signal",
+    "run_stream_workflow",
+    "StreamWorkflowResult",
+    "terminate",
+    "suspend",
     "Signal",
     "Stream",
     "StreamStepContext",

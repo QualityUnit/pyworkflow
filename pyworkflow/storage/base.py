@@ -841,6 +841,7 @@ class StorageBackend(ABC):
         stream_id: str,
         step_run_id: str,
         signal_types: list[str],
+        stream_run_id: str | None = None,
     ) -> None:
         """
         Register a stream step's subscription to signal types.
@@ -909,10 +910,37 @@ class StorageBackend(ABC):
         Args:
             stream_id: Stream identifier
             step_run_id: The stream step's run ID
-            status: New status ("waiting", "running", "completed")
+            status: New status. One of:
+                - "waiting": ready for next signal
+                - "running": currently executing lifecycle
+                - "suspended": alive but waiting for an external resume condition
+                  (e.g. HITL). Contributes "suspended" to the stream-workflow
+                  aggregate state.
+                - "terminated": permanently done; dispatcher will skip it.
+                - "completed": legacy alias for "terminated".
 
         Raises:
             NotImplementedError: If backend doesn't support streams
+        """
+        raise NotImplementedError("This storage backend does not support streams")
+
+    async def get_subscription_states(
+        self,
+        stream_id: str,
+        stream_run_id: str | None = None,
+    ) -> list[dict]:
+        """
+        Return all subscriptions and their statuses for a stream.
+
+        Used by the stream-workflow runtime to compute the aggregate state
+        across all registered ``@stream_step``s.
+
+        Args:
+            stream_id: Stream identifier
+            stream_run_id: Optional stream run scope
+
+        Returns:
+            List of dicts with at least ``step_run_id`` and ``status`` keys.
         """
         raise NotImplementedError("This storage backend does not support streams")
 
@@ -952,6 +980,41 @@ class StorageBackend(ABC):
             NotImplementedError: If backend doesn't support streams
         """
         raise NotImplementedError("This storage backend does not support streams")
+
+    # Scheduled Signal Operations (for schedule_signal primitive)
+
+    async def schedule_signal(
+        self,
+        *,
+        stream_id: str,
+        signal_type: str,
+        payload: dict,
+        due_at: "datetime",  # noqa: F821  (forward ref; datetime imported by backends)
+        stream_run_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> str:
+        """
+        Persist a signal to be emitted at ``due_at``.
+
+        Used by the ``schedule_signal`` streams primitive for time-delayed
+        signal delivery (e.g. supervisor sleep/wakeup).
+
+        Returns:
+            Opaque scheduled-signal ID.
+        """
+        raise NotImplementedError("This storage backend does not support scheduled signals")
+
+    async def fetch_due_scheduled_signals(
+        self,
+        now: "datetime",  # noqa: F821
+        limit: int = 100,
+    ) -> list[dict]:
+        """Return scheduled signals whose ``due_at <= now`` and not yet delivered."""
+        raise NotImplementedError("This storage backend does not support scheduled signals")
+
+    async def mark_scheduled_signal_delivered(self, sched_id: str) -> None:
+        """Mark a scheduled signal as delivered so it is not emitted twice."""
+        raise NotImplementedError("This storage backend does not support scheduled signals")
 
     # Checkpoint Operations
 

@@ -65,7 +65,48 @@ class StreamConsumer:
             except Exception as e:
                 logger.error(f"Stream consumer error: {e}")
 
+            try:
+                await self._process_scheduled_signals()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Scheduled signal consumer error: {e}")
+
             await asyncio.sleep(self._poll_interval)
+
+    async def _process_scheduled_signals(self) -> None:
+        """Scan for due scheduled signals and emit them."""
+        from datetime import UTC, datetime
+
+        from pyworkflow.streams.emit import emit
+
+        fetch = getattr(self._storage, "fetch_due_scheduled_signals", None)
+        mark = getattr(self._storage, "mark_scheduled_signal_delivered", None)
+        if fetch is None or mark is None:
+            return  # backend doesn't support scheduled signals
+
+        try:
+            due = await fetch(datetime.now(UTC))
+        except NotImplementedError:
+            return
+
+        for row in due:
+            try:
+                await emit(
+                    stream_id=row["stream_id"],
+                    signal_type=row["signal_type"],
+                    payload=row.get("payload") or {},
+                    storage=self._storage,
+                    metadata=row.get("metadata") or {},
+                    stream_run_id=row.get("stream_run_id"),
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"Failed to emit scheduled signal {row.get('id')}: {e}")
+                continue
+            try:
+                await mark(row["id"])
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"Failed to mark scheduled signal delivered: {e}")
 
     async def _process_pending_signals(self) -> None:
         """Process any pending signals for subscribed steps."""

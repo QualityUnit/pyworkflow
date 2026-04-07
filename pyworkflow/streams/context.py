@@ -18,6 +18,57 @@ _current_stream_id: ContextVar[str | None] = ContextVar("_current_stream_id", de
 _current_storage: ContextVar[Any] = ContextVar("_current_storage", default=None)
 _current_stream_run_id: ContextVar[str | None] = ContextVar("_current_stream_run_id", default=None)
 
+# Post-return lifecycle state requested by terminate() / suspend() helpers.
+# The dispatcher reads this after the step lifecycle function returns to
+# decide whether to write "waiting", "suspended", or "terminated".
+_post_return_state: ContextVar[dict | None] = ContextVar("_post_return_state", default=None)
+
+
+async def terminate() -> None:
+    """
+    Mark the current stream step as permanently terminated.
+
+    The dispatcher will set the subscription status to ``terminated`` after
+    the lifecycle function returns, and will not invoke this step again.
+    """
+    _post_return_state.set({"status": "terminated"})
+
+
+async def suspend(
+    reason: str,
+    resume_signals: list[str] | None = None,
+) -> None:
+    """
+    Mark the current stream step as suspended.
+
+    The dispatcher will set the subscription status to ``suspended`` after
+    the lifecycle function returns. The stream workflow runtime aggregates
+    suspended steps and propagates a ``SuspensionSignal`` to the parent
+    ``@workflow``.
+
+    Args:
+        reason: Human-readable reason; also used as the SuspensionSignal
+            reason tag (e.g. ``"hitl:<hitl_id>"``).
+        resume_signals: Optional whitelist of signal types that may flip
+            the step back to ``waiting``. Defaults to the step's existing
+            ``signals=`` map.
+    """
+    _post_return_state.set(
+        {
+            "status": "suspended",
+            "reason": reason,
+            "resume_signals": list(resume_signals) if resume_signals else None,
+        }
+    )
+
+
+def consume_post_return_state() -> dict | None:
+    """Read and clear the pending post-return state for the current context."""
+    state = _post_return_state.get()
+    if state is not None:
+        _post_return_state.set(None)
+    return state
+
 
 def set_stream_step_context(
     step_run_id: str,

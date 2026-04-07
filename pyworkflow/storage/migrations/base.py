@@ -317,3 +317,16 @@ _v4_migration = Migration(
     up_sql="SELECT 1",  # Placeholder, actual migration is in backend runners
 )
 register_migration(_v4_migration)
+
+
+# Version 5: Add stream_run_id column to stream_subscriptions and a
+# scheduled_signals table for the schedule_signal() primitive.
+_v5_migration = Migration(
+    version=5,
+    description=(
+        "Add stream_run_id to stream_subscriptions (+index) and create "
+        "scheduled_signals table for time-delayed signal delivery"
+    ),
+    up_sql="SELECT 1",  # Placeholder, actual migration is in backend runners
+)
+register_migration(_v5_migration)

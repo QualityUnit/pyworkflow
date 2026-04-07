@@ -169,6 +169,44 @@ class PostgresMigrationRunner(MigrationRunner):
                 await conn.execute(
                     "ALTER TABLE IF EXISTS stream_subscriptions DROP CONSTRAINT IF EXISTS stream_subscriptions_stream_id_fkey"
                 )
+            elif migration.version == 5:
+                # V5: stream_run_id on stream_subscriptions + scheduled_signals table
+                await conn.execute("""
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT FROM information_schema.tables
+                            WHERE table_name = 'stream_subscriptions'
+                        ) AND NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'stream_subscriptions'
+                              AND column_name = 'stream_run_id'
+                        ) THEN
+                            ALTER TABLE stream_subscriptions ADD COLUMN stream_run_id TEXT NULL;
+                        END IF;
+                    END $$
+                """)
+                await conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_subscriptions_stream_run "
+                    "ON stream_subscriptions(stream_id, stream_run_id)"
+                )
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS scheduled_signals (
+                        id TEXT PRIMARY KEY,
+                        stream_id TEXT NOT NULL,
+                        signal_type TEXT NOT NULL,
+                        payload JSONB NOT NULL DEFAULT '{}',
+                        due_at TIMESTAMPTZ NOT NULL,
+                        stream_run_id TEXT,
+                        metadata JSONB DEFAULT '{}',
+                        delivered BOOLEAN NOT NULL DEFAULT FALSE,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """)
+                await conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_scheduled_signals_due "
+                    "ON scheduled_signals(delivered, due_at)"
+                )
             elif migration.up_func:
                 await migration.up_func(conn)
             elif migration.up_sql and migration.up_sql != "SELECT 1":
@@ -519,12 +557,36 @@ class PostgresStorageBackend(StorageBackend):
                     step_run_id TEXT NOT NULL,
                     signal_types JSONB NOT NULL DEFAULT '[]',
                     status TEXT NOT NULL DEFAULT 'waiting',
+                    stream_run_id TEXT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     PRIMARY KEY (stream_id, step_run_id)
                 )
             """)
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON stream_subscriptions(stream_id, status)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_subscriptions_stream_run "
+                "ON stream_subscriptions(stream_id, stream_run_id)"
+            )
+
+            # Scheduled signals table (for schedule_signal() primitive)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS scheduled_signals (
+                    id TEXT PRIMARY KEY,
+                    stream_id TEXT NOT NULL,
+                    signal_type TEXT NOT NULL,
+                    payload JSONB NOT NULL DEFAULT '{}',
+                    due_at TIMESTAMPTZ NOT NULL,
+                    stream_run_id TEXT,
+                    metadata JSONB DEFAULT '{}',
+                    delivered BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_scheduled_signals_due "
+                "ON scheduled_signals(delivered, due_at)"
             )
 
             # Signal acknowledgments table
@@ -1725,6 +1787,11 @@ class PostgresStorageBackend(StorageBackend):
         """Publish a signal to a stream."""
         pool = await self._get_pool()
         now = datetime.now(UTC)
+        # stream_run_id is part of the signals PK and cannot be NULL.
+        # Coerce missing values to a sentinel so legacy emit() callers
+        # (which never passed stream_run_id) keep working.
+        if not stream_run_id:
+            stream_run_id = "__none__"
 
         async with pool.acquire() as conn:
             # Get next sequence number (scoped per stream_run_id)
@@ -1885,6 +1952,7 @@ class PostgresStorageBackend(StorageBackend):
         stream_id: str,
         step_run_id: str,
         signal_types: list[str],
+        stream_run_id: str | None = None,
     ) -> None:
         """Register a stream step's subscription to signal types."""
         pool = await self._get_pool()
@@ -1892,16 +1960,132 @@ class PostgresStorageBackend(StorageBackend):
         async with pool.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO stream_subscriptions (stream_id, step_run_id, signal_types, status, created_at)
-                VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO stream_subscriptions
+                    (stream_id, step_run_id, signal_types, status, stream_run_id, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6)
                 ON CONFLICT (stream_id, step_run_id)
-                DO UPDATE SET signal_types = $3, status = $4
+                DO UPDATE SET signal_types = $3, status = $4, stream_run_id = $5
                 """,
                 stream_id,
                 step_run_id,
                 json.dumps(signal_types),
                 "waiting",
+                stream_run_id,
                 datetime.now(UTC),
+            )
+
+    async def get_subscription_states(
+        self,
+        stream_id: str,
+        stream_run_id: str | None = None,
+    ) -> list[dict]:
+        """Return all subscriptions and statuses for a stream run."""
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            if stream_run_id is None:
+                rows = await conn.fetch(
+                    """
+                    SELECT stream_id, step_run_id, status, stream_run_id
+                    FROM stream_subscriptions
+                    WHERE stream_id = $1
+                    """,
+                    stream_id,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT stream_id, step_run_id, status, stream_run_id
+                    FROM stream_subscriptions
+                    WHERE stream_id = $1
+                      AND (stream_run_id = $2 OR stream_run_id IS NULL)
+                    """,
+                    stream_id,
+                    stream_run_id,
+                )
+
+        return [
+            {
+                "stream_id": row["stream_id"],
+                "step_run_id": row["step_run_id"],
+                "status": row["status"],
+                "stream_run_id": row["stream_run_id"],
+            }
+            for row in rows
+        ]
+
+    async def schedule_signal(
+        self,
+        *,
+        stream_id: str,
+        signal_type: str,
+        payload: dict,
+        due_at: datetime,
+        stream_run_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> str:
+        """Persist a signal to be emitted at ``due_at``."""
+        import uuid as _uuid
+
+        sched_id = f"sched_{_uuid.uuid4().hex[:16]}"
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO scheduled_signals
+                    (id, stream_id, signal_type, payload, due_at, stream_run_id, metadata)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                sched_id,
+                stream_id,
+                signal_type,
+                json.dumps(payload or {}),
+                due_at,
+                stream_run_id,
+                json.dumps(metadata or {}),
+            )
+        return sched_id
+
+    async def fetch_due_scheduled_signals(
+        self,
+        now: datetime,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Return due, undelivered scheduled signals."""
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, stream_id, signal_type, payload, due_at, stream_run_id, metadata
+                FROM scheduled_signals
+                WHERE delivered = FALSE AND due_at <= $1
+                ORDER BY due_at ASC
+                LIMIT $2
+                """,
+                now,
+                limit,
+            )
+
+        return [
+            {
+                "id": row["id"],
+                "stream_id": row["stream_id"],
+                "signal_type": row["signal_type"],
+                "payload": json.loads(row["payload"]) if row["payload"] else {},
+                "due_at": row["due_at"],
+                "stream_run_id": row["stream_run_id"],
+                "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+            }
+            for row in rows
+        ]
+
+    async def mark_scheduled_signal_delivered(self, sched_id: str) -> None:
+        """Mark a scheduled signal as delivered."""
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE scheduled_signals SET delivered = TRUE WHERE id = $1",
+                sched_id,
             )
 
     async def get_waiting_steps(

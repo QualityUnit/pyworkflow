@@ -746,6 +746,7 @@ class InMemoryStorageBackend(StorageBackend):
         stream_id: str,
         step_run_id: str,
         signal_types: list[str],
+        stream_run_id: str | None = None,
     ) -> None:
         """Register a stream step's subscription to signal types."""
         with self._lock:
@@ -755,34 +756,136 @@ class InMemoryStorageBackend(StorageBackend):
                 "step_run_id": step_run_id,
                 "signal_types": signal_types,
                 "status": "waiting",
+                "stream_run_id": stream_run_id,
                 "created_at": datetime.now(UTC).isoformat(),
             }
+
+    async def get_subscription_states(
+        self,
+        stream_id: str,
+        stream_run_id: str | None = None,
+    ) -> list[dict]:
+        """Return all subscriptions and their statuses for a stream run."""
+        with self._lock:
+            result = []
+            for (sid, _), sub in self._subscriptions.items():
+                if sid != stream_id:
+                    continue
+                if stream_run_id is not None and sub.get("stream_run_id") not in (
+                    stream_run_id,
+                    None,
+                ):
+                    continue
+                result.append(
+                    {
+                        "stream_id": sub["stream_id"],
+                        "step_run_id": sub["step_run_id"],
+                        "status": sub["status"],
+                        "stream_run_id": sub.get("stream_run_id"),
+                    }
+                )
+            return result
+
+    async def schedule_signal(
+        self,
+        *,
+        stream_id: str,
+        signal_type: str,
+        payload: dict,
+        due_at: datetime,
+        stream_run_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> str:
+        """Persist a signal to be emitted at ``due_at``."""
+        import uuid as _uuid
+
+        with self._lock:
+            if not hasattr(self, "_scheduled_signals"):
+                self._scheduled_signals: dict[str, dict] = {}
+            sched_id = f"sched_{_uuid.uuid4().hex[:16]}"
+            self._scheduled_signals[sched_id] = {
+                "id": sched_id,
+                "stream_id": stream_id,
+                "signal_type": signal_type,
+                "payload": payload,
+                "due_at": due_at,
+                "stream_run_id": stream_run_id,
+                "metadata": metadata or {},
+                "delivered": False,
+            }
+            return sched_id
+
+    async def fetch_due_scheduled_signals(
+        self,
+        now: datetime,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Return scheduled signals whose ``due_at <= now`` and not delivered."""
+        with self._lock:
+            if not hasattr(self, "_scheduled_signals"):
+                return []
+            due = []
+            for row in self._scheduled_signals.values():
+                if row["delivered"]:
+                    continue
+                if row["due_at"] <= now:
+                    due.append(dict(row))
+                    if len(due) >= limit:
+                        break
+            return due
+
+    async def mark_scheduled_signal_delivered(self, sched_id: str) -> None:
+        with self._lock:
+            if not hasattr(self, "_scheduled_signals"):
+                return
+            row = self._scheduled_signals.get(sched_id)
+            if row:
+                row["delivered"] = True
 
     async def get_waiting_steps(
         self,
         stream_id: str,
         signal_type: str,
+        stream_run_id: str | None = None,
     ) -> list[dict]:
         """Get step_run_ids waiting for a specific signal type on a stream."""
         with self._lock:
             result = []
             for (sid, _), sub in self._subscriptions.items():
-                if sid == stream_id and sub["status"] == "waiting":
-                    if signal_type in sub["signal_types"]:
-                        result.append(sub)
+                if sid != stream_id:
+                    continue
+                if sub["status"] not in ("waiting", "suspended"):
+                    continue
+                if signal_type not in sub["signal_types"]:
+                    continue
+                if stream_run_id is not None and sub.get("stream_run_id") not in (
+                    stream_run_id,
+                    None,
+                ):
+                    continue
+                result.append(sub)
             return result
 
     async def get_subscriptions_for_stream(
         self,
         stream_id: str,
         signal_type: str,
+        stream_run_id: str | None = None,
     ) -> list[dict]:
         """Get ALL subscriptions for a signal type, regardless of status."""
         with self._lock:
             result = []
             for (sid, _), sub in self._subscriptions.items():
-                if sid == stream_id and signal_type in sub["signal_types"]:
-                    result.append(sub)
+                if sid != stream_id:
+                    continue
+                if signal_type not in sub["signal_types"]:
+                    continue
+                if stream_run_id is not None and sub.get("stream_run_id") not in (
+                    stream_run_id,
+                    None,
+                ):
+                    continue
+                result.append(sub)
             return result
 
     async def update_subscription_status(

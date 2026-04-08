@@ -32,6 +32,10 @@ class StreamStepContext:
         self._should_resume = False
         self._cancelled = False
         self._cancel_reason: str | None = None
+        self._terminate_requested = False
+        self._suspend_requested = False
+        self._suspend_reason: str | None = None
+        self._suspend_resume_signals: list[str] | None = None
 
     async def resume(self) -> None:
         """
@@ -62,6 +66,36 @@ class StreamStepContext:
             stream_id=self.stream_id,
             reason=reason,
         )
+
+    async def terminate(self) -> None:
+        """Mark the step as permanently terminated (no further invocations)."""
+        self._terminate_requested = True
+
+    async def suspend(
+        self,
+        reason: str,
+        resume_signals: list[str] | None = None,
+    ) -> None:
+        """Mark the step as suspended until an external resume condition."""
+        self._suspend_requested = True
+        self._suspend_reason = reason
+        self._suspend_resume_signals = list(resume_signals) if resume_signals else None
+
+    @property
+    def terminate_requested(self) -> bool:
+        return self._terminate_requested
+
+    @property
+    def suspend_requested(self) -> bool:
+        return self._suspend_requested
+
+    @property
+    def suspend_reason(self) -> str | None:
+        return self._suspend_reason
+
+    @property
+    def suspend_resume_signals(self) -> list[str] | None:
+        return self._suspend_resume_signals
 
     @property
     def should_resume(self) -> bool:

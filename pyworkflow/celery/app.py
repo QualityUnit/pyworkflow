@@ -335,6 +335,11 @@ def create_celery_app(
                 "schedule": timedelta(hours=24),
                 "options": {"queue": "pyworkflow.default"},
             },
+            "pyworkflow-streams-drain-scheduled": {
+                "task": "pyworkflow.streams.drain_scheduled_signals",
+                "schedule": timedelta(seconds=2),
+                "options": {"queue": "pyworkflow.default"},
+            },
         },
         # Logging
         "worker_log_format": "[%(asctime)s: %(levelname)s/%(processName)s] %(message)s",

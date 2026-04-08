@@ -1686,6 +1686,7 @@ class DynamoDBStorageBackend(StorageBackend):
         stream_id: str,
         step_run_id: str,
         signal_types: list[str],
+        stream_run_id: str | None = None,
     ) -> None:
         """Register a stream step's subscription to signal types."""
         async with self._get_client() as client:
@@ -1710,6 +1711,7 @@ class DynamoDBStorageBackend(StorageBackend):
         self,
         stream_id: str,
         signal_type: str,
+        stream_run_id: str | None = None,
     ) -> list[dict]:
         """Get step_run_ids waiting for a specific signal type on a stream."""
         async with self._get_client() as client:

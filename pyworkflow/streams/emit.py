@@ -120,12 +120,103 @@ async def emit(
         except Exception:
             pass  # Non-critical: event logging is best-effort from caller context
 
-    # Dispatch signal to waiting steps
-    from pyworkflow.streams.dispatcher import dispatch_signal
+    # Dispatch signal to waiting steps. Prefer enqueueing a celery task so
+    # the parent worker (the one that called emit() from inside a workflow)
+    # is not held while step lifecycles run; fall back to inline dispatch
+    # for in-process / test environments where celery is unavailable.
+    #
+    # The InMemoryStorageBackend holds subscriptions in process-local state,
+    # so a celery worker in a different process would not see them — always
+    # dispatch inline for in-memory storage.
+    dispatched_via_celery = False
+    if storage.__class__.__name__ != "InMemoryStorageBackend":
+        try:
+            from pyworkflow.celery.tasks import dispatch_stream_signal_task
+            from pyworkflow.storage.config import storage_to_config
 
-    await dispatch_signal(signal, storage)
+            storage_config = storage_to_config(storage)
+            dispatch_stream_signal_task.apply_async(
+                kwargs={
+                    "signal_id": signal_id,
+                    "stream_id": stream_id,
+                    "signal_type": signal_type,
+                    "payload": payload_data,
+                    "sequence": sequence,
+                    "source_run_id": source_run_id,
+                    "stream_run_id": stream_run_id,
+                    "metadata": metadata or {},
+                    "storage_config": storage_config,
+                }
+            )
+            dispatched_via_celery = True
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[emit] celery dispatch unavailable, falling back to inline: {e}")
+
+    if not dispatched_via_celery:
+        from pyworkflow.streams.dispatcher import dispatch_signal
+
+        await dispatch_signal(signal, storage)
 
     return signal
+
+
+async def schedule_signal(
+    *,
+    stream_id: str,
+    signal_type: str,
+    payload: Any = None,
+    delay_seconds: float,
+    stream_run_id: str | None = None,
+    storage: Any = None,
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    """
+    Schedule a signal for future delivery.
+
+    The signal row is persisted with a ``due_at`` timestamp; the
+    :class:`StreamConsumer` polls ``fetch_due_scheduled_signals`` and calls
+    :func:`emit` on each due row.
+
+    Returns:
+        The scheduled-signal ID.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    if storage is None:
+        storage = _resolve_storage()
+    if storage is None:
+        raise RuntimeError(
+            "No storage backend available for schedule_signal(). "
+            "Either pass storage= or call pyworkflow.configure(storage=...)"
+        )
+
+    if isinstance(payload, BaseModel):
+        payload_data = payload.model_dump()
+    elif payload is None:
+        payload_data = {}
+    else:
+        payload_data = payload
+
+    if stream_run_id is None:
+        stream_run_id = _get_stream_run_id()
+
+    due_at = datetime.now(UTC) + timedelta(seconds=max(0.0, float(delay_seconds)))
+
+    sched_id = await storage.schedule_signal(
+        stream_id=stream_id,
+        signal_type=signal_type,
+        payload=payload_data,
+        due_at=due_at,
+        stream_run_id=stream_run_id,
+        metadata=metadata,
+    )
+    logger.info(
+        f"Signal scheduled: {signal_type} → {stream_id} in {delay_seconds}s",
+        sched_id=sched_id,
+        stream_id=stream_id,
+        signal_type=signal_type,
+    )
+    return sched_id
 
 
 def _resolve_storage() -> Any:

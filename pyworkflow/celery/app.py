@@ -61,6 +61,82 @@ def _run_warmup_callable(dotted_path: str) -> None:
         )
 
 
+def _run_startup_migrations() -> None:
+    """Run pending DB migrations before the worker accepts tasks.
+
+    Loads storage configuration from environment variables, creates a throwaway
+    backend, calls ``connect()`` (which triggers ``_initialize_schema()`` →
+    ``run_migrations()``), and disconnects. The pool is bound to a temporary
+    event loop that lives only for this function, so the forked workers below
+    start with no inherited state.
+
+    Behavior:
+    - If ``PYWORKFLOW_STORAGE_TYPE`` is unset, or points at a schema-less backend
+      (``memory`` / ``file``), this is a no-op and tasks fall back to lazy init.
+    - If migrations raise, the exception propagates — the worker fails to start
+      rather than accepting tasks against a schema it can't read. That is the
+      desired failure mode: a restart loop is louder than silent corruption.
+    - Controllable via ``PYWORKFLOW_SKIP_STARTUP_MIGRATIONS=1`` for deployments
+      that intentionally migrate out-of-band (e.g. a dedicated job).
+    """
+    import asyncio
+
+    from loguru import logger as loguru_logger
+
+    if os.getenv("PYWORKFLOW_SKIP_STARTUP_MIGRATIONS", "").lower() in ("1", "true", "yes"):
+        loguru_logger.info(
+            "STARTUP_MIGRATIONS: skipped (PYWORKFLOW_SKIP_STARTUP_MIGRATIONS set)"
+        )
+        return
+
+    from pyworkflow.config import _load_env_storage_config
+
+    config = _load_env_storage_config()
+    if not config:
+        loguru_logger.info(
+            "STARTUP_MIGRATIONS: PYWORKFLOW_STORAGE_TYPE not set — skipping. "
+            "Migrations will run lazily on first task that touches storage."
+        )
+        return
+
+    storage_type = config.get("type")
+    if storage_type in ("memory", "file"):
+        loguru_logger.info(
+            f"STARTUP_MIGRATIONS: skipping for type={storage_type} (schema-less backend)"
+        )
+        return
+
+    loguru_logger.info(
+        f"STARTUP_MIGRATIONS: connecting to {storage_type} to apply pending migrations"
+    )
+
+    async def _run() -> None:
+        # Create the backend directly (bypassing the cache) so that the pool we
+        # open here does not leak into the forked workers' storage cache. The
+        # worker processes will each create their own pool on first task.
+        from pyworkflow.storage.config import _create_storage_backend
+
+        backend = _create_storage_backend(config)
+        try:
+            await backend.connect()
+        finally:
+            try:
+                if hasattr(backend, "disconnect"):
+                    await backend.disconnect()
+            except Exception as e:
+                loguru_logger.warning(f"STARTUP_MIGRATIONS: disconnect failed: {e}")
+
+    try:
+        asyncio.run(_run())
+    except Exception:
+        loguru_logger.opt(exception=True).error(
+            "STARTUP_MIGRATIONS: FAILED — worker will not start"
+        )
+        raise
+
+    loguru_logger.info("STARTUP_MIGRATIONS: completed successfully")
+
+
 def is_sentinel_url(url: str) -> bool:
     """Check if URL uses sentinel:// or sentinel+ssl:// protocol."""
     return url.startswith("sentinel://") or url.startswith("sentinel+ssl://")
@@ -419,6 +495,15 @@ def on_worker_init(**kwargs):
     warmup_path = os.getenv("PYWORKFLOW_WORKER_WARMUP")
     if warmup_path:
         _run_warmup_callable(warmup_path)
+
+    # Apply pending DB migrations once per pod, BEFORE any task is dispatched.
+    # This replaces the old lazy "first task triggers connect() triggers
+    # migrations" path, which was fragile: backend instances cached across
+    # restarts (or inherited via fork) would skip migrations entirely because
+    # _initialized was True without the migration check ever having run in
+    # this process. Running at startup makes migration state observable in
+    # the pod logs and fails the pod fast if the schema is incompatible.
+    _run_startup_migrations()
 
 
 @worker_process_init.connect

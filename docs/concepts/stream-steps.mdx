@@ -1,0 +1,264 @@
+---
+title: 'Stream Steps'
+description: 'Reactive, long-lived steps that subscribe to signals on a stream and resume on each arrival'
+---
+
+## What is a Stream Step?
+
+A stream step is a long-lived reactive unit that subscribes to a named stream and runs in response to **signals**. Unlike a regular `@step` — which runs once when called from a workflow — a `@stream_step` is materialized as a subscription row when its parent [stream workflow](/concepts/stream-workflows) starts, and is then re-invoked each time a matching signal arrives, until it explicitly terminates.
+
+```python
+from pyworkflow import stream_step
+from pyworkflow.streams import get_current_signal, set_result, terminate
+
+@stream_step(stream="agent_comms", signals=["task.assigned"])
+async def worker():
+    signal = await get_current_signal()
+    if signal is None:
+        # First start — no signal yet, just register and wait.
+        return
+
+    task_id = signal.payload["task_id"]
+    result = await do_work(task_id)
+
+    await set_result({"task_id": task_id, "result": result})
+    await terminate()
+```
+
+## Key Characteristics
+
+<CardGroup cols={2}>
+  <Card title="Signal-driven" icon="bolt">
+    The step body runs once on start and again on each matching signal arrival.
+  </Card>
+  <Card title="Stateful" icon="database">
+    Use `save_checkpoint()` / `get_checkpoint()` to carry state across resumes without rebuilding from scratch.
+  </Card>
+  <Card title="Suspendable" icon="pause">
+    `suspend()` parks the step and bubbles a `SuspensionSignal` up to the parent workflow — perfect for HITL.
+  </Card>
+  <Card title="Schema-aware" icon="shield-check">
+    Bind Pydantic models to signal types and the dispatcher validates payloads before delivery.
+  </Card>
+</CardGroup>
+
+## The Two Code Paths
+
+A stream step has **two** code paths the runtime invokes at different times:
+
+1. **`on_signal` callback** — runs on every matching signal arrival. It receives the raw `Signal` and a `StreamStepContext`. Its job is to decide whether to `resume()`, `cancel()`, `terminate()`, or `suspend()` — typically very lightweight.
+2. **The lifecycle function** (the decorated function itself) — runs on first start and again on each explicit `ctx.resume()`. This is where the actual work happens.
+
+If you don't pass an `on_signal`, the default callback (`_auto_resume_on_signal`) just calls `ctx.resume()` for every matching signal — which is the right thing 90% of the time.
+
+```python
+from pyworkflow import stream_step
+from pyworkflow.streams import get_current_signal, terminate
+
+# Custom on_signal: only resume on the high-priority variant.
+async def gate_priority(signal, ctx):
+    if signal.payload.get("priority") == "high":
+        await ctx.resume()
+    # Otherwise: do nothing — the signal is acked and the step stays waiting.
+
+@stream_step(
+    stream="agent_comms",
+    signals=["task.created"],
+    on_signal=gate_priority,
+)
+async def priority_worker():
+    signal = await get_current_signal()
+    if signal is None:
+        return
+    await handle_high_priority(signal.payload)
+    await terminate()
+```
+
+## Defining Signals
+
+The `signals=` argument accepts either a plain list of names or a dict mapping names to Pydantic schemas.
+
+<Tabs>
+  <Tab title="List of names">
+    ```python
+    @stream_step(
+        stream="agent_comms",
+        signals=["task.created", "task.updated", "task.cancelled"],
+    )
+    async def planner():
+        signal = await get_current_signal()
+        ...
+    ```
+  </Tab>
+  <Tab title="Pydantic schemas">
+    ```python
+    from pydantic import BaseModel
+
+    class TaskAssigned(BaseModel):
+        task_id: str
+        assignee: str
+        priority: int
+
+    @stream_step(
+        stream="agent_comms",
+        signals={"task.assigned": TaskAssigned},
+    )
+    async def worker():
+        signal = await get_current_signal()
+        if signal:
+            # signal.payload is a validated dict matching TaskAssigned
+            await assign(signal.payload["task_id"], signal.payload["assignee"])
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  When a schema is bound to a signal type, payloads that fail validation are rejected by the dispatcher and the step is **not** invoked for that signal.
+</Note>
+
+## Lifecycle Primitives
+
+These helpers, imported from `pyworkflow.streams`, are how the lifecycle function communicates with the dispatcher. They all set state that the dispatcher reads **after** the function returns — they don't immediately mutate the subscription row.
+
+| Primitive | Purpose |
+|---|---|
+| `await get_current_signal()` | Returns the `Signal` that triggered this resume (or `None` on first start). |
+| `await set_result(value)` | Attach a result payload to the subscription. Surfaced via `StreamWorkflowResult.get_result(...)`. |
+| `await terminate()` | Mark the step `terminated` — it will not be invoked again. |
+| `await suspend(reason, resume_signals=None)` | Mark the step `suspended` — bubbles a `SuspensionSignal` up to the parent workflow (HITL). |
+| `await save_checkpoint(data)` | Persist a JSON-serializable dict for the next resume. |
+| `await get_checkpoint()` | Load the most recently saved checkpoint dict (or `None`). |
+
+```python
+from pyworkflow.streams import (
+    get_current_signal,
+    get_checkpoint,
+    save_checkpoint,
+    set_result,
+    suspend,
+    terminate,
+)
+
+@stream_step(stream="reviews", signals=["review.submitted", "human.approved"])
+async def review_loop():
+    signal = await get_current_signal()
+    state = (await get_checkpoint()) or {"submissions": 0}
+
+    if signal is None:
+        return  # initial start
+
+    if signal.signal_type == "review.submitted":
+        state["submissions"] += 1
+        await save_checkpoint(state)
+
+        if state["submissions"] >= 3:
+            # Park the step until a human reviews it.
+            await suspend(
+                reason="hitl:needs_review",
+                resume_signals=["human.approved"],
+            )
+            return
+
+    if signal.signal_type == "human.approved":
+        await set_result({"approved": True, "submissions": state["submissions"]})
+        await terminate()
+```
+
+## The `Signal` Object
+
+`get_current_signal()` returns a `Signal` dataclass:
+
+```python
+@dataclass
+class Signal:
+    signal_id: str
+    stream_id: str
+    signal_type: str
+    payload: Any                      # dict (validated against schema if configured)
+    published_at: datetime
+    sequence: int | None              # Per-stream ordering, assigned by storage
+    source_run_id: str | None         # run_id of the workflow that called emit()
+    stream_run_id: str | None         # Scoping key for this stream run
+    metadata: dict[str, Any]
+```
+
+The `sequence` field gives you a strict ordering across all signals on the stream — useful for deduping or detecting gaps. `source_run_id` is set automatically when `emit()` is called from inside a workflow context.
+
+## Emitting Signals from a Step
+
+Stream steps can emit signals back to the same or another stream — this is how multi-actor pipelines fan out work between participants.
+
+```python
+from pyworkflow.streams import emit, get_current_signal, terminate
+
+@stream_step(stream="orders", signals=["order.placed"])
+async def fulfillment():
+    signal = await get_current_signal()
+    if signal is None:
+        return
+
+    order_id = signal.payload["order_id"]
+    await ship(order_id)
+
+    # Notify the billing stream that this order is ready to invoice.
+    await emit("billing", "order.shipped", {"order_id": order_id})
+
+    await terminate()
+```
+
+`emit()` automatically picks up the current `stream_run_id` from context, so signals stay scoped to the same run unless you pass an explicit override.
+
+## The `StreamStepContext` (for `on_signal` callbacks)
+
+When you pass a custom `on_signal=...`, the callback receives `(signal, ctx)` where `ctx` is a `StreamStepContext`:
+
+| Method | Effect |
+|---|---|
+| `await ctx.resume()` | Trigger the lifecycle function with `signal` as the current signal. |
+| `await ctx.terminate()` | Mark the step terminated without invoking the lifecycle function. |
+| `await ctx.suspend(reason, resume_signals=None)` | Park the step; bubbles to the parent workflow as a `SuspensionSignal`. |
+| `await ctx.cancel(reason=None)` | Cancel the step (terminal, with a reason). |
+
+`ctx` also exposes `ctx.status`, `ctx.run_id`, and `ctx.stream_id` for inspection.
+
+```python
+async def cancel_on_kill(signal, ctx):
+    if signal.signal_type == "stream.kill":
+        await ctx.cancel(reason="received kill signal")
+        return
+    await ctx.resume()
+
+@stream_step(
+    stream="agent_comms",
+    signals=["task.created", "stream.kill"],
+    on_signal=cancel_on_kill,
+)
+async def killable_worker():
+    ...
+```
+
+## Terminal States
+
+Every stream step subscription is in one of these states. The aggregate of all step states determines whether the parent stream workflow is `running`, `completed`, or `suspended` — see [Stream Workflows: Aggregate Lifecycle](/concepts/stream-workflows#aggregate-lifecycle).
+
+| State | Meaning |
+|---|---|
+| `waiting` | Subscribed and parked, ready for the next matching signal. |
+| `running` | Lifecycle function is currently executing on a worker. |
+| `suspended` | `suspend()` was called — bubbles `SuspensionSignal` up to the parent. |
+| `terminated` | `terminate()` was called — the step is done and will never run again. |
+| `cancelled` | `cancel()` was called from an `on_signal` callback. |
+
+## Best Practices
+
+- **Keep `on_signal` callbacks lightweight.** They run for every signal, including ones you ignore — do filtering there, do work in the lifecycle function.
+- **Always handle the `signal is None` case.** The first invocation has no triggering signal; that's the registration phase. Use it to seed state, not to do work.
+- **Use `set_result()` instead of `save_checkpoint()` for output the parent needs.** `save_checkpoint` is for *internal* state across resumes; `set_result` is the parent-facing return value.
+- **Call `terminate()` or `suspend()` when you're done.** A step that just `return`s without setting a terminal state stays in `waiting` and keeps the parent stream workflow alive.
+- **Don't rely on globals.** Step lifecycles can run on different workers between resumes — persist anything you need via `save_checkpoint()`.
+
+## Related Concepts
+
+- [Stream Workflows](/concepts/stream-workflows) — the parent runtime that hosts and drives stream steps
+- [Steps](/concepts/steps) — the regular, run-once step model for sequential workflows
+- [Hooks](/concepts/hooks) — the suspension primitive that stream workflows use under the hood

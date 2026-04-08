@@ -63,6 +63,8 @@
         "concepts/cancellation",
         "concepts/continue-as-new",
         "concepts/fault-tolerance",
+        "concepts/stream-workflows",
+        "concepts/stream-steps",
         "concepts/limitations"
       ]
     },

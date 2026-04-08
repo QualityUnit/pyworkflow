@@ -71,8 +71,9 @@ def _resolve_storage() -> Any:
 
         if has_context():
             ctx = get_context()
-            if getattr(ctx, "_storage", None) is not None:
-                return ctx._storage
+            ctx_storage = getattr(ctx, "_storage", None)
+            if ctx_storage is not None:
+                return ctx_storage
     except Exception:  # noqa: BLE001
         pass
     try:

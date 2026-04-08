@@ -1187,6 +1187,7 @@ class FileStorageBackend(StorageBackend):
         stream_id: str,
         step_run_id: str,
         signal_types: list[str],
+        stream_run_id: str | None = None,
     ) -> None:
         """Register a stream step's subscription to signal types."""
         sub_file = self.subscriptions_dir / f"{stream_id}__{step_run_id}.json"
@@ -1210,6 +1211,7 @@ class FileStorageBackend(StorageBackend):
         self,
         stream_id: str,
         signal_type: str,
+        stream_run_id: str | None = None,
     ) -> list[dict]:
         """Get step_run_ids waiting for a specific signal type on a stream."""
 

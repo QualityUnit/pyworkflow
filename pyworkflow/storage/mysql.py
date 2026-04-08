@@ -1647,6 +1647,7 @@ class MySQLStorageBackend(StorageBackend):
         stream_id: str,
         step_run_id: str,
         signal_types: list[str],
+        stream_run_id: str | None = None,
     ) -> None:
         """Register a stream step's subscription to signal types."""
         pool = self._ensure_connected()
@@ -1666,6 +1667,7 @@ class MySQLStorageBackend(StorageBackend):
         self,
         stream_id: str,
         signal_type: str,
+        stream_run_id: str | None = None,
     ) -> list[dict]:
         """Get step_run_ids waiting for a specific signal type on a stream."""
         pool = self._ensure_connected()

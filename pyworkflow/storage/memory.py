@@ -846,27 +846,46 @@ class InMemoryStorageBackend(StorageBackend):
         self,
         stream_id: str,
         signal_type: str,
+        stream_run_id: str | None = None,
     ) -> list[dict]:
         """Get step_run_ids waiting for a specific signal type on a stream."""
         with self._lock:
             result = []
             for (sid, _), sub in self._subscriptions.items():
-                if sid == stream_id and sub["status"] in ("waiting", "suspended"):
-                    if signal_type in sub["signal_types"]:
-                        result.append(sub)
+                if sid != stream_id:
+                    continue
+                if sub["status"] not in ("waiting", "suspended"):
+                    continue
+                if signal_type not in sub["signal_types"]:
+                    continue
+                if stream_run_id is not None and sub.get("stream_run_id") not in (
+                    stream_run_id,
+                    None,
+                ):
+                    continue
+                result.append(sub)
             return result
 
     async def get_subscriptions_for_stream(
         self,
         stream_id: str,
         signal_type: str,
+        stream_run_id: str | None = None,
     ) -> list[dict]:
         """Get ALL subscriptions for a signal type, regardless of status."""
         with self._lock:
             result = []
             for (sid, _), sub in self._subscriptions.items():
-                if sid == stream_id and signal_type in sub["signal_types"]:
-                    result.append(sub)
+                if sid != stream_id:
+                    continue
+                if signal_type not in sub["signal_types"]:
+                    continue
+                if stream_run_id is not None and sub.get("stream_run_id") not in (
+                    stream_run_id,
+                    None,
+                ):
+                    continue
+                result.append(sub)
             return result
 
     async def update_subscription_status(

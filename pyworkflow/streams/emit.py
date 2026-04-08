@@ -124,30 +124,33 @@ async def emit(
     # the parent worker (the one that called emit() from inside a workflow)
     # is not held while step lifecycles run; fall back to inline dispatch
     # for in-process / test environments where celery is unavailable.
+    #
+    # The InMemoryStorageBackend holds subscriptions in process-local state,
+    # so a celery worker in a different process would not see them — always
+    # dispatch inline for in-memory storage.
     dispatched_via_celery = False
-    try:
-        from pyworkflow.celery.tasks import dispatch_stream_signal_task
-        from pyworkflow.storage.config import storage_to_config
+    if storage.__class__.__name__ != "InMemoryStorageBackend":
+        try:
+            from pyworkflow.celery.tasks import dispatch_stream_signal_task
+            from pyworkflow.storage.config import storage_to_config
 
-        storage_config = storage_to_config(storage)
-        dispatch_stream_signal_task.apply_async(
-            kwargs={
-                "signal_id": signal_id,
-                "stream_id": stream_id,
-                "signal_type": signal_type,
-                "payload": payload_data,
-                "sequence": sequence,
-                "source_run_id": source_run_id,
-                "stream_run_id": stream_run_id,
-                "metadata": metadata or {},
-                "storage_config": storage_config,
-            }
-        )
-        dispatched_via_celery = True
-    except Exception as e:  # noqa: BLE001
-        logger.debug(
-            f"[emit] celery dispatch unavailable, falling back to inline: {e}"
-        )
+            storage_config = storage_to_config(storage)
+            dispatch_stream_signal_task.apply_async(
+                kwargs={
+                    "signal_id": signal_id,
+                    "stream_id": stream_id,
+                    "signal_type": signal_type,
+                    "payload": payload_data,
+                    "sequence": sequence,
+                    "source_run_id": source_run_id,
+                    "stream_run_id": stream_run_id,
+                    "metadata": metadata or {},
+                    "storage_config": storage_config,
+                }
+            )
+            dispatched_via_celery = True
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[emit] celery dispatch unavailable, falling back to inline: {e}")
 
     if not dispatched_via_celery:
         from pyworkflow.streams.dispatcher import dispatch_signal

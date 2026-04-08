@@ -170,22 +170,16 @@ class PostgresMigrationRunner(MigrationRunner):
                     "ALTER TABLE IF EXISTS stream_subscriptions DROP CONSTRAINT IF EXISTS stream_subscriptions_stream_id_fkey"
                 )
             elif migration.version == 5:
-                # V5: stream_run_id on stream_subscriptions + scheduled_signals table
-                await conn.execute("""
-                    DO $$
-                    BEGIN
-                        IF EXISTS (
-                            SELECT FROM information_schema.tables
-                            WHERE table_name = 'stream_subscriptions'
-                        ) AND NOT EXISTS (
-                            SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'stream_subscriptions'
-                              AND column_name = 'stream_run_id'
-                        ) THEN
-                            ALTER TABLE stream_subscriptions ADD COLUMN stream_run_id TEXT NULL;
-                        END IF;
-                    END $$
-                """)
+                # V5: stream_run_id on stream_subscriptions + scheduled_signals table.
+                # Use top-level ALTER (not a DO $$ block) for consistency with
+                # CitusMigrationRunner — DDL inside DO blocks is executed via SPI
+                # and bypasses the Citus ProcessUtility hook, so worker shards
+                # silently miss the column. Plain Postgres is unaffected either way,
+                # but keeping both runners symmetric avoids future foot-guns.
+                await conn.execute(
+                    "ALTER TABLE stream_subscriptions "
+                    "ADD COLUMN IF NOT EXISTS stream_run_id TEXT NULL"
+                )
                 await conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_subscriptions_stream_run "
                     "ON stream_subscriptions(stream_id, stream_run_id)"
@@ -211,41 +205,21 @@ class PostgresMigrationRunner(MigrationRunner):
                 # V6: parent linkage columns on stream_subscriptions so the
                 # stream-step dispatcher can resume the parent @workflow via
                 # resume_hook() instead of pinning a worker on an asyncio.Event.
-                await conn.execute("""
-                    DO $$
-                    BEGIN
-                        IF EXISTS (
-                            SELECT FROM information_schema.tables
-                            WHERE table_name = 'stream_subscriptions'
-                        ) AND NOT EXISTS (
-                            SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'stream_subscriptions'
-                              AND column_name = 'parent_run_id'
-                        ) THEN
-                            ALTER TABLE stream_subscriptions
-                                ADD COLUMN parent_run_id TEXT NULL,
-                                ADD COLUMN parent_hook_token TEXT NULL;
-                        END IF;
-                    END $$
-                """)
+                # Top-level ALTERs for Citus propagation symmetry (see V5 note).
+                await conn.execute(
+                    "ALTER TABLE stream_subscriptions "
+                    "ADD COLUMN IF NOT EXISTS parent_run_id TEXT NULL"
+                )
+                await conn.execute(
+                    "ALTER TABLE stream_subscriptions "
+                    "ADD COLUMN IF NOT EXISTS parent_hook_token TEXT NULL"
+                )
             elif migration.version == 7:
                 # V7: result column on stream_subscriptions for step output payloads.
-                await conn.execute("""
-                    DO $$
-                    BEGIN
-                        IF EXISTS (
-                            SELECT FROM information_schema.tables
-                            WHERE table_name = 'stream_subscriptions'
-                        ) AND NOT EXISTS (
-                            SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'stream_subscriptions'
-                              AND column_name = 'result'
-                        ) THEN
-                            ALTER TABLE stream_subscriptions
-                                ADD COLUMN result JSONB NULL;
-                        END IF;
-                    END $$
-                """)
+                await conn.execute(
+                    "ALTER TABLE stream_subscriptions "
+                    "ADD COLUMN IF NOT EXISTS result JSONB NULL"
+                )
             elif migration.up_func:
                 await migration.up_func(conn)
             elif migration.up_sql and migration.up_sql != "SELECT 1":

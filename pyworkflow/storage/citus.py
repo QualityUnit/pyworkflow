@@ -116,22 +116,16 @@ class CitusMigrationRunner(PostgresMigrationRunner):
                 # so this is a no-op but we still record the version.
                 pass
             elif migration.version == 5:
-                # V5: Add stream_run_id to stream_subscriptions + scheduled_signals table
-                await conn.execute("""
-                    DO $$
-                    BEGIN
-                        IF EXISTS (
-                            SELECT FROM information_schema.tables
-                            WHERE table_name = 'stream_subscriptions'
-                        ) AND NOT EXISTS (
-                            SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'stream_subscriptions'
-                              AND column_name = 'stream_run_id'
-                        ) THEN
-                            ALTER TABLE stream_subscriptions ADD COLUMN stream_run_id TEXT NULL;
-                        END IF;
-                    END $$
-                """)
+                # V5: Add stream_run_id to stream_subscriptions + scheduled_signals table.
+                # IMPORTANT: Use top-level ALTER (NOT inside a DO $$ block) so Citus
+                # propagates the DDL to all worker shards via the ProcessUtility hook.
+                # DDL inside PL/pgSQL DO blocks is executed via SPI and bypasses the
+                # hook, which would leave worker shards missing the column while the
+                # coordinator catalog appears correct.
+                await conn.execute(
+                    "ALTER TABLE stream_subscriptions "
+                    "ADD COLUMN IF NOT EXISTS stream_run_id TEXT NULL"
+                )
                 await conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_subscriptions_stream_run "
                     "ON stream_subscriptions(stream_id, stream_run_id)"
@@ -164,41 +158,22 @@ class CitusMigrationRunner(PostgresMigrationRunner):
                 if not already:
                     await conn.execute("SELECT create_reference_table('scheduled_signals')")
             elif migration.version == 6:
-                # V6: Add parent_run_id + parent_hook_token to stream_subscriptions
-                await conn.execute("""
-                    DO $$
-                    BEGIN
-                        IF EXISTS (
-                            SELECT FROM information_schema.tables
-                            WHERE table_name = 'stream_subscriptions'
-                        ) AND NOT EXISTS (
-                            SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'stream_subscriptions'
-                              AND column_name = 'parent_run_id'
-                        ) THEN
-                            ALTER TABLE stream_subscriptions
-                                ADD COLUMN parent_run_id TEXT NULL,
-                                ADD COLUMN parent_hook_token TEXT NULL;
-                        END IF;
-                    END $$
-                """)
+                # V6: Add parent_run_id + parent_hook_token to stream_subscriptions.
+                # Top-level ALTERs so Citus propagates to all worker shards (see V5 note).
+                await conn.execute(
+                    "ALTER TABLE stream_subscriptions "
+                    "ADD COLUMN IF NOT EXISTS parent_run_id TEXT NULL"
+                )
+                await conn.execute(
+                    "ALTER TABLE stream_subscriptions "
+                    "ADD COLUMN IF NOT EXISTS parent_hook_token TEXT NULL"
+                )
             elif migration.version == 7:
-                await conn.execute("""
-                    DO $$
-                    BEGIN
-                        IF EXISTS (
-                            SELECT FROM information_schema.tables
-                            WHERE table_name = 'stream_subscriptions'
-                        ) AND NOT EXISTS (
-                            SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'stream_subscriptions'
-                              AND column_name = 'result'
-                        ) THEN
-                            ALTER TABLE stream_subscriptions
-                                ADD COLUMN result JSONB NULL;
-                        END IF;
-                    END $$
-                """)
+                # V7: Add result column. Top-level ALTER for Citus propagation (see V5 note).
+                await conn.execute(
+                    "ALTER TABLE stream_subscriptions "
+                    "ADD COLUMN IF NOT EXISTS result JSONB NULL"
+                )
             elif migration.up_func:
                 await migration.up_func(conn)
             elif migration.up_sql and migration.up_sql != "SELECT 1":

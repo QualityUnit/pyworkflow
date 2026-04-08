@@ -107,9 +107,7 @@ def _compute_aggregate(states: list[dict]) -> tuple[str, list[str]]:
     return "running", [s["step_run_id"] for s in suspended]
 
 
-async def _ensure_all_subscriptions(
-    stream_name: str, storage: Any, stream_run_id: str
-) -> None:
+async def _ensure_all_subscriptions(stream_name: str, storage: Any, stream_run_id: str) -> None:
     """Materialize a DB subscription row per @stream_step on this stream run."""
     for step_meta in get_steps_for_stream(stream_name):
         signal_types = step_meta.signal_types or []
@@ -167,23 +165,18 @@ async def run_stream_workflow(
 
     if aggregate == "completed":
         logger.info(
-            f"[run_stream_workflow] {stream_name} completed "
-            f"(stream_run_id={stream_run_id})"
+            f"[run_stream_workflow] {stream_name} completed (stream_run_id={stream_run_id})"
         )
         return StreamWorkflowResult(
             status="completed",
             step_states={s["step_run_id"]: s["status"] for s in states},
             step_results={
-                s["step_run_id"]: s.get("result")
-                for s in states
-                if s.get("result") is not None
+                s["step_run_id"]: s.get("result") for s in states if s.get("result") is not None
             },
         )
 
     if aggregate == "suspended":
-        logger.info(
-            f"[run_stream_workflow] {stream_name} suspended (steps={suspended_ids})"
-        )
+        logger.info(f"[run_stream_workflow] {stream_name} suspended (steps={suspended_ids})")
         raise SuspensionSignal(
             f"stream_step_suspended:{stream_name}",
             stream_name=stream_name,
@@ -245,24 +238,18 @@ async def run_stream_workflow(
                 parent_hook_token=token,
             )
         except Exception as e:  # noqa: BLE001
-            logger.error(
-                f"[run_stream_workflow] failed to persist parent link: {e}"
-            )
+            logger.error(f"[run_stream_workflow] failed to persist parent link: {e}")
             return
 
         try:
-            states_now = await storage.get_subscription_states(
-                stream_name, stream_run_id
-            )
+            states_now = await storage.get_subscription_states(stream_name, stream_run_id)
             agg_now, _ = _compute_aggregate(states_now)
             if agg_now in ("completed", "suspended"):
                 from pyworkflow.primitives.resume_hook import resume_hook
 
                 await resume_hook(token, {"aggregate": agg_now}, storage=storage)
         except Exception as e:  # noqa: BLE001
-            logger.warning(
-                f"[run_stream_workflow] race-check resume failed: {e}"
-            )
+            logger.warning(f"[run_stream_workflow] race-check resume failed: {e}")
 
     await hook(name=f"stream:{stream_run_id}", on_created=_on_created)
 

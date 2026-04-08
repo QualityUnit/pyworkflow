@@ -2935,10 +2935,7 @@ def drain_scheduled_signals_task(self: SingletonWorkflowTask) -> dict[str, Any]:
                 await storage.mark_scheduled_signal_delivered(row["id"])
                 delivered += 1
             except Exception as e:  # noqa: BLE001
-                logger.error(
-                    f"[drain_scheduled_signals] failed to deliver "
-                    f"{row.get('id')}: {e}"
-                )
+                logger.error(f"[drain_scheduled_signals] failed to deliver {row.get('id')}: {e}")
         return delivered
 
     count = run_async(_drain())

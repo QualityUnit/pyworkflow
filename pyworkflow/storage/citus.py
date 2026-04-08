@@ -162,9 +162,7 @@ class CitusMigrationRunner(PostgresMigrationRunner):
                     )
                 """)
                 if not already:
-                    await conn.execute(
-                        "SELECT create_reference_table('scheduled_signals')"
-                    )
+                    await conn.execute("SELECT create_reference_table('scheduled_signals')")
             elif migration.version == 6:
                 # V6: Add parent_run_id + parent_hook_token to stream_subscriptions
                 await conn.execute("""

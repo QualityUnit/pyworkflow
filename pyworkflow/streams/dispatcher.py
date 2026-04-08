@@ -98,9 +98,7 @@ async def dispatch_signal(signal: Signal, storage: Any) -> None:
 
     # After all step dispatches for this signal, check if the stream
     # aggregate became terminal and resume the parent @workflow via hook.
-    await _maybe_resume_stream_parent(
-        signal.stream_id, signal.stream_run_id, storage
-    )
+    await _maybe_resume_stream_parent(signal.stream_id, signal.stream_run_id, storage)
 
 
 async def _maybe_resume_stream_parent(
@@ -154,10 +152,7 @@ async def _maybe_resume_stream_parent(
             f"(stream_run_id={stream_run_id}, aggregate={aggregate})"
         )
     except Exception as e:  # noqa: BLE001
-        logger.warning(
-            f"[_maybe_resume_stream_parent] resume_hook failed for "
-            f"{parent_run_id}: {e}"
-        )
+        logger.warning(f"[_maybe_resume_stream_parent] resume_hook failed for {parent_run_id}: {e}")
 
 
 async def _dispatch_to_step(
@@ -437,9 +432,7 @@ async def _drain_pending_signals_for_step(
             )
             await dispatch_signal(pending_signal, storage)
         except Exception as e:  # noqa: BLE001
-            logger.warning(
-                f"[drain_pending] failed to redeliver {row.get('signal_id')}: {e}"
-            )
+            logger.warning(f"[drain_pending] failed to redeliver {row.get('signal_id')}: {e}")
 
 
 async def _cancel_step(

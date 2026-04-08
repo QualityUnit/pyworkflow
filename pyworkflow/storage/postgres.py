@@ -446,10 +446,11 @@ class PostgresStorageBackend(StorageBackend):
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_events_run_id_type ON events(run_id, type)"
             )
-            # Optimized index for has_event() with step_id filter (V2 migration)
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_events_run_id_step_id_type ON events(run_id, step_id, type)"
-            )
+            # NOTE: idx_events_run_id_step_id_type is intentionally NOT created here.
+            # On a pre-v2 database, the step_id column does not yet exist
+            # (CREATE TABLE IF NOT EXISTS above is a no-op on existing tables, so
+            # the new column declaration is ignored). The v2 migration adds the
+            # column AND creates this index — see PostgresMigrationRunner version 2.
 
             # Steps table
             await conn.execute("""
@@ -593,10 +594,13 @@ class PostgresStorageBackend(StorageBackend):
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON stream_subscriptions(stream_id, status)"
             )
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_subscriptions_stream_run "
-                "ON stream_subscriptions(stream_id, stream_run_id)"
-            )
+            # NOTE: idx_subscriptions_stream_run is intentionally NOT created here.
+            # On a pre-v5 database, the stream_run_id column does not yet exist
+            # (CREATE TABLE IF NOT EXISTS above is a no-op on existing tables, so
+            # the new column declarations are ignored). The v5 migration adds the
+            # column AND creates this index idempotently — see PostgresMigrationRunner
+            # version 5. Creating the index here would crash _initialize_schema
+            # before run_migrations() ever gets a chance to run.
 
             # Scheduled signals table (for schedule_signal() primitive)
             await conn.execute("""

@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from loguru import logger
+
 
 @dataclass
 class Migration:
@@ -238,11 +240,18 @@ class MigrationRunner(ABC):
         Raises:
             Exception: If any migration fails (partial migrations are rolled back)
         """
+        runner_name = type(self).__name__
+        logger.info(f"MIGRATION: run_migrations() called on {runner_name}")
+
         # Ensure we have a schema_versions table
         await self.ensure_schema_versions_table()
 
         # Get current version
         current_version = await self.get_current_version()
+        logger.info(
+            f"MIGRATION: current schema version = {current_version}",
+            runner=runner_name,
+        )
 
         # If no migrations recorded, check for existing schema
         if current_version == 0:
@@ -250,15 +259,43 @@ class MigrationRunner(ABC):
             if has_existing_schema:
                 # Database has tables but no version tracking
                 # Assume it's at V1 (original schema)
+                logger.info(
+                    "MIGRATION: existing schema detected — recording baseline v1",
+                    runner=runner_name,
+                )
                 await self.record_baseline_version(1, "Baseline: original schema")
                 current_version = 1
 
         # Get and apply pending migrations
         pending = self.registry.get_pending(current_version)
+        pending_versions = [m.version for m in pending]
+        logger.info(
+            f"MIGRATION: pending migrations = {pending_versions}",
+            runner=runner_name,
+            current_version=current_version,
+        )
         applied: list[AppliedMigration] = []
 
         for migration in pending:
-            await self.apply_migration(migration)
+            logger.info(
+                f"MIGRATION: applying v{migration.version} — {migration.description}",
+                runner=runner_name,
+                version=migration.version,
+            )
+            try:
+                await self.apply_migration(migration)
+            except Exception:
+                logger.exception(
+                    f"MIGRATION: v{migration.version} FAILED — {migration.description}",
+                    runner=runner_name,
+                    version=migration.version,
+                )
+                raise
+            logger.info(
+                f"MIGRATION: v{migration.version} applied successfully",
+                runner=runner_name,
+                version=migration.version,
+            )
             applied.append(
                 AppliedMigration(
                     version=migration.version,
@@ -267,6 +304,11 @@ class MigrationRunner(ABC):
                 )
             )
 
+        logger.info(
+            f"MIGRATION: run_migrations() completed, applied {len(applied)} migration(s)",
+            runner=runner_name,
+            applied_versions=[a.version for a in applied],
+        )
         return applied
 
 

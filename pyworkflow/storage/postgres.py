@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
+from loguru import logger
 
 from pyworkflow.engine.events import Event, EventType
 from pyworkflow.storage.base import StorageBackend
@@ -92,6 +93,10 @@ class PostgresMigrationRunner(MigrationRunner):
 
     async def apply_migration(self, migration: Migration) -> None:
         """Apply a migration with PostgreSQL-specific handling."""
+        logger.info(
+            f"PG_MIGRATION: opening transaction for v{migration.version}",
+            version=migration.version,
+        )
         async with self._pool.acquire() as conn, conn.transaction():
             if migration.version == 2:
                 # V2: Add step_id column to events table
@@ -176,14 +181,17 @@ class PostgresMigrationRunner(MigrationRunner):
                 # and bypasses the Citus ProcessUtility hook, so worker shards
                 # silently miss the column. Plain Postgres is unaffected either way,
                 # but keeping both runners symmetric avoids future foot-guns.
+                logger.info("PG_MIGRATION v5: ALTER stream_subscriptions ADD stream_run_id")
                 await conn.execute(
                     "ALTER TABLE stream_subscriptions "
                     "ADD COLUMN IF NOT EXISTS stream_run_id TEXT NULL"
                 )
+                logger.info("PG_MIGRATION v5: CREATE INDEX idx_subscriptions_stream_run")
                 await conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_subscriptions_stream_run "
                     "ON stream_subscriptions(stream_id, stream_run_id)"
                 )
+                logger.info("PG_MIGRATION v5: CREATE TABLE scheduled_signals")
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS scheduled_signals (
                         id TEXT PRIMARY KEY,
@@ -197,6 +205,7 @@ class PostgresMigrationRunner(MigrationRunner):
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
                 """)
+                logger.info("PG_MIGRATION v5: CREATE INDEX idx_scheduled_signals_due")
                 await conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_scheduled_signals_due "
                     "ON scheduled_signals(delivered, due_at)"
@@ -206,16 +215,19 @@ class PostgresMigrationRunner(MigrationRunner):
                 # stream-step dispatcher can resume the parent @workflow via
                 # resume_hook() instead of pinning a worker on an asyncio.Event.
                 # Top-level ALTERs for Citus propagation symmetry (see V5 note).
+                logger.info("PG_MIGRATION v6: ALTER stream_subscriptions ADD parent_run_id")
                 await conn.execute(
                     "ALTER TABLE stream_subscriptions "
                     "ADD COLUMN IF NOT EXISTS parent_run_id TEXT NULL"
                 )
+                logger.info("PG_MIGRATION v6: ALTER stream_subscriptions ADD parent_hook_token")
                 await conn.execute(
                     "ALTER TABLE stream_subscriptions "
                     "ADD COLUMN IF NOT EXISTS parent_hook_token TEXT NULL"
                 )
             elif migration.version == 7:
                 # V7: result column on stream_subscriptions for step output payloads.
+                logger.info("PG_MIGRATION v7: ALTER stream_subscriptions ADD result")
                 await conn.execute(
                     "ALTER TABLE stream_subscriptions "
                     "ADD COLUMN IF NOT EXISTS result JSONB NULL"

@@ -21,6 +21,7 @@ See: https://docs.citusdata.com/en/stable/develop/api.html
 """
 
 import asyncpg
+from loguru import logger
 
 from pyworkflow.storage.migrations import Migration
 from pyworkflow.storage.postgres import PostgresMigrationRunner, PostgresStorageBackend
@@ -39,6 +40,10 @@ class CitusMigrationRunner(PostgresMigrationRunner):
         """Apply a migration with Citus-specific handling."""
         from datetime import UTC, datetime
 
+        logger.info(
+            f"CITUS_MIGRATION: opening transaction for v{migration.version}",
+            version=migration.version,
+        )
         async with self._pool.acquire() as conn, conn.transaction():
             if migration.version == 2:
                 # V2: Add step_id column to events table
@@ -122,14 +127,17 @@ class CitusMigrationRunner(PostgresMigrationRunner):
                 # DDL inside PL/pgSQL DO blocks is executed via SPI and bypasses the
                 # hook, which would leave worker shards missing the column while the
                 # coordinator catalog appears correct.
+                logger.info("CITUS_MIGRATION v5: ALTER stream_subscriptions ADD stream_run_id")
                 await conn.execute(
                     "ALTER TABLE stream_subscriptions "
                     "ADD COLUMN IF NOT EXISTS stream_run_id TEXT NULL"
                 )
+                logger.info("CITUS_MIGRATION v5: CREATE INDEX idx_subscriptions_stream_run")
                 await conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_subscriptions_stream_run "
                     "ON stream_subscriptions(stream_id, stream_run_id)"
                 )
+                logger.info("CITUS_MIGRATION v5: CREATE TABLE scheduled_signals")
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS scheduled_signals (
                         id TEXT PRIMARY KEY,
@@ -143,6 +151,7 @@ class CitusMigrationRunner(PostgresMigrationRunner):
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
                 """)
+                logger.info("CITUS_MIGRATION v5: CREATE INDEX idx_scheduled_signals_due")
                 await conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_scheduled_signals_due "
                     "ON scheduled_signals(delivered, due_at)"
@@ -155,21 +164,30 @@ class CitusMigrationRunner(PostgresMigrationRunner):
                         WHERE c.relname = 'scheduled_signals'
                     )
                 """)
+                logger.info(
+                    f"CITUS_MIGRATION v5: scheduled_signals already distributed = {already}"
+                )
                 if not already:
+                    logger.info(
+                        "CITUS_MIGRATION v5: calling create_reference_table('scheduled_signals')"
+                    )
                     await conn.execute("SELECT create_reference_table('scheduled_signals')")
             elif migration.version == 6:
                 # V6: Add parent_run_id + parent_hook_token to stream_subscriptions.
                 # Top-level ALTERs so Citus propagates to all worker shards (see V5 note).
+                logger.info("CITUS_MIGRATION v6: ALTER stream_subscriptions ADD parent_run_id")
                 await conn.execute(
                     "ALTER TABLE stream_subscriptions "
                     "ADD COLUMN IF NOT EXISTS parent_run_id TEXT NULL"
                 )
+                logger.info("CITUS_MIGRATION v6: ALTER stream_subscriptions ADD parent_hook_token")
                 await conn.execute(
                     "ALTER TABLE stream_subscriptions "
                     "ADD COLUMN IF NOT EXISTS parent_hook_token TEXT NULL"
                 )
             elif migration.version == 7:
                 # V7: Add result column. Top-level ALTER for Citus propagation (see V5 note).
+                logger.info("CITUS_MIGRATION v7: ALTER stream_subscriptions ADD result")
                 await conn.execute(
                     "ALTER TABLE stream_subscriptions "
                     "ADD COLUMN IF NOT EXISTS result JSONB NULL"

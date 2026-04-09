@@ -134,7 +134,16 @@ def _run_startup_migrations() -> None:
         )
         raise
 
-    loguru_logger.info("STARTUP_MIGRATIONS: completed successfully")
+    # Declare that the schema is up-to-date in this process. Forked worker
+    # children inherit the flag via copy-on-write, so every runtime connect()
+    # in this pod will skip _initialize_schema() / run_migrations() entirely.
+    from pyworkflow.storage.config import mark_schema_ensured
+
+    mark_schema_ensured()
+
+    loguru_logger.info(
+        "STARTUP_MIGRATIONS: completed successfully — runtime connects will skip schema init"
+    )
 
 
 def is_sentinel_url(url: str) -> bool:

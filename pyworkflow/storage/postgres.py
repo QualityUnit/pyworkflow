@@ -358,7 +358,24 @@ class PostgresStorageBackend(StorageBackend):
             self._pool_loop_id = current_loop_id
 
         if not self._initialized:
-            await self._initialize_schema()
+            # When the Celery worker startup hook has already run migrations
+            # for this process, skip _initialize_schema() entirely. The hook
+            # sets a module-level flag (see pyworkflow.storage.config) that
+            # survives fork via copy-on-write, so every runtime connect in
+            # this process and its children is a pure pool-create.
+            #
+            # Paths that do NOT go through the startup hook (tests, CLI,
+            # PYWORKFLOW_SKIP_STARTUP_MIGRATIONS=1) still initialize lazily
+            # here, preserving backwards compatibility.
+            from pyworkflow.storage.config import is_schema_ensured
+
+            if is_schema_ensured():
+                logger.debug(
+                    "POSTGRES_CONNECT: skipping _initialize_schema "
+                    "(schema already ensured by startup migration hook)"
+                )
+            else:
+                await self._initialize_schema()
             self._initialized = True
 
     async def disconnect(self) -> None:

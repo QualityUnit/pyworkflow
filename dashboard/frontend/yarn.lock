@@ -1455,14 +1455,14 @@
   dependencies:
     "@tanstack/router-devtools-core" "1.167.1"
 
-"@tanstack/react-router@^1.168.7":
-  version "1.168.10"
-  resolved "https://registry.npmjs.org/@tanstack/react-router/-/react-router-1.168.10.tgz"
-  integrity sha512-/RmDlOwDkCug609KdPB3U+U1zmrtadJpvsmRg2zEn8TRCKRNri7dYZIjQZbNg8PgUiRL4T6njrZBV1ChzblNaA==
+"@tanstack/react-router@^1.168.15":
+  version "1.168.15"
+  resolved "https://registry.yarnpkg.com/@tanstack/react-router/-/react-router-1.168.15.tgz#333e51ef02dd5e19be1dc35f988847cd79bc4005"
+  integrity sha512-V6evK+2d8r4VtaxNFT7I3ZUSPJegaXWoocCcIkAsFTBq66ymlD6FrNTOdl7qRB0I+ApFT1CGV3OMmzq5HgX74Q==
   dependencies:
     "@tanstack/history" "1.161.6"
     "@tanstack/react-store" "^0.9.3"
-    "@tanstack/router-core" "1.168.9"
+    "@tanstack/router-core" "1.168.11"
     isbot "^5.1.22"
 
 "@tanstack/react-store@^0.9.3":
@@ -1479,6 +1479,16 @@
   integrity sha512-5nNMTSETP4ykGegmVkhjcS8tTLW6Vl4axfEGQN3v0zdHYbK4UfoqfPChclTrJ4EoK9QynqAu9oUf8VEmrpZ5Ww==
   dependencies:
     "@tanstack/table-core" "8.21.3"
+
+"@tanstack/router-core@1.168.11":
+  version "1.168.11"
+  resolved "https://registry.yarnpkg.com/@tanstack/router-core/-/router-core-1.168.11.tgz#ad0e4275806315e3cf06e6a84309a3d766a402ac"
+  integrity sha512-5dOSXyQnLHnw7aBoH+8cQtQyc66rT2/MnhFjQgWH7YZKedSYsmneQ1ZhB6I0HJuYbTtfvZIcGMoruXMSuEHYNg==
+  dependencies:
+    "@tanstack/history" "1.161.6"
+    cookie-es "^2.0.0"
+    seroval "^1.5.0"
+    seroval-plugins "^1.5.0"
 
 "@tanstack/router-core@1.168.9":
   version "1.168.9"
@@ -3564,10 +3574,20 @@ seroval-plugins@^1.4.2:
   resolved "https://registry.npmjs.org/seroval-plugins/-/seroval-plugins-1.5.1.tgz"
   integrity sha512-4FbuZ/TMl02sqv0RTFexu0SP6V+ywaIe5bAWCCEik0fk17BhALgwvUDVF7e3Uvf9pxmwCEJsRPmlkUE6HdzLAw==
 
+seroval-plugins@^1.5.0:
+  version "1.5.2"
+  resolved "https://registry.yarnpkg.com/seroval-plugins/-/seroval-plugins-1.5.2.tgz#102b8ec17525e2504e9476b1fe6a1f442926f0af"
+  integrity sha512-qpY0Cl+fKYFn4GOf3cMiq6l72CpuVaawb6ILjubOQ+diJ54LfOWaSSPsaswN8DRPIPW4Yq+tE1k5aKd7ILyaFg==
+
 seroval@^1.4.2:
   version "1.5.1"
   resolved "https://registry.npmjs.org/seroval/-/seroval-1.5.1.tgz"
   integrity sha512-OwrZRZAfhHww0WEnKHDY8OM0U/Qs8OTfIDWhUD4BLpNJUfXK4cGmjiagGze086m+mhI+V2nD0gfbHEnJjb9STA==
+
+seroval@^1.5.0:
+  version "1.5.2"
+  resolved "https://registry.yarnpkg.com/seroval/-/seroval-1.5.2.tgz#b07584d531281498fa7f51f49dfdc5d76e76a681"
+  integrity sha512-xcRN39BdsnO9Tf+VzsE7b3JyTJASItIV1FVFewJKCFcW4s4haIKS3e6vj8PGB9qBwC7tnuOywQMdv5N4qkzi7Q==
 
 shebang-command@^2.0.0:
   version "2.0.0"

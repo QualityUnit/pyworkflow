@@ -64,7 +64,7 @@ postgres = [
 
 # AWS runtime support
 aws = [
-    "aws-durable-execution-sdk-python>=0.1.0",
+    "aws-durable-execution-sdk-python>=1.4.0",
 ]
 dynamodb = [
     "aiobotocore>=2.5.0",
@@ -84,7 +84,7 @@ all = [
     "aiosqlite>=0.19.0",
     "asyncpg>=0.29.0",
     "aiomysql>=0.2.0",
-    "aws-durable-execution-sdk-python>=0.1.0",
+    "aws-durable-execution-sdk-python>=1.4.0",
     "cassandra-driver>=3.29.0",
 ]
 

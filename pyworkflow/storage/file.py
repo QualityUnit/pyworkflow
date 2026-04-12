@@ -973,6 +973,7 @@ class FileStorageBackend(StorageBackend):
     async def delete_old_runs(self, older_than: datetime) -> int:
         """Delete terminal runs (and all related files) updated before older_than."""
         terminal = {"completed", "failed", "cancelled", "continued_as_new", "interrupted"}
+        cutoff_iso = older_than.isoformat()
 
         def _sync_delete() -> int:
             count = 0
@@ -994,6 +995,10 @@ class FileStorageBackend(StorageBackend):
                         try:
                             sd = json.loads(sf.read_text())
                             if sd.get("run_id") == run_id:
+                                # Also delete checkpoint for this step
+                                (self.checkpoints_dir / f"{sd['step_id']}.json").unlink(
+                                    missing_ok=True
+                                )
                                 sf.unlink(missing_ok=True)
                         except Exception:
                             pass
@@ -1003,6 +1008,50 @@ class FileStorageBackend(StorageBackend):
                     count += 1
                 except Exception:
                     continue
+
+            # --- Stream / schedule cleanup ---
+            # Prune old signals from each stream's signal file
+            for sig_file in list(self.signals_dir.glob("*.json")):
+                try:
+                    signals = json.loads(sig_file.read_text())
+                    kept = [
+                        s for s in signals if s.get("published_at", "") >= cutoff_iso
+                    ]
+                    if len(kept) < len(signals):
+                        sig_file.write_text(json.dumps(kept, indent=2))
+                except Exception:
+                    pass
+
+            # Delete old terminal subscriptions
+            for sub_file in list(self.subscriptions_dir.glob("*.json")):
+                try:
+                    sub = json.loads(sub_file.read_text())
+                    if sub.get("status") in ("terminated", "completed"):
+                        if sub.get("created_at", "") < cutoff_iso:
+                            sub_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+            # Delete old acknowledgments
+            for ack_file in list(self.acknowledgments_dir.glob("*.json")):
+                try:
+                    ack = json.loads(ack_file.read_text())
+                    if ack.get("acknowledged_at", "") < cutoff_iso:
+                        ack_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+            # Purge soft-deleted schedules
+            for sched_file in list(self.schedules_dir.glob("*.json")):
+                try:
+                    sched = json.loads(sched_file.read_text())
+                    if sched.get("status") == "DELETED":
+                        deleted_at = sched.get("deleted_at") or sched.get("updated_at", "")
+                        if deleted_at and deleted_at < cutoff_iso:
+                            sched_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
             return count
 
         return await asyncio.to_thread(_sync_delete)

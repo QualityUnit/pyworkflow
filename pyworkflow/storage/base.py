@@ -707,7 +707,14 @@ class StorageBackend(ABC):
         Delete workflow runs in terminal states last updated before `older_than`.
 
         Terminal states: COMPLETED, FAILED, CANCELLED, CONTINUED_AS_NEW, INTERRUPTED.
-        Associated events, steps, hooks, and cancellation flags are deleted too.
+
+        Deletes the following associated data:
+        - events, steps, checkpoints, hooks, cancellation_flags (by run_id)
+        - signals (published_at < older_than)
+        - signal_acknowledgments (acknowledged_at < older_than)
+        - scheduled_signals (delivered + created_at < older_than)
+        - stream_subscriptions (terminated/completed + created_at < older_than)
+        - schedules (soft-deleted + deleted_at/updated_at < older_than)
 
         Args:
             older_than: Delete runs where updated_at < older_than

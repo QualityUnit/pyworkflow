@@ -2832,7 +2832,7 @@ def run_data_retention_task(self: SingletonWorkflowTask) -> dict[str, Any]:
 
     cutoff = datetime.now(UTC) - timedelta(days=config.data_retention_days)
     logger.info(
-        "Running data retention: deleting runs updated before {}",
+        "Running data retention: deleting runs and orphaned stream data older than {}",
         cutoff.isoformat(),
     )
     storage_config = storage_to_config(storage)

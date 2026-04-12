@@ -1426,6 +1426,37 @@ class DynamoDBStorageBackend(StorageBackend):
 
                 count += 1
 
+            # --- Schedule cleanup: purge soft-deleted schedules ---
+            sched_params: dict[str, Any] = {
+                "TableName": self.table_name,
+                "IndexName": "GSI1",
+                "KeyConditionExpression": "GSI1PK = :pk",
+                "FilterExpression": "#st = :deleted AND updated_at < :cutoff",
+                "ExpressionAttributeNames": {"#st": "status"},
+                "ExpressionAttributeValues": {
+                    ":pk": {"S": "SCHEDULES"},
+                    ":deleted": {"S": "DELETED"},
+                    ":cutoff": {"S": cutoff_iso},
+                },
+                "ProjectionExpression": "PK, SK",
+            }
+            while True:
+                resp = await client.query(**sched_params)
+                items_to_delete = resp.get("Items", [])
+                for i in range(0, len(items_to_delete), 25):
+                    batch = items_to_delete[i : i + 25]
+                    request_items = {
+                        self.table_name: [
+                            {"DeleteRequest": {"Key": {"PK": it["PK"], "SK": it["SK"]}}}
+                            for it in batch
+                        ]
+                    }
+                    await client.batch_write_item(RequestItems=request_items)
+                lk = resp.get("LastEvaluatedKey")
+                if not lk:
+                    break
+                sched_params["ExclusiveStartKey"] = lk
+
         return count
 
     # Helper methods for converting DynamoDB items to domain objects

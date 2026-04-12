@@ -615,6 +615,7 @@ class InMemoryStorageBackend(StorageBackend):
             RunStatus.CONTINUED_AS_NEW,
             RunStatus.INTERRUPTED,
         }
+        cutoff_iso = older_than.isoformat()
         with self._lock:
             to_delete = [
                 run_id
@@ -629,12 +630,63 @@ class InMemoryStorageBackend(StorageBackend):
                     self._idempotency_index.pop(run.idempotency_key, None)
                 step_ids = [sid for sid, s in self._steps.items() if s.run_id == run_id]
                 for sid in step_ids:
+                    self._checkpoints.pop(sid, None)
                     del self._steps[sid]
                 hook_keys = [k for k in self._hooks if k[0] == run_id]
                 for k in hook_keys:
                     hook = self._hooks.pop(k)
                     self._token_index.pop(hook.token, None)
                 self._cancellation_flags.pop(run_id, None)
+
+            # --- Stream / schedule cleanup ---
+            # Purge old signals
+            for stream_id in list(self._signals):
+                self._signals[stream_id] = [
+                    s
+                    for s in self._signals[stream_id]
+                    if s.get("published_at", "") >= cutoff_iso
+                ]
+
+            # Purge delivered scheduled signals
+            if hasattr(self, "_scheduled_signals"):
+                to_remove = [
+                    sid
+                    for sid, row in self._scheduled_signals.items()
+                    if row["delivered"]
+                ]
+                for sid in to_remove:
+                    del self._scheduled_signals[sid]
+
+            # Purge terminal subscriptions
+            sub_to_remove = [
+                key
+                for key, sub in self._subscriptions.items()
+                if sub["status"] in ("terminated", "completed")
+                and sub.get("created_at", "") < cutoff_iso
+            ]
+            for key in sub_to_remove:
+                del self._subscriptions[key]
+
+            # Purge acknowledgments for signals that no longer exist
+            existing_signal_ids = set()
+            for sigs in self._signals.values():
+                for s in sigs:
+                    existing_signal_ids.add(s["signal_id"])
+            self._acknowledgments = {
+                (sig_id, step_id)
+                for sig_id, step_id in self._acknowledgments
+                if sig_id in existing_signal_ids
+            }
+
+            # Purge soft-deleted schedules
+            sched_to_remove = [
+                sid
+                for sid, sched in self._schedules.items()
+                if sched.status == ScheduleStatus.DELETED and sched.updated_at < older_than
+            ]
+            for sid in sched_to_remove:
+                del self._schedules[sid]
+
             return len(to_delete)
 
     # Stream Operations

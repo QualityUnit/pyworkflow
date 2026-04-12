@@ -422,7 +422,7 @@ def create_celery_app(
             },
             "pyworkflow-streams-drain-scheduled": {
                 "task": "pyworkflow.streams.drain_scheduled_signals",
-                "schedule": timedelta(seconds=2),
+                "schedule": timedelta(seconds=30),
                 "options": {"queue": "pyworkflow.default"},
             },
         },

@@ -678,7 +678,9 @@ class InMemoryStorageBackend(StorageBackend):
             sched_to_remove = [
                 sid
                 for sid, sched in self._schedules.items()
-                if sched.status == ScheduleStatus.DELETED and sched.updated_at < older_than
+                if sched.status == ScheduleStatus.DELETED
+                and sched.updated_at is not None
+                and sched.updated_at < older_than
             ]
             for sid in sched_to_remove:
                 del self._schedules[sid]

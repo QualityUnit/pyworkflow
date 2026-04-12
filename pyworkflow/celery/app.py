@@ -84,9 +84,7 @@ def _run_startup_migrations() -> None:
     from loguru import logger as loguru_logger
 
     if os.getenv("PYWORKFLOW_SKIP_STARTUP_MIGRATIONS", "").lower() in ("1", "true", "yes"):
-        loguru_logger.info(
-            "STARTUP_MIGRATIONS: skipped (PYWORKFLOW_SKIP_STARTUP_MIGRATIONS set)"
-        )
+        loguru_logger.info("STARTUP_MIGRATIONS: skipped (PYWORKFLOW_SKIP_STARTUP_MIGRATIONS set)")
         return
 
     from pyworkflow.config import _load_env_storage_config
@@ -134,7 +132,16 @@ def _run_startup_migrations() -> None:
         )
         raise
 
-    loguru_logger.info("STARTUP_MIGRATIONS: completed successfully")
+    # Declare that the schema is up-to-date in this process. Forked worker
+    # children inherit the flag via copy-on-write, so every runtime connect()
+    # in this pod will skip _initialize_schema() / run_migrations() entirely.
+    from pyworkflow.storage.config import mark_schema_ensured
+
+    mark_schema_ensured()
+
+    loguru_logger.info(
+        "STARTUP_MIGRATIONS: completed successfully — runtime connects will skip schema init"
+    )
 
 
 def is_sentinel_url(url: str) -> bool:
@@ -413,7 +420,7 @@ def create_celery_app(
             },
             "pyworkflow-streams-drain-scheduled": {
                 "task": "pyworkflow.streams.drain_scheduled_signals",
-                "schedule": timedelta(seconds=2),
+                "schedule": timedelta(seconds=30),
                 "options": {"queue": "pyworkflow.default"},
             },
         },

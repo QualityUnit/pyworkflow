@@ -229,8 +229,7 @@ class PostgresMigrationRunner(MigrationRunner):
                 # V7: result column on stream_subscriptions for step output payloads.
                 logger.info("PG_MIGRATION v7: ALTER stream_subscriptions ADD result")
                 await conn.execute(
-                    "ALTER TABLE stream_subscriptions "
-                    "ADD COLUMN IF NOT EXISTS result JSONB NULL"
+                    "ALTER TABLE stream_subscriptions ADD COLUMN IF NOT EXISTS result JSONB NULL"
                 )
             elif migration.up_func:
                 await migration.up_func(conn)
@@ -358,7 +357,19 @@ class PostgresStorageBackend(StorageBackend):
             self._pool_loop_id = current_loop_id
 
         if not self._initialized:
-            await self._initialize_schema()
+            # When the Celery worker startup hook has already run migrations
+            # for this process, skip _initialize_schema() entirely. The hook
+            # sets a module-level flag (see pyworkflow.storage.config) that
+            # survives fork via copy-on-write, so every runtime connect in
+            # this process and its children is a pure pool-create.
+            #
+            # Paths that do NOT go through the startup hook (tests, CLI,
+            # PYWORKFLOW_SKIP_STARTUP_MIGRATIONS=1) still initialize lazily
+            # here, preserving backwards compatibility.
+            from pyworkflow.storage.config import is_schema_ensured
+
+            if not is_schema_ensured():
+                await self._initialize_schema()
             self._initialized = True
 
     async def disconnect(self) -> None:
@@ -1651,8 +1662,14 @@ class PostgresStorageBackend(StorageBackend):
             await self.update_schedule(schedule)
 
     async def delete_old_runs(self, older_than: datetime) -> int:
-        """Delete terminal runs (and all related data) updated before older_than."""
+        """Delete terminal runs (and all related data) updated before older_than.
+
+        Also purges orphaned stream data (signals, acknowledgments, delivered
+        scheduled signals, terminal subscriptions) and soft-deleted schedules
+        older than the cutoff.
+        """
         terminal = ["completed", "failed", "cancelled", "continued_as_new", "interrupted"]
+        sub_terminal = ["terminated", "completed"]
         pool = await self._get_pool()
         async with pool.acquire() as conn, conn.transaction():
             subq = "SELECT run_id FROM workflow_runs WHERE status = ANY($1) AND updated_at < $2"
@@ -1670,6 +1687,30 @@ class PostgresStorageBackend(StorageBackend):
                 terminal,
                 older_than,
             )
+
+            # --- Stream / schedule cleanup ---
+            await conn.execute(
+                "DELETE FROM scheduled_signals WHERE delivered = TRUE AND created_at < $1",
+                older_than,
+            )
+            await conn.execute(
+                "DELETE FROM signals WHERE published_at < $1",
+                older_than,
+            )
+            await conn.execute(
+                "DELETE FROM signal_acknowledgments WHERE acknowledged_at < $1",
+                older_than,
+            )
+            await conn.execute(
+                "DELETE FROM stream_subscriptions WHERE status = ANY($1) AND created_at < $2",
+                sub_terminal,
+                older_than,
+            )
+            await conn.execute(
+                "DELETE FROM schedules WHERE status = 'DELETED' AND deleted_at < $1",
+                older_than,
+            )
+
             result = await conn.execute(
                 "DELETE FROM workflow_runs WHERE status = ANY($1) AND updated_at < $2",
                 terminal,

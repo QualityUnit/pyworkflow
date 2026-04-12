@@ -189,8 +189,7 @@ class CitusMigrationRunner(PostgresMigrationRunner):
                 # V7: Add result column. Top-level ALTER for Citus propagation (see V5 note).
                 logger.info("CITUS_MIGRATION v7: ALTER stream_subscriptions ADD result")
                 await conn.execute(
-                    "ALTER TABLE stream_subscriptions "
-                    "ADD COLUMN IF NOT EXISTS result JSONB NULL"
+                    "ALTER TABLE stream_subscriptions ADD COLUMN IF NOT EXISTS result JSONB NULL"
                 )
             elif migration.up_func:
                 await migration.up_func(conn)

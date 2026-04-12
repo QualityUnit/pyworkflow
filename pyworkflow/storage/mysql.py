@@ -1422,11 +1422,34 @@ class MySQLStorageBackend(StorageBackend):
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(f"DELETE FROM events WHERE run_id IN ({subq})", params)
+                step_subq = f"SELECT step_id FROM steps WHERE run_id IN ({subq})"
+                await cur.execute(
+                    f"DELETE FROM checkpoints WHERE step_run_id IN ({step_subq})", params
+                )
                 await cur.execute(f"DELETE FROM steps WHERE run_id IN ({subq})", params)
                 await cur.execute(f"DELETE FROM hooks WHERE run_id IN ({subq})", params)
                 await cur.execute(
                     f"DELETE FROM cancellation_flags WHERE run_id IN ({subq})", params
                 )
+
+                # --- Stream / schedule cleanup ---
+                await cur.execute(
+                    "DELETE FROM signals WHERE published_at < %s",
+                    (older_than,),
+                )
+                await cur.execute(
+                    "DELETE FROM signal_acknowledgments WHERE acknowledged_at < %s",
+                    (older_than,),
+                )
+                await cur.execute(
+                    "DELETE FROM stream_subscriptions WHERE status IN (%s,%s) AND created_at < %s",
+                    ("terminated", "completed", older_than),
+                )
+                await cur.execute(
+                    "DELETE FROM schedules WHERE status = 'DELETED' AND deleted_at < %s",
+                    (older_than,),
+                )
+
                 await cur.execute(
                     f"DELETE FROM workflow_runs WHERE status IN ({placeholders}) AND updated_at < %s",
                     params,

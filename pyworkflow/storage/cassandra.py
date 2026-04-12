@@ -1876,6 +1876,94 @@ class CassandraStorageBackend(StorageBackend):
                 )
                 count += 1
 
+        # --- Stream / schedule cleanup ---
+        # ALLOW FILTERING is acceptable here: this is a background retention
+        # job that runs at most once per day.
+        sig_rows = session.execute(
+            SimpleStatement(
+                "SELECT stream_id, stream_run_id, sequence FROM signals "
+                "WHERE published_at < %s ALLOW FILTERING",
+                consistency_level=self.read_consistency,
+            ),
+            (older_than,),
+        )
+        for sr in sig_rows:
+            session.execute(
+                SimpleStatement(
+                    "DELETE FROM signals WHERE stream_id = %s "
+                    "AND stream_run_id = %s AND sequence = %s",
+                    consistency_level=self.write_consistency,
+                ),
+                (sr.stream_id, sr.stream_run_id, sr.sequence),
+            )
+
+        ack_rows = session.execute(
+            SimpleStatement(
+                "SELECT signal_id, step_run_id FROM signal_acknowledgments "
+                "WHERE acknowledged_at < %s ALLOW FILTERING",
+                consistency_level=self.read_consistency,
+            ),
+            (older_than,),
+        )
+        for ar in ack_rows:
+            session.execute(
+                SimpleStatement(
+                    "DELETE FROM signal_acknowledgments WHERE signal_id = %s AND step_run_id = %s",
+                    consistency_level=self.write_consistency,
+                ),
+                (ar.signal_id, ar.step_run_id),
+            )
+
+        sub_rows = session.execute(
+            SimpleStatement(
+                "SELECT stream_id, step_run_id FROM stream_subscriptions "
+                "WHERE status IN ('terminated','completed') "
+                "AND created_at < %s ALLOW FILTERING",
+                consistency_level=self.read_consistency,
+            ),
+            (older_than,),
+        )
+        for sub in sub_rows:
+            session.execute(
+                SimpleStatement(
+                    "DELETE FROM stream_subscriptions WHERE stream_id = %s AND step_run_id = %s",
+                    consistency_level=self.write_consistency,
+                ),
+                (sub.stream_id, sub.step_run_id),
+            )
+
+        # Purge soft-deleted schedules
+        del_sched_rows = session.execute(
+            SimpleStatement(
+                "SELECT schedule_id FROM schedules_by_status WHERE status = 'DELETED'",
+                consistency_level=self.read_consistency,
+            ),
+        )
+        for ds in del_sched_rows:
+            sched_row = session.execute(
+                SimpleStatement(
+                    "SELECT updated_at FROM schedules WHERE schedule_id = %s",
+                    consistency_level=self.read_consistency,
+                ),
+                (ds.schedule_id,),
+            ).one()
+            if sched_row and sched_row.updated_at < older_than:
+                session.execute(
+                    SimpleStatement(
+                        "DELETE FROM schedules WHERE schedule_id = %s",
+                        consistency_level=self.write_consistency,
+                    ),
+                    (ds.schedule_id,),
+                )
+                session.execute(
+                    SimpleStatement(
+                        "DELETE FROM schedules_by_status "
+                        "WHERE status = 'DELETED' AND schedule_id = %s",
+                        consistency_level=self.write_consistency,
+                    ),
+                    (ds.schedule_id,),
+                )
+
         return count
 
     # Helper methods for converting Cassandra rows to domain objects

@@ -25,6 +25,55 @@ from pyworkflow.storage.base import StorageBackend
 _storage_cache: dict[str, tuple[StorageBackend, None]] = {}
 
 
+# ---------------------------------------------------------------------------
+# Schema-ensured signal
+# ---------------------------------------------------------------------------
+#
+# Process-global flag set by the Celery worker startup hook
+# (``pyworkflow.celery.app._run_startup_migrations``) after it has successfully
+# run pending migrations. When True, runtime ``connect()`` calls SKIP the
+# ``_initialize_schema()`` step entirely — no CREATE TABLE IF NOT EXISTS
+# sweep, no ``run_migrations()`` probe on the ``schema_versions`` table.
+#
+# Why a module-level flag rather than instance state or an env var:
+#   * Forked worker children inherit the flag via copy-on-write, so the
+#     parent process's "I already migrated" decision naturally propagates.
+#   * It's not an env var so child processes that shell out or subprocess
+#     don't accidentally carry the claim into an unrelated context.
+#   * Per-instance state would be reset on every loop change (pool recreate),
+#     so the flag must outlive backend instances.
+#
+# Paths that do NOT set the flag still get lazy initialization:
+#   * Tests that instantiate backends directly
+#   * CLI commands
+#   * Celery workers started with ``PYWORKFLOW_SKIP_STARTUP_MIGRATIONS=1``
+#   * Any caller that bypasses the startup hook
+_schema_ensured: bool = False
+
+
+def mark_schema_ensured() -> None:
+    """Declare that migrations are up-to-date in this process.
+
+    Called by the startup migration hook once migrations have been applied
+    successfully. After this, ``connect()`` on any Postgres/Citus backend
+    in this process (and in its fork children) will skip
+    ``_initialize_schema()``.
+    """
+    global _schema_ensured
+    _schema_ensured = True
+
+
+def is_schema_ensured() -> bool:
+    """Return True if the schema has already been ensured in this process."""
+    return _schema_ensured
+
+
+def reset_schema_ensured() -> None:
+    """Reset the flag. Intended for tests only."""
+    global _schema_ensured
+    _schema_ensured = False
+
+
 def _config_to_cache_key(config: dict[str, Any] | None) -> str:
     """
     Create a cache key from config dict.

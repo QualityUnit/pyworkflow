@@ -182,3 +182,76 @@ def set_stream_run_id(stream_run_id: str | None) -> Any:
     Returns a token that can be used to reset the value.
     """
     return _current_stream_run_id.set(stream_run_id)
+
+
+async def poll_inbox(
+    signal_types: list[str] | None = None,
+) -> list[Signal]:
+    """Get unacknowledged signals for the current running stream step.
+
+    Allows a step that is in ``running`` status to discover signals that
+    arrived while it was executing.  Uses the same storage query as the
+    post-execution drain mechanism (``get_pending_signals``) but can be
+    called from *within* the lifecycle function, so a long-running step
+    does not have to return first.
+
+    Signals are filtered to the current ``stream_run_id`` to prevent
+    cross-run leakage.
+
+    Args:
+        signal_types: Optional whitelist.  When provided, only signals
+            whose ``signal_type`` is in this list are returned.
+
+    Returns:
+        A list of :class:`Signal` objects ordered by sequence number.
+    """
+    from loguru import logger
+
+    storage = _current_storage.get()
+    stream_id = _current_stream_id.get()
+    step_run_id = _current_step_run_id.get()
+    stream_run_id = _current_stream_run_id.get()
+
+    if not storage or not stream_id or not step_run_id:
+        return []
+
+    try:
+        pending = await storage.get_pending_signals(stream_id, step_run_id)
+    except Exception:
+        logger.debug("[poll_inbox] get_pending_signals failed", exc_info=True)
+        return []
+
+    results: list[Signal] = []
+    for row in pending:
+        # Filter to current stream run
+        if stream_run_id and row.get("stream_run_id") != stream_run_id:
+            continue
+        # Optional signal type filter
+        if signal_types and row.get("signal_type") not in signal_types:
+            continue
+        results.append(
+            Signal(
+                signal_id=row["signal_id"],
+                stream_id=row["stream_id"],
+                signal_type=row["signal_type"],
+                payload=row.get("payload") or {},
+                sequence=row.get("sequence", 0),
+                source_run_id=row.get("source_run_id"),
+                stream_run_id=row.get("stream_run_id"),
+                metadata=row.get("metadata") or {},
+            )
+        )
+    return results
+
+
+async def acknowledge_inbox_signal(signal_id: str) -> None:
+    """Acknowledge a signal retrieved via :func:`poll_inbox`.
+
+    Once acknowledged the signal will not appear in subsequent
+    ``poll_inbox`` calls or in the post-execution drain, preventing
+    double processing.
+    """
+    storage = _current_storage.get()
+    step_run_id = _current_step_run_id.get()
+    if storage and step_run_id:
+        await storage.acknowledge_signal(signal_id, step_run_id)

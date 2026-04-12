@@ -28,8 +28,10 @@ from pyworkflow.streams.checkpoint import (  # noqa: F401
 )
 from pyworkflow.streams.consumer import StreamConsumer, poll_once  # noqa: F401
 from pyworkflow.streams.context import (  # noqa: F401
+    acknowledge_inbox_signal,
     get_checkpoint,
     get_current_signal,
+    poll_inbox,
     save_checkpoint,
     set_result,
     suspend,
@@ -73,6 +75,8 @@ __all__ = [
     "get_current_signal",
     "get_checkpoint",
     "save_checkpoint",
+    "poll_inbox",
+    "acknowledge_inbox_signal",
     # Checkpoint
     "CheckpointBackend",
     "DefaultCheckpointBackend",

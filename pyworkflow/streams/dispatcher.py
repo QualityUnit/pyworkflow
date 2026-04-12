@@ -66,9 +66,20 @@ async def dispatch_signal(signal: Signal, storage: Any) -> None:
             )
 
     if not waiting_steps:
-        logger.warning(
+        # Determine whether any subscriptions are in "running" status.
+        # If so the signal is safely persisted in the signals table and
+        # will be picked up by poll_inbox() (called from within the
+        # running step) or by _drain_pending_signals_for_step() when the
+        # step transitions back to "waiting".  Use DEBUG to avoid noisy
+        # warnings for this expected scenario.
+        has_running = any(
+            s.get("status") == "running" for s in (all_subs or [])
+        )
+        log_fn = logger.debug if has_running else logger.warning
+        log_fn(
             f"No waiting steps for {signal.signal_type} on {signal.stream_id} "
-            f"(stream_run_id={signal.stream_run_id})",
+            f"(stream_run_id={signal.stream_run_id})"
+            + (" — signal queued for running step inbox" if has_running else ""),
             stream_id=signal.stream_id,
             signal_type=signal.signal_type,
             stream_run_id=signal.stream_run_id,

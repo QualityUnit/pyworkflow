@@ -1014,9 +1014,7 @@ class FileStorageBackend(StorageBackend):
             for sig_file in list(self.signals_dir.glob("*.json")):
                 try:
                     signals = json.loads(sig_file.read_text())
-                    kept = [
-                        s for s in signals if s.get("published_at", "") >= cutoff_iso
-                    ]
+                    kept = [s for s in signals if s.get("published_at", "") >= cutoff_iso]
                     if len(kept) < len(signals):
                         sig_file.write_text(json.dumps(kept, indent=2))
                 except Exception:

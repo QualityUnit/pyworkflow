@@ -229,8 +229,7 @@ class PostgresMigrationRunner(MigrationRunner):
                 # V7: result column on stream_subscriptions for step output payloads.
                 logger.info("PG_MIGRATION v7: ALTER stream_subscriptions ADD result")
                 await conn.execute(
-                    "ALTER TABLE stream_subscriptions "
-                    "ADD COLUMN IF NOT EXISTS result JSONB NULL"
+                    "ALTER TABLE stream_subscriptions ADD COLUMN IF NOT EXISTS result JSONB NULL"
                 )
             elif migration.up_func:
                 await migration.up_func(conn)
@@ -1703,8 +1702,7 @@ class PostgresStorageBackend(StorageBackend):
                 older_than,
             )
             await conn.execute(
-                "DELETE FROM stream_subscriptions "
-                "WHERE status = ANY($1) AND created_at < $2",
+                "DELETE FROM stream_subscriptions WHERE status = ANY($1) AND created_at < $2",
                 sub_terminal,
                 older_than,
             )

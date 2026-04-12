@@ -1908,8 +1908,7 @@ class CassandraStorageBackend(StorageBackend):
         for ar in ack_rows:
             session.execute(
                 SimpleStatement(
-                    "DELETE FROM signal_acknowledgments "
-                    "WHERE signal_id = %s AND step_run_id = %s",
+                    "DELETE FROM signal_acknowledgments WHERE signal_id = %s AND step_run_id = %s",
                     consistency_level=self.write_consistency,
                 ),
                 (ar.signal_id, ar.step_run_id),
@@ -1927,8 +1926,7 @@ class CassandraStorageBackend(StorageBackend):
         for sub in sub_rows:
             session.execute(
                 SimpleStatement(
-                    "DELETE FROM stream_subscriptions "
-                    "WHERE stream_id = %s AND step_run_id = %s",
+                    "DELETE FROM stream_subscriptions WHERE stream_id = %s AND step_run_id = %s",
                     consistency_level=self.write_consistency,
                 ),
                 (sub.stream_id, sub.step_run_id),

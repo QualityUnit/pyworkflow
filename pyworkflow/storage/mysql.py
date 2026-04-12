@@ -1442,8 +1442,7 @@ class MySQLStorageBackend(StorageBackend):
                     (older_than,),
                 )
                 await cur.execute(
-                    "DELETE FROM stream_subscriptions "
-                    "WHERE status IN (%s,%s) AND created_at < %s",
+                    "DELETE FROM stream_subscriptions WHERE status IN (%s,%s) AND created_at < %s",
                     ("terminated", "completed", older_than),
                 )
                 await cur.execute(

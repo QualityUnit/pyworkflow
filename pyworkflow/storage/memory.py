@@ -642,17 +642,13 @@ class InMemoryStorageBackend(StorageBackend):
             # Purge old signals
             for stream_id in list(self._signals):
                 self._signals[stream_id] = [
-                    s
-                    for s in self._signals[stream_id]
-                    if s.get("published_at", "") >= cutoff_iso
+                    s for s in self._signals[stream_id] if s.get("published_at", "") >= cutoff_iso
                 ]
 
             # Purge delivered scheduled signals
             if hasattr(self, "_scheduled_signals"):
                 to_remove = [
-                    sid
-                    for sid, row in self._scheduled_signals.items()
-                    if row["delivered"]
+                    sid for sid, row in self._scheduled_signals.items() if row["delivered"]
                 ]
                 for sid in to_remove:
                     del self._scheduled_signals[sid]

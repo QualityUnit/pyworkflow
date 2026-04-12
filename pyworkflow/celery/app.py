@@ -84,9 +84,7 @@ def _run_startup_migrations() -> None:
     from loguru import logger as loguru_logger
 
     if os.getenv("PYWORKFLOW_SKIP_STARTUP_MIGRATIONS", "").lower() in ("1", "true", "yes"):
-        loguru_logger.info(
-            "STARTUP_MIGRATIONS: skipped (PYWORKFLOW_SKIP_STARTUP_MIGRATIONS set)"
-        )
+        loguru_logger.info("STARTUP_MIGRATIONS: skipped (PYWORKFLOW_SKIP_STARTUP_MIGRATIONS set)")
         return
 
     from pyworkflow.config import _load_env_storage_config

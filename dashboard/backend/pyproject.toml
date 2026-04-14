@@ -16,7 +16,7 @@ pydantic-settings = "^2.0.0"
 pyworkflow-engine = {path = "../..", develop = true}
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^8.0.0"
+pytest = ">=8,<10"
 pytest-asyncio = "^0.23.0"
 httpx = "^0.27.0"
 

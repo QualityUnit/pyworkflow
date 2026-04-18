@@ -167,7 +167,7 @@ importers:
         version: 1.167.12(@tanstack/react-router@1.168.10(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(vite@8.0.5(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.5.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0))
       '@trivago/prettier-plugin-sort-imports':
         specifier: ^6.0.1
-        version: 6.0.1(prettier@3.7.4)
+        version: 6.0.1(prettier@3.8.3)
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.2
@@ -193,11 +193,11 @@ importers:
         specifier: ^17.4.0
         version: 17.4.0
       prettier:
-        specifier: ^3.7.4
-        version: 3.7.4
+        specifier: ^3.8.3
+        version: 3.8.3
       prettier-plugin-tailwindcss:
         specifier: ^0.7.2
-        version: 0.7.2(@trivago/prettier-plugin-sort-imports@6.0.1(prettier@3.7.4))(prettier@3.7.4)
+        version: 0.7.2(@trivago/prettier-plugin-sort-imports@6.0.1(prettier@3.8.3))(prettier@3.8.3)
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
@@ -666,6 +666,9 @@ packages:
 
   '@lezer/common@1.5.1':
     resolution: {integrity: sha512-6YRVG9vBkaY7p1IVxL4s44n5nUnaNnGM2/AckNgYOnxTG2kWh1vR8BMxPseWPjRNpb5VtXnMpeYAEAADoRV1Iw==}
+
+  '@lezer/common@1.5.2':
+    resolution: {integrity: sha512-sxQE460fPZyU3sdc8lafxiPwJHBzZRy/udNFynGQky1SePYBdhkBl1kOagA9uT3pxR8K09bOrmTUqA9wb/PjSQ==}
 
   '@lezer/highlight@1.2.3':
     resolution: {integrity: sha512-qXdH7UqTvGfdVBINrgKhDsVTJTxactNNxLk7+UMwZhU13lMHaOBlJe9Vqp907ya56Y3+ed2tlqzys7jDkTmW0g==}
@@ -2780,8 +2783,8 @@ packages:
       prettier-plugin-svelte:
         optional: true
 
-  prettier@3.7.4:
-    resolution: {integrity: sha512-v6UNi1+3hSlVvv8fSaoUbggEM5VErKmmpGA7Pl3HF8V6uKY7rvClBOJlH6yNwQtfTueNkGVpOv/mtWL9L4bgRA==}
+  prettier@3.8.3:
+    resolution: {integrity: sha512-7igPTM53cGHMW8xWuVTydi2KO233VFiTNyF5hLJqpilHfmn8C8gPf+PS7dUT64YcXFbiMGZxS9pCSxL/Dxm/Jw==}
     engines: {node: '>=14'}
     hasBin: true
 
@@ -3386,7 +3389,7 @@ snapshots:
       '@codemirror/language': 6.12.3
       '@codemirror/state': 6.6.0
       '@codemirror/view': 6.41.0
-      '@lezer/common': 1.5.1
+      '@lezer/common': 1.5.2
 
   '@codemirror/commands@6.10.3':
     dependencies:
@@ -3665,6 +3668,8 @@ snapshots:
   '@lezer/common@1.5.0': {}
 
   '@lezer/common@1.5.1': {}
+
+  '@lezer/common@1.5.2': {}
 
   '@lezer/highlight@1.2.3':
     dependencies:
@@ -4514,7 +4519,7 @@ snapshots:
       '@tanstack/router-core': 1.168.9
       '@tanstack/router-utils': 1.161.6
       '@tanstack/virtual-file-routes': 1.161.7
-      prettier: 3.7.4
+      prettier: 3.8.3
       recast: 0.23.11
       source-map: 0.7.6
       tsx: 4.21.0
@@ -4563,7 +4568,7 @@ snapshots:
 
   '@tanstack/virtual-file-routes@1.161.7': {}
 
-  '@trivago/prettier-plugin-sort-imports@6.0.1(prettier@3.7.4)':
+  '@trivago/prettier-plugin-sort-imports@6.0.1(prettier@3.8.3)':
     dependencies:
       '@babel/generator': 7.28.5
       '@babel/parser': 7.28.5
@@ -4573,7 +4578,7 @@ snapshots:
       lodash-es: 4.17.22
       minimatch: 9.0.5
       parse-imports-exports: 0.2.4
-      prettier: 3.7.4
+      prettier: 3.8.3
     transitivePeerDependencies:
       - supports-color
 
@@ -5693,13 +5698,13 @@ snapshots:
 
   prelude-ls@1.2.1: {}
 
-  prettier-plugin-tailwindcss@0.7.2(@trivago/prettier-plugin-sort-imports@6.0.1(prettier@3.7.4))(prettier@3.7.4):
+  prettier-plugin-tailwindcss@0.7.2(@trivago/prettier-plugin-sort-imports@6.0.1(prettier@3.8.3))(prettier@3.8.3):
     dependencies:
-      prettier: 3.7.4
+      prettier: 3.8.3
     optionalDependencies:
-      '@trivago/prettier-plugin-sort-imports': 6.0.1(prettier@3.7.4)
+      '@trivago/prettier-plugin-sort-imports': 6.0.1(prettier@3.8.3)
 
-  prettier@3.7.4: {}
+  prettier@3.8.3: {}
 
   proxy-from-env@2.1.0: {}
 

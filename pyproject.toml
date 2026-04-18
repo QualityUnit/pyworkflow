@@ -71,7 +71,7 @@ dynamodb = [
 ]
 
 cassandra = [
-    "cassandra-driver>=3.29.0",
+    "cassandra-driver>=3.30.0",
 ]
 
 mysql = [
@@ -85,7 +85,7 @@ all = [
     "asyncpg>=0.29.0",
     "aiomysql>=0.2.0",
     "aws-durable-execution-sdk-python>=0.1.0",
-    "cassandra-driver>=3.29.0",
+    "cassandra-driver>=3.30.0",
 ]
 
 # Development dependencies

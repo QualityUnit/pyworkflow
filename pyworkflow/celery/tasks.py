@@ -508,8 +508,17 @@ async def _record_step_completion_and_resume(
         run_id, EventType.STEP_COMPLETED.value, step_id=step_id
     )
     if already_completed:
+        # A prior worker recorded STEP_COMPLETED but may have crashed before
+        # scheduling the workflow resume. Re-schedule defensively — the resume
+        # task is idempotent via try_claim_run(SUSPENDED -> RUNNING).
+        schedule_workflow_resumption(
+            run_id,
+            datetime.now(UTC),
+            storage_config,
+            triggered_by="step_completed_idempotent_retry",
+        )
         logger.info(
-            "Step already completed by another task, skipping",
+            "Step already completed by another task, re-scheduled resume",
             run_id=run_id,
             step_id=step_id,
             step_name=step_name,
@@ -537,8 +546,16 @@ async def _record_step_completion_and_resume(
             run_id, EventType.STEP_COMPLETED.value, step_id=step_id
         )
         if already_completed:
+            # Defensive re-schedule: the peer that recorded STEP_COMPLETED may
+            # have crashed before scheduling resume. Safe due to try_claim_run.
+            schedule_workflow_resumption(
+                run_id,
+                datetime.now(UTC),
+                storage_config,
+                triggered_by="step_completed_idempotent_retry",
+            )
             logger.info(
-                "Step already completed by another task during wait, skipping",
+                "Step already completed by another task during wait, re-scheduled resume",
                 run_id=run_id,
                 step_id=step_id,
                 step_name=step_name,
@@ -676,8 +693,17 @@ async def _record_step_failure_and_resume(
         run_id, EventType.STEP_FAILED.value, step_id=step_id, is_retryable="False"
     )
     if already_completed or already_failed_terminal:
+        # A prior worker recorded the terminal event but may have crashed before
+        # scheduling the workflow resume. Re-schedule defensively — safe due to
+        # try_claim_run(SUSPENDED -> RUNNING) idempotency.
+        schedule_workflow_resumption(
+            run_id,
+            datetime.now(UTC),
+            storage_config,
+            triggered_by="step_failed_idempotent_retry",
+        )
         logger.info(
-            "Step already completed/failed by another task, skipping",
+            "Step already completed/failed by another task, re-scheduled resume",
             run_id=run_id,
             step_id=step_id,
             step_name=step_name,
@@ -708,8 +734,16 @@ async def _record_step_failure_and_resume(
             run_id, EventType.STEP_FAILED.value, step_id=step_id, is_retryable="False"
         )
         if already_completed or already_failed_terminal:
+            # Defensive re-schedule: peer that recorded the terminal event may
+            # have crashed before scheduling resume. Safe due to try_claim_run.
+            schedule_workflow_resumption(
+                run_id,
+                datetime.now(UTC),
+                storage_config,
+                triggered_by="step_failed_idempotent_retry",
+            )
             logger.info(
-                "Step already completed/failed by another task during wait, skipping",
+                "Step already completed/failed by another task during wait, re-scheduled resume",
                 run_id=run_id,
                 step_id=step_id,
                 step_name=step_name,

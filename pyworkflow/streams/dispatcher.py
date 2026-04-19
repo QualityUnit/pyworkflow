@@ -72,9 +72,7 @@ async def dispatch_signal(signal: Signal, storage: Any) -> None:
         # running step) or by _drain_pending_signals_for_step() when the
         # step transitions back to "waiting".  Use DEBUG to avoid noisy
         # warnings for this expected scenario.
-        has_running = any(
-            s.get("status") == "running" for s in (all_subs or [])
-        )
+        has_running = any(s.get("status") == "running" for s in (all_subs or []))
         log_fn = logger.debug if has_running else logger.warning
         log_fn(
             f"No waiting steps for {signal.signal_type} on {signal.stream_id} "

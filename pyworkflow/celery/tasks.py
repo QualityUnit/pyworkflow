@@ -302,7 +302,7 @@ def execute_step_task(
                     )
                     if _step_span:
                         text_output = result.get("text_output", "") if isinstance(result, dict) else ""
-                        _tp.update_span(_step_span, input={"step": step_name}, output={"text_output": text_output})
+                        _tp.update_span(_step_span, input=dict(kwargs) if kwargs else None, output={"text_output": text_output})
 
                         llm_calls = result.get("_llm_calls", []) if isinstance(result, dict) else []
                         if llm_calls and is_generator:

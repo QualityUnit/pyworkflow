@@ -277,6 +277,7 @@ async def execute_workflow_with_context(
     try:
         # Note: Event replay is handled by LocalContext in its constructor
         # when event_log is provided
+        result = None  # For tracing in finally block
 
         logger.info(
             f"Executing workflow: {workflow_name}",
@@ -378,6 +379,28 @@ async def execute_workflow_with_context(
     finally:
         # Flush tracing data
         if tracing_provider:
+            try:
+                # Set trace-level input (user message) and output (final response)
+                _trace_input = None
+                if args and isinstance(args[0], dict):
+                    _trace_input = args[0].get("input_value")
+                _trace_output = None
+                try:
+                    if result is not None and isinstance(result, dict):
+                        _out = result.get("outputs", result)
+                        if isinstance(_out, dict):
+                            for v in _out.values():
+                                if isinstance(v, dict) and v.get("text_output"):
+                                    _trace_output = v["text_output"]
+                                    break
+                        if not _trace_output:
+                            _trace_output = result.get("text_output")
+                except Exception:
+                    pass
+                if ctx._trace_id:
+                    tracing_provider.update_trace(ctx._trace_id, input=_trace_input, output=_trace_output)
+            except Exception:
+                pass
             try:
                 import asyncio
                 asyncio.get_event_loop().create_task(tracing_provider.shutdown())

@@ -301,7 +301,7 @@ def step(
                 )
 
                 # Record tracing span for locally executed step
-                _record_step_tracing(ctx, step_name, step_id, is_generator, result)
+                _record_step_tracing(ctx, step_name, step_id, is_generator, result, args, kwargs)
 
                 return result
 
@@ -773,6 +773,8 @@ def _record_step_tracing(
     step_id: str,
     is_generator: bool,
     result: Any,
+    step_args: tuple = (),
+    step_kwargs: dict | None = None,
 ) -> None:
     """Record a tracing span for a completed step. No-op if tracing is not configured."""
     tp = getattr(ctx, "_tracing_provider", None)
@@ -786,9 +788,14 @@ def _record_step_tracing(
         if not span:
             return
 
+        # Build input from actual step arguments
+        step_input = dict(step_kwargs) if step_kwargs else {}
+        if step_args:
+            step_input["_args"] = [str(a)[:500] for a in step_args]
+
         # Basic input/output
         text_output = result.get("text_output", "") if isinstance(result, dict) else ""
-        tp.update_span(span, input={"step": step_name}, output={"text_output": text_output})
+        tp.update_span(span, input=step_input or None, output={"text_output": text_output})
 
         # LLM calls
         llm_calls = result.get("_llm_calls", []) if isinstance(result, dict) else []

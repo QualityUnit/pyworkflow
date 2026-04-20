@@ -298,6 +298,7 @@ def execute_step_task(
                     _trace_id = run_id.replace("run_", "").ljust(32, "0")[:32]
                     _step_span = _tp.start_span_on_trace(
                         _trace_id, f"{step_name}-{step_id}", is_generator=is_generator,
+                        trace_name=workflow_name or "workflow",
                     )
                     if _step_span:
                         text_output = result.get("text_output", "") if isinstance(result, dict) else ""

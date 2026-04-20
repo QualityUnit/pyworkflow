@@ -34,6 +34,8 @@ class TracingProvider:
 
         self._root_span: Any = None
         self._root_span_id: Optional[str] = None
+        self._trace_name: Optional[str] = None
+        self._session_id: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Root (workflow-level) span
@@ -46,24 +48,23 @@ class TracingProvider:
         session_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> Any:
-        """Start the root workflow span on a fixed trace_id.
-
-        All spans (start, worker, resume) use the same trace_id so they
-        land in one Langfuse trace.
-        """
+        """Start the root workflow span on a fixed trace_id."""
         if not self._langfuse:
             return None
+        self._trace_name = name
+        self._session_id = session_id
         try:
-            # Create root span attached to our fixed trace_id
-            self._root_span = self._langfuse.start_observation(
-                name=name, as_type="span",
-                trace_context={"trace_id": trace_id},
-            )
-            # Set trace-level name/session so the trace shows up correctly
-            try:
-                self._langfuse.trace(id=trace_id, name=name, session_id=session_id, user_id=user_id)
-            except Exception:
-                pass
+            from langfuse import propagate_attributes
+
+            with propagate_attributes(
+                trace_name=name,
+                session_id=session_id,
+                user_id=user_id,
+            ):
+                self._root_span = self._langfuse.start_observation(
+                    name=name, as_type="span",
+                    trace_context={"trace_id": trace_id},
+                )
             if self._root_span and hasattr(self._root_span, 'id'):
                 self._root_span_id = self._root_span.id
             return self._root_span
@@ -130,19 +131,24 @@ class TracingProvider:
             logger.debug(f"Failed to start child generation: {e}")
             return None
 
-    def start_span_on_trace(self, trace_id: str, name: str, is_generator: bool = False, parent_span_id: Optional[str] = None) -> Any:
+    def start_span_on_trace(self, trace_id: str, name: str, is_generator: bool = False, parent_span_id: Optional[str] = None, trace_name: Optional[str] = None) -> Any:
         """Start a span attached to a trace with optional parent span. For worker/resume step tracing."""
         if not self._langfuse:
             return None
         try:
+            from langfuse import propagate_attributes
+
             as_type = "generation" if is_generator else "span"
             trace_context = {"trace_id": trace_id}
             if parent_span_id:
                 trace_context["parent_span_id"] = parent_span_id
-            return self._langfuse.start_observation(
-                name=name, as_type=as_type,
-                trace_context=trace_context,
-            )
+            # Use propagate_attributes to preserve trace name
+            effective_trace_name = trace_name or self._trace_name or "workflow"
+            with propagate_attributes(trace_name=effective_trace_name, session_id=self._session_id):
+                return self._langfuse.start_observation(
+                    name=name, as_type=as_type,
+                    trace_context=trace_context,
+                )
         except Exception as e:
             logger.debug(f"Failed to start span on trace: {e}")
             return None

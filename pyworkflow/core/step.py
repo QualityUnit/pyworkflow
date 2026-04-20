@@ -782,7 +782,7 @@ def _record_step_tracing(
         trace_id = getattr(ctx, "_trace_id", None)
         if not trace_id:
             return
-        span = tp.start_span_on_trace(trace_id, f"{step_name}-{step_id}", is_generator=is_generator)
+        span = tp.start_span_on_trace(trace_id, f"{step_name}-{step_id}", is_generator=is_generator, trace_name=ctx.workflow_name)
         if not span:
             return
 

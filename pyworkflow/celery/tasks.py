@@ -580,6 +580,15 @@ async def _record_step_completion_and_resume(
     )
     await storage.record_event(completion_event)
 
+    # Release the resume_workflow_task singleton lock before scheduling the
+    # next resume. The parent resume task that dispatched this step may still
+    # be holding the (run_id,) lock during its final teardown; without this
+    # release the apply_async below sees the lock held and silently drops
+    # the schedule as a duplicate, leaving the workflow stuck in SUSPENDED.
+    resume_workflow_task.release_lock(
+        task_args=[run_id], task_kwargs={"storage_config": storage_config}
+    )
+
     # Schedule workflow resumption
     schedule_workflow_resumption(
         run_id, datetime.now(UTC), storage_config, triggered_by="step_completed"
@@ -768,6 +777,12 @@ async def _record_step_failure_and_resume(
         attempt=1,  # Final attempt
     )
     await storage.record_event(failure_event)
+
+    # Release the resume_workflow_task singleton lock before scheduling the
+    # next resume (see _record_step_completion_and_resume for details on why).
+    resume_workflow_task.release_lock(
+        task_args=[run_id], task_kwargs={"storage_config": storage_config}
+    )
 
     # Schedule workflow resumption
     schedule_workflow_resumption(

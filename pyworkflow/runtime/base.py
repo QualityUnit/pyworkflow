@@ -37,6 +37,7 @@ class Runtime(ABC):
         idempotency_key: str | None = None,
         max_duration: str | None = None,
         metadata: dict | None = None,
+        tracing: dict | None = None,
     ) -> str:
         """
         Start a new workflow execution.

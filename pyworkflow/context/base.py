@@ -133,6 +133,10 @@ class WorkflowContext(ABC):
         """
         self._run_id = run_id
         self._workflow_name = workflow_name
+        self._tracing: dict[str, Any] | None = None
+        self._tracing_provider: Any = None  # TracingProvider instance
+        self._trace_id: str | None = None  # Stable trace ID for Langfuse
+        self._root_span_id: str | None = None  # Root span ID for nesting
 
     @property
     def run_id(self) -> str:
@@ -143,6 +147,20 @@ class WorkflowContext(ABC):
     def workflow_name(self) -> str:
         """Get the current workflow name."""
         return self._workflow_name
+
+    @property
+    def tracing(self) -> dict[str, Any] | None:
+        """Get the tracing provider config (e.g. Langfuse credentials), or None."""
+        return self._tracing
+
+    @tracing.setter
+    def tracing(self, value: dict[str, Any] | None) -> None:
+        self._tracing = value
+
+    @property
+    def tracing_provider(self) -> Any:
+        """Get the active TracingProvider instance, or None."""
+        return self._tracing_provider
 
     # =========================================================================
     # Abstract methods - must be implemented by subclasses

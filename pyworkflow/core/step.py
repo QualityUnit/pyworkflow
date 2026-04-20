@@ -58,6 +58,7 @@ def step(
     timeout: int | None = None,
     metadata: dict[str, Any] | None = None,
     force_local: bool = False,
+    is_generator: bool = False,
 ) -> Callable:
     """
     Decorator to mark functions as workflow steps.
@@ -77,6 +78,8 @@ def step(
         force_local: If True, always execute inline even in distributed
             runtimes (e.g., Celery). Useful for lightweight steps where
             the overhead of message broker dispatch is undesirable.
+        is_generator: If True, creates a Langfuse generation span instead of
+            a regular span. Use for LLM/AI steps that produce generated content.
 
     Returns:
         Decorated step function
@@ -170,9 +173,8 @@ def step(
                     run_id=ctx.run_id,
                     step_id=step_id,
                 )
-                return ctx.get_step_result(step_id)
-
-            # Check if step is already in progress (dispatched to Celery but not completed)
+                cached = ctx.get_step_result(step_id)
+                return cached
             # This prevents re-dispatch during resume when step is still running/retrying
             if ctx.is_step_in_progress(step_id):
                 logger.debug(
@@ -209,6 +211,7 @@ def step(
                     max_retries=max_retries,
                     retry_delay=retry_delay,
                     timeout=timeout,
+                    is_generator=is_generator,
                 )
 
             # Check if we're resuming from a retry
@@ -296,6 +299,9 @@ def step(
                     run_id=ctx.run_id,
                     step_id=step_id,
                 )
+
+                # Record tracing span for locally executed step
+                _record_step_tracing(ctx, step_name, step_id, is_generator, result)
 
                 return result
 
@@ -458,6 +464,7 @@ def step(
             timeout=timeout,
             metadata=metadata,
             force_local=force_local,
+            is_generator=is_generator,
         )
 
         # Store metadata on wrapper
@@ -468,6 +475,7 @@ def step(
         wrapper.__step_timeout__ = timeout  # type: ignore[attr-defined]
         wrapper.__step_metadata__ = metadata or {}  # type: ignore[attr-defined]
         wrapper.__step_force_local__ = force_local  # type: ignore[attr-defined]
+        wrapper.__step_is_generator__ = is_generator  # type: ignore[attr-defined]
 
         return wrapper
 
@@ -627,6 +635,7 @@ async def _dispatch_step_to_celery(
     max_retries: int,
     retry_delay: str | int | list[int],
     timeout: int | None,
+    is_generator: bool = False,
 ) -> Any:
     """
     Dispatch step execution to Celery step worker.
@@ -736,6 +745,9 @@ async def _dispatch_step_to_celery(
         context_data=context_data,
         context_class_name=context_class_name,
         workflow_name=ctx.workflow_name,
+        tracing=ctx.tracing,
+        is_generator=is_generator,
+        root_span_id=getattr(ctx, '_root_span_id', None),
     )
 
     logger.info(
@@ -753,3 +765,64 @@ async def _dispatch_step_to_celery(
         step_name=step_name,
         task_id=task_result.id,
     )
+
+
+def _record_step_tracing(
+    ctx: Any,
+    step_name: str,
+    step_id: str,
+    is_generator: bool,
+    result: Any,
+) -> None:
+    """Record a tracing span for a completed step. No-op if tracing is not configured."""
+    tp = getattr(ctx, "_tracing_provider", None)
+    if not tp:
+        return
+    try:
+        trace_id = getattr(ctx, "_trace_id", None)
+        if not trace_id:
+            return
+        span = tp.start_span_on_trace(trace_id, f"{step_name}-{step_id}", is_generator=is_generator)
+        if not span:
+            return
+
+        # Basic input/output
+        text_output = result.get("text_output", "") if isinstance(result, dict) else ""
+        tp.update_span(span, input={"step": step_name}, output={"text_output": text_output})
+
+        # LLM calls
+        llm_calls = result.get("_llm_calls", []) if isinstance(result, dict) else []
+        if llm_calls and is_generator:
+            total_in = sum(lc.get("input_tokens", 0) for lc in llm_calls)
+            total_out = sum(lc.get("output_tokens", 0) for lc in llm_calls)
+            total_cost = sum(lc.get("cost", 0) for lc in llm_calls)
+            model = llm_calls[0].get("model") if llm_calls else None
+            tp.update_span(
+                span,
+                usage_details={"input_tokens": total_in, "output_tokens": total_out, "total_tokens": total_in + total_out},
+                cost_details={"input": 0, "output": total_cost},
+                model=model,
+            )
+        elif llm_calls:
+            for lc in llm_calls:
+                gen = tp.start_child_generation(span, "LLM Call")
+                if gen:
+                    tp.update_span(
+                        gen,
+                        usage_details={"input_tokens": lc.get("input_tokens", 0), "output_tokens": lc.get("output_tokens", 0), "total_tokens": lc.get("total_tokens", 0)},
+                        cost_details={"input": 0, "output": lc.get("cost", 0)},
+                        model=lc.get("model"),
+                    )
+                    tp.end_span(gen)
+
+        # Tool calls
+        tool_calls = result.get("_tool_calls", []) if isinstance(result, dict) else []
+        for tc in tool_calls:
+            ts = tp.start_child_span(span, tc.get("name", "tool"))
+            if ts:
+                tp.update_span(ts, input=tc.get("input"), output=tc.get("output"))
+                tp.end_span(ts)
+
+        tp.end_span(span)
+    except Exception:
+        pass  # Never fail the workflow because of tracing

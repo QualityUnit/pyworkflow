@@ -93,6 +93,9 @@ def execute_step_task(
     context_data: dict[str, Any] | None = None,
     context_class_name: str | None = None,
     workflow_name: str | None = None,
+    tracing: dict[str, Any] | None = None,
+    is_generator: bool = False,
+    root_span_id: str | None = None,
 ) -> Any:
     """
     Execute a workflow step on a Celery worker.
@@ -242,6 +245,7 @@ def execute_step_task(
             step_workflow_ctx._runtime = "celery"
             step_workflow_ctx._storage_config = storage_config
             step_workflow_ctx._is_step_worker = True
+            step_workflow_ctx.tracing = tracing
 
             # Set parent_run_id if this workflow is a child
             wf_run = run_async(storage.get_run(run_id))
@@ -283,6 +287,46 @@ def execute_step_task(
             run_id=run_id,
             step_id=step_id,
         )
+
+        # Record tracing span for this step on the worker
+        if tracing and result is not None:
+            try:
+                from pyworkflow.tracing import create_tracing_provider
+
+                _tp = create_tracing_provider(tracing)
+                if _tp:
+                    _trace_id = run_id.replace("run_", "").ljust(32, "0")[:32]
+                    _step_span = _tp.start_span_on_trace(
+                        _trace_id, f"{step_name}-{step_id}", is_generator=is_generator,
+                    )
+                    if _step_span:
+                        text_output = result.get("text_output", "") if isinstance(result, dict) else ""
+                        _tp.update_span(_step_span, input={"step": step_name}, output={"text_output": text_output})
+
+                        llm_calls = result.get("_llm_calls", []) if isinstance(result, dict) else []
+                        if llm_calls and is_generator:
+                            t_in = sum(lc.get("input_tokens", 0) for lc in llm_calls)
+                            t_out = sum(lc.get("output_tokens", 0) for lc in llm_calls)
+                            t_cost = sum(lc.get("cost", 0) for lc in llm_calls)
+                            _tp.update_span(_step_span, usage_details={"input_tokens": t_in, "output_tokens": t_out, "total_tokens": t_in + t_out}, cost_details={"input": 0, "output": t_cost}, model=llm_calls[0].get("model") if llm_calls else None)
+                        elif llm_calls:
+                            for lc in llm_calls:
+                                gen = _tp.start_child_generation(_step_span, "LLM Call")
+                                if gen:
+                                    _tp.update_span(gen, usage_details={"input_tokens": lc.get("input_tokens", 0), "output_tokens": lc.get("output_tokens", 0), "total_tokens": lc.get("total_tokens", 0)}, cost_details={"input": 0, "output": lc.get("cost", 0)}, model=lc.get("model"))
+                                    _tp.end_span(gen)
+
+                        tool_calls = result.get("_tool_calls", []) if isinstance(result, dict) else []
+                        for tc in tool_calls:
+                            ts = _tp.start_child_span(_step_span, tc.get("name", "tool"))
+                            if ts:
+                                _tp.update_span(ts, input=tc.get("input"), output=tc.get("output"))
+                                _tp.end_span(ts)
+
+                        _tp.end_span(_step_span)
+                    run_async(_tp.shutdown())
+            except Exception:
+                pass  # Never fail step because of tracing
 
         # Record STEP_COMPLETED event and trigger workflow resumption
         run_async(
@@ -840,6 +884,7 @@ def start_workflow_task(
     run_id: str,
     storage_config: dict[str, Any] | None = None,
     idempotency_key: str | None = None,
+    tracing: dict[str, Any] | None = None,
 ) -> str:
     """
     Start a workflow execution.
@@ -891,6 +936,7 @@ def start_workflow_task(
             storage_config=storage_config,
             idempotency_key=idempotency_key,
             run_id=run_id,
+            tracing=tracing,
         )
     )
 
@@ -1416,6 +1462,13 @@ async def _recover_workflow_on_worker(
     args = deserialize_args(run.input_args)
     kwargs = deserialize_kwargs(run.input_kwargs)
 
+    # Extract tracing config from workflow arguments (graph_state)
+    _recover_tracing = None
+    if args:
+        _first_arg = args[0] if args else None
+        if isinstance(_first_arg, dict):
+            _recover_tracing = _first_arg.get("tracing")
+
     # Execute workflow with event replay
     try:
         result = await execute_workflow_with_context(
@@ -1429,6 +1482,7 @@ async def _recover_workflow_on_worker(
             runtime="celery",
             storage_config=storage_config,
             parent_run_id=run.parent_run_id,
+            tracing=workflow_meta.tracing or _recover_tracing,
         )
 
         # Update run status to completed
@@ -1564,6 +1618,7 @@ async def _start_workflow_on_worker(
     storage_config: dict[str, Any] | None = None,
     idempotency_key: str | None = None,
     run_id: str | None = None,
+    tracing: dict[str, Any] | None = None,
 ) -> str:
     """
     Internal function to start workflow on Celery worker.
@@ -1767,13 +1822,16 @@ async def _start_workflow_on_worker(
         input_kwargs=serialize_kwargs(**kwargs),
         idempotency_key=idempotency_key,
         max_duration=workflow_meta.max_duration,
-        context={},  # Step context (not from decorator)
+        context={},  # Step context
         recovery_attempts=0,
         max_recovery_attempts=max_recovery_attempts,
         recover_on_worker_loss=recover_on_worker_loss,
     )
 
     await storage.create_run(run)
+
+    # Pyworkflow just created the run
+    # TODO - use the OLTP
 
     # Record workflow started event
     start_event = create_workflow_started_event(
@@ -1797,6 +1855,7 @@ async def _start_workflow_on_worker(
             kwargs=kwargs,
             runtime="celery",
             storage_config=storage_config,
+            tracing=tracing or workflow_meta.tracing,
         )
 
         # Update run status to completed
@@ -2377,6 +2436,13 @@ async def _resume_workflow_on_worker(
     args = deserialize_args(run.input_args)
     kwargs = deserialize_kwargs(run.input_kwargs)
 
+    # Extract tracing config from workflow arguments (graph_state)
+    _resume_tracing = None
+    if args:
+        _first_arg = args[0] if args else None
+        if isinstance(_first_arg, dict):
+            _resume_tracing = _first_arg.get("tracing")
+
     # Execute workflow with event replay
     try:
         result = await execute_workflow_with_context(
@@ -2391,6 +2457,7 @@ async def _resume_workflow_on_worker(
             runtime="celery",
             storage_config=storage_config,
             parent_run_id=run.parent_run_id,
+            tracing=workflow_meta.tracing or _resume_tracing,
         )
 
         # Update run status to completed

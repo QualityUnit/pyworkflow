@@ -134,6 +134,7 @@ class LocalRuntime(Runtime):
         idempotency_key: str | None = None,
         max_duration: str | None = None,
         metadata: dict | None = None,
+        tracing: dict | None = None,
     ) -> str:
         """Start a workflow execution in the current process."""
         from pyworkflow.core.workflow import execute_workflow_with_context
@@ -190,6 +191,7 @@ class LocalRuntime(Runtime):
                 args=args,
                 kwargs=kwargs,
                 durable=durable,
+                tracing=tracing,
             )
 
             if durable and storage is not None:

@@ -34,6 +34,7 @@ def workflow(
     recover_on_worker_loss: bool | None = None,
     max_recovery_attempts: int | None = None,
     context_class: type | None = None,
+    tracing: dict[str, Any] | None = None,
 ) -> Callable:
     """
     Decorator to mark async functions as workflows.
@@ -53,6 +54,9 @@ def workflow(
         context_class: Optional StepContext subclass for step context access.
             When provided, enables get_step_context() and set_step_context()
             for passing context data to steps running on remote workers.
+        tracing: Optional tracing provider config dict. When provided, enables
+            observability tracing (e.g. Langfuse) for the workflow and its steps.
+            Example: {"provider": "langfuse", "public_key": "...", "secret_key": "...", "host": "..."}
 
     Returns:
         Decorated workflow function
@@ -127,6 +131,7 @@ def workflow(
             max_duration=max_duration,
             tags=validated_tags,
             context_class=context_class,
+            tracing=tracing,
         )
 
         # Store metadata on wrapper
@@ -142,6 +147,7 @@ def workflow(
             max_recovery_attempts  # None = use config default
         )
         wrapper.__workflow_context_class__ = context_class  # type: ignore[attr-defined]
+        wrapper.__workflow_tracing__ = tracing  # type: ignore[attr-defined]
 
         return wrapper
 
@@ -161,6 +167,7 @@ async def execute_workflow_with_context(
     runtime: str | None = None,
     storage_config: dict | None = None,
     parent_run_id: str | None = None,
+    tracing: dict | None = None,
 ) -> Any:
     """
     Execute workflow function with proper context setup.
@@ -209,6 +216,33 @@ async def execute_workflow_with_context(
     ctx._runtime = runtime
     ctx._storage_config = storage_config
     ctx._parent_run_id = parent_run_id
+
+    # Set tracing config (e.g. Langfuse credentials from caller or decorator)
+    ctx.tracing = tracing or getattr(workflow_func, "__workflow_tracing__", None)
+
+    # Initialize tracing provider
+    is_resume = bool(event_log)
+    tracing_provider = None
+    if ctx.tracing:
+        from pyworkflow.tracing import create_tracing_provider
+
+        tracing_provider = create_tracing_provider(ctx.tracing)
+        if tracing_provider:
+            # Stable trace ID derived from run_id (same across start/resume/worker)
+            ctx._trace_id = run_id.replace("run_", "").ljust(32, "0")[:32]
+            if not is_resume:
+                # Fresh start: create the Langfuse trace (no root span — steps are direct children)
+                try:
+                    tracing_provider._langfuse.trace(
+                        id=ctx._trace_id, name=workflow_name, session_id=run_id,
+                    )
+                except Exception:
+                    pass
+            logger.info(
+                f"Tracing provider initialized for workflow: {workflow_name} (resume={is_resume})",
+                run_id=run_id,
+            )
+    ctx._tracing_provider = tracing_provider
 
     # Set cancellation state if requested before execution
     if cancellation_requested:
@@ -276,6 +310,7 @@ async def execute_workflow_with_context(
 
     except SuspensionSignal as e:
         # Workflow suspended (sleep/hook) - only happens in durable mode
+        # Don't end tracing - will continue on resume
         logger.info(
             f"Workflow suspended: {e.reason}",
             run_id=run_id,
@@ -341,6 +376,14 @@ async def execute_workflow_with_context(
         raise
 
     finally:
+        # Flush tracing data
+        if tracing_provider:
+            try:
+                import asyncio
+                asyncio.get_event_loop().create_task(tracing_provider.shutdown())
+            except Exception:
+                pass
+
         # Clear step context if it was set
         if step_context_token is not None:
             from pyworkflow.context.step_context import _reset_step_context

@@ -18,6 +18,9 @@ class TracingProvider:
     """Manages a Langfuse client and the root workflow span."""
 
     def __init__(self, public_key: str, secret_key: str, host: str):
+        self._public_key = public_key
+        self._secret_key = secret_key
+        self._host = host
         try:
             from langfuse import Langfuse
             from opentelemetry.sdk.trace import TracerProvider
@@ -134,6 +137,7 @@ class TracingProvider:
     def start_span_on_trace(self, trace_id: str, name: str, is_generator: bool = False, parent_span_id: Optional[str] = None, trace_name: Optional[str] = None) -> Any:
         """Start a span attached to a trace with optional parent span. For worker/resume step tracing."""
         if not self._langfuse:
+            logger.info(f"TRACING SPAN: no langfuse client, skipping span {name}")
             return None
         try:
             from langfuse import propagate_attributes
@@ -142,15 +146,17 @@ class TracingProvider:
             trace_context = {"trace_id": trace_id}
             if parent_span_id:
                 trace_context["parent_span_id"] = parent_span_id
-            # Use propagate_attributes to preserve trace name
             effective_trace_name = trace_name or self._trace_name or "workflow"
+            logger.info(f"TRACING SPAN: creating {as_type} name={name}, trace_id={trace_id}, parent={parent_span_id}, trace_name={effective_trace_name}")
             with propagate_attributes(trace_name=effective_trace_name, session_id=self._session_id):
-                return self._langfuse.start_observation(
+                span = self._langfuse.start_observation(
                     name=name, as_type=as_type,
                     trace_context=trace_context,
                 )
+            logger.info(f"TRACING SPAN: created span id={getattr(span, 'id', None)}")
+            return span
         except Exception as e:
-            logger.debug(f"Failed to start span on trace: {e}")
+            logger.error(f"TRACING SPAN: failed to start span {name}: {e}", exc_info=True)
             return None
 
     @staticmethod
@@ -224,10 +230,41 @@ class TracingProvider:
         if not self._langfuse:
             return
         try:
-            await asyncio.sleep(1)
             self._langfuse.shutdown()
+            await asyncio.sleep(0.5)
         except Exception as e:
             logger.debug(f"Error shutting down tracing: {e}")
+
+    async def update_trace_via_api(self, trace_id: str, name: str = None, input: Any = None, output: Any = None, trace_params: dict = None) -> None:
+        """Update trace attributes via Langfuse REST API. Called after SDK shutdown."""
+        trace_params = trace_params or {}
+        body: dict[str, Any] = {"id": trace_id}
+        if name is not None:
+            body["name"] = name
+        if input is not None:
+            body["input"] = input
+        if output is not None:
+            body["output"] = output
+        # Map trace_params keys to Langfuse API camelCase
+        key_map = {"session_id": "sessionId", "user_id": "userId", "metadata": "metadata", "tags": "tags"}
+        for key, api_key in key_map.items():
+            val = trace_params.get(key)
+            if val is not None:
+                body[api_key] = val
+        logger.info(f"TRACING API: host={self._host}, body_keys={list(body.keys())}, trace_params={trace_params}")
+        try:
+            import httpx
+            from datetime import datetime, timezone
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    f"{self._host}/api/public/ingestion",
+                    json={"batch": [{"id": f"trace-update-{trace_id}", "type": "trace-create", "timestamp": datetime.now(timezone.utc).isoformat(), "body": body}]},
+                    auth=(self._public_key, self._secret_key),
+                    timeout=5,
+                )
+                logger.info(f"TRACING API: response status={resp.status_code}, body={resp.text[:500]}")
+        except Exception as e:
+            logger.error(f"TRACING API: failed: {e}", exc_info=True)
 
     @property
     def root_span(self) -> Any:

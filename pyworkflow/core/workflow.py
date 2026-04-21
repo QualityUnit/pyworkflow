@@ -230,14 +230,6 @@ async def execute_workflow_with_context(
         if tracing_provider:
             # Stable trace ID derived from run_id (same across start/resume/worker)
             ctx._trace_id = run_id.replace("run_", "").ljust(32, "0")[:32]
-            if not is_resume:
-                # Fresh start: create the Langfuse trace (no root span — steps are direct children)
-                try:
-                    tracing_provider._langfuse.trace(
-                        id=ctx._trace_id, name=workflow_name, session_id=run_id,
-                    )
-                except Exception:
-                    pass
             logger.info(
                 f"Tracing provider initialized for workflow: {workflow_name} (resume={is_resume})",
                 run_id=run_id,
@@ -377,15 +369,14 @@ async def execute_workflow_with_context(
         raise
 
     finally:
-        # Flush tracing data
+        # Flush tracing data — wrapped in broad try/except to never crash the workflow
         if tracing_provider:
             try:
-                # Set trace-level input (user message) and output (final response)
                 _trace_input = None
-                if args and isinstance(args[0], dict):
-                    _trace_input = args[0].get("input_value")
                 _trace_output = None
                 try:
+                    if args and isinstance(args[0], dict):
+                        _trace_input = args[0].get("input_value")
                     if result is not None and isinstance(result, dict):
                         _out = result.get("outputs", result)
                         if isinstance(_out, dict):
@@ -397,15 +388,29 @@ async def execute_workflow_with_context(
                             _trace_output = result.get("text_output")
                 except Exception:
                     pass
-                if ctx._trace_id:
-                    tracing_provider.update_trace(ctx._trace_id, input=_trace_input, output=_trace_output)
-            except Exception:
-                pass
-            try:
-                import asyncio
-                asyncio.get_event_loop().create_task(tracing_provider.shutdown())
-            except Exception:
-                pass
+                try:
+                    if ctx._trace_id:
+                        tracing_provider.update_trace(ctx._trace_id, input=_trace_input, output=_trace_output)
+                except Exception:
+                    pass
+                try:
+                    await tracing_provider.shutdown()
+                except Exception:
+                    pass
+                try:
+                    trace_params = (ctx.tracing or {}).get("trace_params", {})
+                    await tracing_provider.update_trace_via_api(
+                        trace_id=ctx._trace_id,
+                        name=workflow_name,
+                        input=_trace_input,
+                        output=_trace_output,
+                        trace_params=trace_params,
+                    )
+                except Exception as e:
+                    import traceback as _tb
+                    logger.error(f"TRACING: update_trace_via_api failed: {e}\n{_tb.format_exc()}")
+            except Exception as e:
+                logger.error(f"TRACING: unexpected error in tracing finally block: {e}")
 
         # Clear step context if it was set
         if step_context_token is not None:

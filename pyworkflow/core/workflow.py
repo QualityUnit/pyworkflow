@@ -389,20 +389,15 @@ async def execute_workflow_with_context(
                 except Exception:
                     pass
                 try:
-                    if ctx._trace_id:
-                        tracing_provider.update_trace(ctx._trace_id, input=_trace_input, output=_trace_output)
-                except Exception:
-                    pass
-                try:
                     await tracing_provider.shutdown()
                 except Exception:
                     pass
                 try:
-                    trace_params = dict((ctx.tracing or {}).get("trace_params", {}))
-                    meta = dict(trace_params.get("metadata") or {})
+                    trace_params = (ctx.tracing or {}).get("trace_params", {})
+                    meta = trace_params.get("metadata") or {}
                     meta["run_id"] = run_id
                     trace_params["metadata"] = meta
-                    await tracing_provider.update_trace_via_api(
+                    await tracing_provider.update_trace(
                         trace_id=ctx._trace_id,
                         name=workflow_name,
                         input=_trace_input,

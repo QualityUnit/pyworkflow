@@ -205,26 +205,6 @@ class TracingProvider:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def update_trace(self, trace_id: str, input: Any = None, output: Any = None) -> None:
-        """Update trace-level input/output via Langfuse ingestion API."""
-        if not self._langfuse:
-            return
-        try:
-            self._langfuse._ingestion_consumer.add_task(
-                {
-                    "id": trace_id,
-                    "type": "trace-create",
-                    "timestamp": None,
-                    "body": {
-                        "id": trace_id,
-                        "input": input,
-                        "output": output,
-                    },
-                }
-            )
-        except Exception:
-            pass
-
     async def shutdown(self) -> None:
         """Flush pending data and shut down the Langfuse client."""
         if not self._langfuse:
@@ -235,7 +215,7 @@ class TracingProvider:
         except Exception as e:
             logger.debug(f"Error shutting down tracing: {e}")
 
-    async def update_trace_via_api(self, trace_id: str, name: str = None, input: Any = None, output: Any = None, trace_params: dict = None) -> None:
+    async def update_trace(self, trace_id: str, name: str = None, input: Any = None, output: Any = None, trace_params: dict = None) -> None:
         """Update trace attributes via Langfuse REST API. Called after SDK shutdown."""
         trace_params = trace_params or {}
         body: dict[str, Any] = {"id": trace_id}

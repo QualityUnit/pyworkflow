@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from loguru import logger
@@ -150,7 +150,7 @@ class LangfuseTracingProvider(BaseTracingProvider):
             async with httpx.AsyncClient() as client:
                 await client.post(
                     f"{self._host}/api/public/ingestion",
-                    json={"batch": [{"id": f"trace-update-{trace_id}", "type": "trace-create", "timestamp": datetime.now(timezone.utc).isoformat(), "body": body}]},
+                    json={"batch": [{"id": f"trace-update-{trace_id}", "type": "trace-create", "timestamp": datetime.now(UTC).isoformat(), "body": body}]},
                     auth=(self._public_key, self._secret_key),
                     timeout=5,
                 )

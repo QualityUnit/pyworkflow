@@ -10,6 +10,7 @@ These tasks enable:
 """
 
 import asyncio
+import hashlib
 import random
 import uuid
 from collections.abc import Callable
@@ -296,7 +297,7 @@ def execute_step_task(
                 logger.info(f"TRACING WORKER: creating provider for step {step_name}, tracing_keys={list(tracing.keys())}")
                 _tp = create_tracing_provider(tracing)
                 if _tp:
-                    _trace_id = run_id.replace("run_", "").ljust(32, "0")[:32]
+                    _trace_id = hashlib.md5(run_id.encode()).hexdigest()
                     _step_span = _tp.start_span_on_trace(
                         _trace_id, f"{step_name}-{step_id}", is_generator=is_generator,
                         trace_name=workflow_name or "workflow",

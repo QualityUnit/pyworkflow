@@ -10,6 +10,7 @@ decorated with @workflow to enable:
 """
 
 import functools
+import hashlib
 from collections.abc import Callable
 from typing import Any
 
@@ -229,7 +230,7 @@ async def execute_workflow_with_context(
         tracing_provider = create_tracing_provider(ctx.tracing)
         if tracing_provider:
             # Stable trace ID derived from run_id (same across start/resume/worker)
-            ctx._trace_id = run_id.replace("run_", "").ljust(32, "0")[:32]
+            ctx._trace_id = hashlib.md5(run_id.encode()).hexdigest()
             logger.info(
                 f"Tracing provider initialized for workflow: {workflow_name} (resume={is_resume})",
                 run_id=run_id,

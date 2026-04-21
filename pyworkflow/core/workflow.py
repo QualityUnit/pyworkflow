@@ -223,7 +223,9 @@ async def execute_workflow_with_context(
     # 1. pyworkflow.start(tracing={...}) — runtime creds (e.g. from FlowHunt)
     # 2. @workflow(tracing={...}) — decorator-level config
     # 3. configure(TRACING_CONFIG={...}) — global config
-    ctx.tracing = tracing or getattr(workflow_func, "__workflow_tracing__", None)  # 1. start(tracing=) or 2. @workflow(tracing=)
+    ctx.tracing = tracing or getattr(
+        workflow_func, "__workflow_tracing__", None
+    )  # 1. start(tracing=) or 2. @workflow(tracing=)
 
     # Initialize tracing provider
     tracing_provider = None
@@ -233,6 +235,7 @@ async def execute_workflow_with_context(
         tracing_provider = create_tracing_provider(ctx.tracing)  # source 1 or 2
     if not tracing_provider:
         from pyworkflow.config import get_config
+
         _global_tracing = get_config().TRACING_CONFIG
         tracing_provider = create_tracing_provider(_global_tracing)  # source 3
         if tracing_provider:

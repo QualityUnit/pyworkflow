@@ -26,6 +26,7 @@ from typing import Any
 @dataclass
 class LLMCallData:
     """Single LLM call trace data."""
+
     model: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
@@ -36,6 +37,7 @@ class LLMCallData:
 @dataclass
 class ToolCallData:
     """Single tool call trace data."""
+
     name: str = ""
     input: Any = None
     output: Any = None
@@ -46,6 +48,7 @@ class ToolCallData:
 @dataclass
 class StepTracingData:
     """Tracing metadata attached to a step result for Langfuse span creation."""
+
     credits: float = 0
     llm_calls: list[LLMCallData] = field(default_factory=list)
     tool_calls: list[ToolCallData] = field(default_factory=list)

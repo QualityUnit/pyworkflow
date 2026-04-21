@@ -59,7 +59,9 @@ class LangfuseTracingProvider(BaseTracingProvider):
             effective_trace_name = trace_name or "workflow"
             with propagate_attributes(trace_name=effective_trace_name):
                 span = self._langfuse.start_observation(
-                    name=name, as_type=as_type, trace_context=trace_context,
+                    name=name,
+                    as_type=as_type,
+                    trace_context=trace_context,
                 )
             return span
         except Exception as e:
@@ -139,7 +141,14 @@ class LangfuseTracingProvider(BaseTracingProvider):
             body["input"] = input
         if output is not None:
             body["output"] = output
-        key_map = {"session_id": "sessionId", "user_id": "userId", "metadata": "metadata", "tags": "tags", "input": "input", "output": "output"}
+        key_map = {
+            "session_id": "sessionId",
+            "user_id": "userId",
+            "metadata": "metadata",
+            "tags": "tags",
+            "input": "input",
+            "output": "output",
+        }
         for key, api_key in key_map.items():
             val = trace_params.get(key)
             if val is not None:
@@ -150,7 +159,16 @@ class LangfuseTracingProvider(BaseTracingProvider):
             async with httpx.AsyncClient() as client:
                 await client.post(
                     f"{self._host}/api/public/ingestion",
-                    json={"batch": [{"id": f"trace-update-{trace_id}", "type": "trace-create", "timestamp": datetime.now(UTC).isoformat(), "body": body}]},
+                    json={
+                        "batch": [
+                            {
+                                "id": f"trace-update-{trace_id}",
+                                "type": "trace-create",
+                                "timestamp": datetime.now(UTC).isoformat(),
+                                "body": body,
+                            }
+                        ]
+                    },
                     auth=(self._public_key, self._secret_key),
                     timeout=5,
                 )

@@ -23,7 +23,9 @@ class WorkflowMetadata:
     tags: list[str] | None = None
     description: str | None = None  # Docstring from the workflow function
     context_class: type | None = None  # StepContext subclass for step context access
-    tracing: dict[str, Any] | None = None  # Optional tracing provider config (e.g. Langfuse credentials)
+    tracing: dict[str, Any] | None = (
+        None  # Optional tracing provider config (e.g. Langfuse credentials)
+    )
 
     def __post_init__(self) -> None:
         if self.tags is None:
@@ -45,7 +47,9 @@ class StepMetadata:
     timeout: int | None = None
     metadata: dict[str, Any] | None = None
     force_local: bool = False
-    is_generator: bool = False  # If True, creates a Langfuse generation span instead of a regular span
+    is_generator: bool = (
+        False  # If True, creates a Langfuse generation span instead of a regular span
+    )
 
     def __post_init__(self) -> None:
         if self.metadata is None:
@@ -270,7 +274,9 @@ def register_workflow(
     tracing: dict[str, Any] | None = None,
 ) -> None:
     """Register a workflow in the global registry."""
-    _registry.register_workflow(name, func, original_func, max_duration, tags, context_class, tracing)
+    _registry.register_workflow(
+        name, func, original_func, max_duration, tags, context_class, tracing
+    )
 
 
 def get_workflow(name: str) -> WorkflowMetadata | None:
@@ -306,7 +312,15 @@ def register_step(
 ) -> None:
     """Register a step in the global registry."""
     _registry.register_step(
-        name, func, original_func, max_retries, retry_delay, timeout, metadata, force_local, is_generator
+        name,
+        func,
+        original_func,
+        max_retries,
+        retry_delay,
+        timeout,
+        metadata,
+        force_local,
+        is_generator,
     )
 
 

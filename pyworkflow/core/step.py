@@ -784,7 +784,12 @@ def _record_step_tracing(
         trace_id = getattr(ctx, "_trace_id", None)
         if not trace_id:
             return
-        span = tp.start_span_on_trace(trace_id, f"{step_name}-{step_id}", is_generator=is_generator, trace_name=ctx.workflow_name)
+        span = tp.start_span_on_trace(
+            trace_id,
+            f"{step_name}-{step_id}",
+            is_generator=is_generator,
+            trace_name=ctx.workflow_name,
+        )
         if not span:
             return
 
@@ -794,7 +799,13 @@ def _record_step_tracing(
             step_input["_args"] = [str(a)[:500] for a in step_args]
 
         # Convert result to dict for uniform access
-        _r = result.model_dump() if hasattr(result, "model_dump") else result if isinstance(result, dict) else {}
+        _r = (
+            result.model_dump()
+            if hasattr(result, "model_dump")
+            else result
+            if isinstance(result, dict)
+            else {}
+        )
         text_output = _r.get("text_output", "")
 
         # Read tracing data via StepTracingData contract (_tracing key)
@@ -802,21 +813,49 @@ def _record_step_tracing(
         _td = _td if isinstance(_td, dict) else _td.__dict__
         _step_credits = _td.get("credits", 0)
         _step_meta = {"credits": float(_step_credits)} if _step_credits else None
-        tp.update_span(span, input=step_input or None, output={"text_output": text_output}, metadata=_step_meta)
+        tp.update_span(
+            span, input=step_input or None, output={"text_output": text_output}, metadata=_step_meta
+        )
 
         llm_calls = _td.get("llm_calls", [])
         if llm_calls and is_generator:
-            total_in = sum((lc if isinstance(lc, dict) else lc.__dict__).get("input_tokens", 0) for lc in llm_calls)
-            total_out = sum((lc if isinstance(lc, dict) else lc.__dict__).get("output_tokens", 0) for lc in llm_calls)
-            total_cost = sum((lc if isinstance(lc, dict) else lc.__dict__).get("cost", 0) for lc in llm_calls)
+            total_in = sum(
+                (lc if isinstance(lc, dict) else lc.__dict__).get("input_tokens", 0)
+                for lc in llm_calls
+            )
+            total_out = sum(
+                (lc if isinstance(lc, dict) else lc.__dict__).get("output_tokens", 0)
+                for lc in llm_calls
+            )
+            total_cost = sum(
+                (lc if isinstance(lc, dict) else lc.__dict__).get("cost", 0) for lc in llm_calls
+            )
             _first = llm_calls[0] if isinstance(llm_calls[0], dict) else llm_calls[0].__dict__
-            tp.update_span(span, usage_details={"input_tokens": total_in, "output_tokens": total_out, "total_tokens": total_in + total_out}, cost_details={"input": 0, "output": total_cost}, model=_first.get("model"))
+            tp.update_span(
+                span,
+                usage_details={
+                    "input_tokens": total_in,
+                    "output_tokens": total_out,
+                    "total_tokens": total_in + total_out,
+                },
+                cost_details={"input": 0, "output": total_cost},
+                model=_first.get("model"),
+            )
         elif llm_calls:
             for lc in llm_calls:
                 _lc = lc if isinstance(lc, dict) else lc.__dict__
                 gen = tp.start_child_generation(span, "LLM Call")
                 if gen:
-                    tp.update_span(gen, usage_details={"input_tokens": _lc.get("input_tokens", 0), "output_tokens": _lc.get("output_tokens", 0), "total_tokens": _lc.get("total_tokens", 0)}, cost_details={"input": 0, "output": _lc.get("cost", 0)}, model=_lc.get("model"))
+                    tp.update_span(
+                        gen,
+                        usage_details={
+                            "input_tokens": _lc.get("input_tokens", 0),
+                            "output_tokens": _lc.get("output_tokens", 0),
+                            "total_tokens": _lc.get("total_tokens", 0),
+                        },
+                        cost_details={"input": 0, "output": _lc.get("cost", 0)},
+                        model=_lc.get("model"),
+                    )
                     tp.end_span(gen)
 
         tool_calls = _td.get("tool_calls", [])
@@ -826,7 +865,9 @@ def _record_step_tracing(
             if ts:
                 _tc_credits = _tc.get("credits", 0)
                 _tc_meta = {"credits": float(_tc_credits)} if _tc_credits else None
-                tp.update_span(ts, input=_tc.get("input"), output=_tc.get("output"), metadata=_tc_meta)
+                tp.update_span(
+                    ts, input=_tc.get("input"), output=_tc.get("output"), metadata=_tc_meta
+                )
                 tp.end_span(ts)
 
         tp.end_span(span)

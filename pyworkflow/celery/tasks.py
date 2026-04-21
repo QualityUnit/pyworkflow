@@ -297,11 +297,19 @@ def execute_step_task(
                 if _tp:
                     _trace_id = hashlib.md5(run_id.encode()).hexdigest()
                     _step_span = _tp.start_span_on_trace(
-                        _trace_id, f"{step_name}-{step_id}", is_generator=is_generator,
+                        _trace_id,
+                        f"{step_name}-{step_id}",
+                        is_generator=is_generator,
                         trace_name=workflow_name or "workflow",
                     )
                     if _step_span:
-                        _r = result.model_dump() if hasattr(result, "model_dump") else result if isinstance(result, dict) else {}
+                        _r = (
+                            result.model_dump()
+                            if hasattr(result, "model_dump")
+                            else result
+                            if isinstance(result, dict)
+                            else {}
+                        )
                         text_output = _r.get("text_output", "")
 
                         # Read tracing data via StepTracingData contract (_tracing key)
@@ -309,21 +317,59 @@ def execute_step_task(
                         _td = _td if isinstance(_td, dict) else _td.__dict__
                         _step_credits = _td.get("credits", 0)
                         _step_meta = {"credits": float(_step_credits)} if _step_credits else None
-                        _tp.update_span(_step_span, input=dict(kwargs) if kwargs else None, output={"text_output": text_output}, metadata=_step_meta)
+                        _tp.update_span(
+                            _step_span,
+                            input=dict(kwargs) if kwargs else None,
+                            output={"text_output": text_output},
+                            metadata=_step_meta,
+                        )
 
                         llm_calls = _td.get("llm_calls", [])
                         if llm_calls and is_generator:
-                            t_in = sum((lc if isinstance(lc, dict) else lc.__dict__).get("input_tokens", 0) for lc in llm_calls)
-                            t_out = sum((lc if isinstance(lc, dict) else lc.__dict__).get("output_tokens", 0) for lc in llm_calls)
-                            t_cost = sum((lc if isinstance(lc, dict) else lc.__dict__).get("cost", 0) for lc in llm_calls)
-                            _first = llm_calls[0] if isinstance(llm_calls[0], dict) else llm_calls[0].__dict__
-                            _tp.update_span(_step_span, usage_details={"input_tokens": t_in, "output_tokens": t_out, "total_tokens": t_in + t_out}, cost_details={"input": 0, "output": t_cost}, model=_first.get("model"))
+                            t_in = sum(
+                                (lc if isinstance(lc, dict) else lc.__dict__).get("input_tokens", 0)
+                                for lc in llm_calls
+                            )
+                            t_out = sum(
+                                (lc if isinstance(lc, dict) else lc.__dict__).get(
+                                    "output_tokens", 0
+                                )
+                                for lc in llm_calls
+                            )
+                            t_cost = sum(
+                                (lc if isinstance(lc, dict) else lc.__dict__).get("cost", 0)
+                                for lc in llm_calls
+                            )
+                            _first = (
+                                llm_calls[0]
+                                if isinstance(llm_calls[0], dict)
+                                else llm_calls[0].__dict__
+                            )
+                            _tp.update_span(
+                                _step_span,
+                                usage_details={
+                                    "input_tokens": t_in,
+                                    "output_tokens": t_out,
+                                    "total_tokens": t_in + t_out,
+                                },
+                                cost_details={"input": 0, "output": t_cost},
+                                model=_first.get("model"),
+                            )
                         elif llm_calls:
                             for lc in llm_calls:
                                 _lc = lc if isinstance(lc, dict) else lc.__dict__
                                 gen = _tp.start_child_generation(_step_span, "LLM Call")
                                 if gen:
-                                    _tp.update_span(gen, usage_details={"input_tokens": _lc.get("input_tokens", 0), "output_tokens": _lc.get("output_tokens", 0), "total_tokens": _lc.get("total_tokens", 0)}, cost_details={"input": 0, "output": _lc.get("cost", 0)}, model=_lc.get("model"))
+                                    _tp.update_span(
+                                        gen,
+                                        usage_details={
+                                            "input_tokens": _lc.get("input_tokens", 0),
+                                            "output_tokens": _lc.get("output_tokens", 0),
+                                            "total_tokens": _lc.get("total_tokens", 0),
+                                        },
+                                        cost_details={"input": 0, "output": _lc.get("cost", 0)},
+                                        model=_lc.get("model"),
+                                    )
                                     _tp.end_span(gen)
 
                         tool_calls = _td.get("tool_calls", [])
@@ -333,7 +379,12 @@ def execute_step_task(
                             if ts:
                                 _tc_credits = _tc.get("credits", 0)
                                 _tc_meta = {"credits": float(_tc_credits)} if _tc_credits else None
-                                _tp.update_span(ts, input=_tc.get("input"), output=_tc.get("output"), metadata=_tc_meta)
+                                _tp.update_span(
+                                    ts,
+                                    input=_tc.get("input"),
+                                    output=_tc.get("output"),
+                                    metadata=_tc_meta,
+                                )
                                 _tp.end_span(ts)
 
                         _tp.end_span(_step_span)

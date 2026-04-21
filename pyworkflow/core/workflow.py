@@ -9,6 +9,7 @@ decorated with @workflow to enable:
 - Fault tolerance
 """
 
+import contextlib
 import functools
 import hashlib
 from collections.abc import Callable
@@ -392,22 +393,21 @@ async def execute_workflow_with_context(
                             _trace_output = result.get("text_output")
                 except Exception:
                     pass
-                try:
+                with contextlib.suppress(Exception):
                     await tracing_provider.shutdown()
-                except Exception:
-                    pass
                 try:
-                    trace_params = (ctx.tracing or {}).get("trace_params", {})
-                    meta = trace_params.get("metadata") or {}
-                    meta["run_id"] = run_id
-                    trace_params["metadata"] = meta
-                    await tracing_provider.update_trace(
-                        trace_id=ctx._trace_id,
-                        name=workflow_name,
-                        input=_trace_input,
-                        output=_trace_output,
-                        trace_params=trace_params,
-                    )
+                    if ctx._trace_id:
+                        trace_params = (ctx.tracing or {}).get("trace_params", {})
+                        meta = trace_params.get("metadata") or {}
+                        meta["run_id"] = run_id
+                        trace_params["metadata"] = meta
+                        await tracing_provider.update_trace(
+                            trace_id=ctx._trace_id,
+                            name=workflow_name,
+                            input=_trace_input,
+                            output=_trace_output,
+                            trace_params=trace_params,
+                        )
                 except Exception as e:
                     logger.error(f"TRACING: update_trace_via_api failed: {e}")
             except Exception as e:

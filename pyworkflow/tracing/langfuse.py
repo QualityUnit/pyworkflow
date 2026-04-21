@@ -5,7 +5,9 @@ Langfuse tracing provider implementation.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Optional
+import contextlib
+from datetime import datetime, timezone
+from typing import Any
 
 from loguru import logger
 
@@ -42,8 +44,8 @@ class LangfuseTracingProvider(BaseTracingProvider):
         trace_id: str,
         name: str,
         is_generator: bool = False,
-        parent_span_id: Optional[str] = None,
-        trace_name: Optional[str] = None,
+        parent_span_id: str | None = None,
+        trace_name: str | None = None,
     ) -> Any:
         if not self._langfuse:
             return None
@@ -96,29 +98,25 @@ class LangfuseTracingProvider(BaseTracingProvider):
     def end_span(span: Any) -> None:
         if span is None:
             return
-        try:
+        with contextlib.suppress(Exception):
             span.end()
-        except Exception:
-            pass
 
     @staticmethod
     def update_span(
         span: Any,
         input: Any = None,
         output: Any = None,
-        metadata: Optional[dict] = None,
-        usage_details: Optional[dict] = None,
-        cost_details: Optional[dict] = None,
-        model: Optional[str] = None,
+        metadata: dict | None = None,
+        usage_details: dict | None = None,
+        cost_details: dict | None = None,
+        model: str | None = None,
     ) -> None:
         if not span:
             return
-        try:
+        with contextlib.suppress(Exception):
             span.update(input=input, output=output, metadata=metadata)
             if usage_details is not None:
                 span.update(usage_details=usage_details, cost_details=cost_details, model=model)
-        except Exception:
-            pass
 
     # ------------------------------------------------------------------
     # Trace lifecycle
@@ -127,10 +125,10 @@ class LangfuseTracingProvider(BaseTracingProvider):
     async def update_trace(
         self,
         trace_id: str,
-        name: Optional[str] = None,
+        name: str | None = None,
         input: Any = None,
         output: Any = None,
-        trace_params: Optional[dict] = None,
+        trace_params: dict | None = None,
     ) -> None:
         """Update trace attributes via Langfuse REST API. Called after SDK shutdown."""
         trace_params = trace_params or {}
@@ -148,7 +146,6 @@ class LangfuseTracingProvider(BaseTracingProvider):
                 body[api_key] = val
         try:
             import httpx
-            from datetime import datetime, timezone
 
             async with httpx.AsyncClient() as client:
                 await client.post(

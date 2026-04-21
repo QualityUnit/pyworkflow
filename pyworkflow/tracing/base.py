@@ -7,7 +7,7 @@ All provider implementations (Langfuse, etc.) must inherit from this class.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 
 class BaseTracingProvider(ABC):
@@ -23,8 +23,8 @@ class BaseTracingProvider(ABC):
         trace_id: str,
         name: str,
         is_generator: bool = False,
-        parent_span_id: Optional[str] = None,
-        trace_name: Optional[str] = None,
+        parent_span_id: str | None = None,
+        trace_name: str | None = None,
     ) -> Any:
         """Start a span attached to a trace. Returns span object or None."""
         pass
@@ -51,10 +51,10 @@ class BaseTracingProvider(ABC):
         span: Any,
         input: Any = None,
         output: Any = None,
-        metadata: Optional[dict] = None,
-        usage_details: Optional[dict] = None,
-        cost_details: Optional[dict] = None,
-        model: Optional[str] = None,
+        metadata: dict | None = None,
+        usage_details: dict | None = None,
+        cost_details: dict | None = None,
+        model: str | None = None,
     ) -> None:
         """Update a span with input/output/metadata/usage."""
         pass
@@ -67,10 +67,10 @@ class BaseTracingProvider(ABC):
     async def update_trace(
         self,
         trace_id: str,
-        name: Optional[str] = None,
+        name: str | None = None,
         input: Any = None,
         output: Any = None,
-        trace_params: Optional[dict] = None,
+        trace_params: dict | None = None,
     ) -> None:
         """Update trace-level attributes (called after shutdown)."""
         pass

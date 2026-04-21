@@ -171,6 +171,9 @@ class PyWorkflowConfig:
     event_hard_limit: int = 50_000  # Fail workflow at this count
     event_warning_interval: int = 100  # Log warning every N events after soft limit
 
+    # Tracing Configuration
+    TRACING_CONFIG: dict | None = None
+
 
 def _config_from_env_and_yaml() -> PyWorkflowConfig:
     """

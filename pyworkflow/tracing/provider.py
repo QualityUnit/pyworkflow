@@ -246,7 +246,7 @@ class TracingProvider:
         if output is not None:
             body["output"] = output
         # Map trace_params keys to Langfuse API camelCase
-        key_map = {"session_id": "sessionId", "user_id": "userId", "metadata": "metadata", "tags": "tags"}
+        key_map = {"session_id": "sessionId", "user_id": "userId", "metadata": "metadata", "tags": "tags", "input": "input", "output": "output"}
         for key, api_key in key_map.items():
             val = trace_params.get(key)
             if val is not None:

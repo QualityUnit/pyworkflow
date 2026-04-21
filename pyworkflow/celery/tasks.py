@@ -303,7 +303,9 @@ def execute_step_task(
                     )
                     if _step_span:
                         text_output = result.get("text_output", "") if isinstance(result, dict) else ""
-                        _tp.update_span(_step_span, input=dict(kwargs) if kwargs else None, output={"text_output": text_output})
+                        _step_credits = result.get("_credits", 0) if isinstance(result, dict) else 0
+                        _step_meta = {"credits": float(_step_credits)} if _step_credits else None
+                        _tp.update_span(_step_span, input=dict(kwargs) if kwargs else None, output={"text_output": text_output}, metadata=_step_meta)
 
                         llm_calls = result.get("_llm_calls", []) if isinstance(result, dict) else []
                         if llm_calls and is_generator:
@@ -322,7 +324,9 @@ def execute_step_task(
                         for tc in tool_calls:
                             ts = _tp.start_child_span(_step_span, tc.get("name", "tool"))
                             if ts:
-                                _tp.update_span(ts, input=tc.get("input"), output=tc.get("output"))
+                                _tc_credits = tc.get("credits", 0)
+                                _tc_meta = {"credits": float(_tc_credits)} if _tc_credits else None
+                                _tp.update_span(ts, input=tc.get("input"), output=tc.get("output"), metadata=_tc_meta)
                                 _tp.end_span(ts)
 
                         _tp.end_span(_step_span)

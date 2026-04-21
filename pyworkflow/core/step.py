@@ -793,9 +793,11 @@ def _record_step_tracing(
         if step_args:
             step_input["_args"] = [str(a)[:500] for a in step_args]
 
-        # Basic input/output
+        # Basic input/output + credits metadata
         text_output = result.get("text_output", "") if isinstance(result, dict) else ""
-        tp.update_span(span, input=step_input or None, output={"text_output": text_output})
+        _step_credits = result.get("_credits", 0) if isinstance(result, dict) else 0
+        _step_meta = {"credits": float(_step_credits)} if _step_credits else None
+        tp.update_span(span, input=step_input or None, output={"text_output": text_output}, metadata=_step_meta)
 
         # LLM calls
         llm_calls = result.get("_llm_calls", []) if isinstance(result, dict) else []
@@ -827,7 +829,9 @@ def _record_step_tracing(
         for tc in tool_calls:
             ts = tp.start_child_span(span, tc.get("name", "tool"))
             if ts:
-                tp.update_span(ts, input=tc.get("input"), output=tc.get("output"))
+                _tc_credits = tc.get("credits", 0)
+                _tc_meta = {"credits": float(_tc_credits)} if _tc_credits else None
+                tp.update_span(ts, input=tc.get("input"), output=tc.get("output"), metadata=_tc_meta)
                 tp.end_span(ts)
 
         tp.end_span(span)

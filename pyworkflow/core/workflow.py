@@ -218,23 +218,31 @@ async def execute_workflow_with_context(
     ctx._storage_config = storage_config
     ctx._parent_run_id = parent_run_id
 
-    # Set tracing config (e.g. Langfuse credentials from caller or decorator)
-    ctx.tracing = tracing
+    # Tracing config resolution order:
+    # 1. pyworkflow.start(tracing={...}) — runtime creds (e.g. from FlowHunt)
+    # 2. @workflow(tracing={...}) — decorator-level config
+    # 3. configure(TRACING_CONFIG={...}) — global config
+    ctx.tracing = tracing or getattr(workflow_func, "__workflow_tracing__", None)  # 1. start(tracing=) or 2. @workflow(tracing=)
 
     # Initialize tracing provider
     is_resume = bool(event_log)
     tracing_provider = None
-    if ctx.tracing:
-        from pyworkflow.tracing import create_tracing_provider
+    from pyworkflow.tracing import create_tracing_provider
 
-        tracing_provider = create_tracing_provider(ctx.tracing)
+    if ctx.tracing:
+        tracing_provider = create_tracing_provider(ctx.tracing)  # source 1 or 2
+    if not tracing_provider:
+        from pyworkflow.config import get_config
+        _global_tracing = get_config().TRACING_CONFIG
+        tracing_provider = create_tracing_provider(_global_tracing)  # source 3
         if tracing_provider:
-            # Stable trace ID derived from run_id (same across start/resume/worker)
-            ctx._trace_id = hashlib.md5(run_id.encode()).hexdigest()
-            logger.info(
-                f"Tracing provider initialized for workflow: {workflow_name} (resume={is_resume})",
-                run_id=run_id,
-            )
+            ctx.tracing = _global_tracing  # propagate to Celery workers
+    if tracing_provider:
+        ctx._trace_id = hashlib.md5(run_id.encode()).hexdigest()
+        logger.info(
+            f"Tracing provider initialized for workflow: {workflow_name} (resume={is_resume})",
+            run_id=run_id,
+        )
     ctx._tracing_provider = tracing_provider
 
     # Set cancellation state if requested before execution

@@ -251,16 +251,23 @@ class TracingProvider:
         return self._root_span
 
 
-def create_tracing_provider(tracing_config: dict[str, Any] | None) -> TracingProvider | None:
-    """Create a TracingProvider from a config dict. Returns None if config is None/empty."""
+def create_tracing_provider(tracing_config: dict[str, Any] | None = None) -> TracingProvider | None:
+    """Create a TracingProvider from a config dict.
+
+    Returns None if no credentials are available.
+    """
     if not tracing_config:
         return None
-    provider = tracing_config.get("provider")
-    if provider != "langfuse":
+    provider = tracing_config.get("provider", "")
+    if provider and provider != "langfuse":
         logger.debug(f"Unknown tracing provider: {provider}")
         return None
+    public_key = tracing_config.get("public_key", "")
+    secret_key = tracing_config.get("secret_key", "")
+    if not public_key or not secret_key:
+        return None
     return TracingProvider(
-        public_key=tracing_config.get("public_key", ""),
-        secret_key=tracing_config.get("secret_key", ""),
+        public_key=public_key,
+        secret_key=secret_key,
         host=tracing_config.get("host", "https://app.langfuse.com"),
     )

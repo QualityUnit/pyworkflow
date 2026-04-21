@@ -151,8 +151,6 @@ async def start(
     # Generate run_id
     run_id = f"run_{uuid.uuid4().hex[:16]}"
 
-    # Resolve tracing config (priority: start() arg > decorator)
-    effective_tracing = tracing or workflow_meta.tracing
 
     logger.info(
         f"Starting workflow: {workflow_name}",
@@ -174,7 +172,7 @@ async def start(
         idempotency_key=idempotency_key,
         max_duration=workflow_meta.max_duration,
         metadata={},  # Run-level metadata
-        tracing=effective_tracing,
+        tracing=tracing,
     )
 
 

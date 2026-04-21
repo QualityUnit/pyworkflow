@@ -218,7 +218,7 @@ async def execute_workflow_with_context(
     ctx._parent_run_id = parent_run_id
 
     # Set tracing config (e.g. Langfuse credentials from caller or decorator)
-    ctx.tracing = tracing or getattr(workflow_func, "__workflow_tracing__", None)
+    ctx.tracing = tracing
 
     # Initialize tracing provider
     is_resume = bool(event_log)

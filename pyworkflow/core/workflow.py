@@ -134,7 +134,7 @@ def workflow(
             context_class=context_class,
             tracing=tracing,
         )
-        # test
+
         # Store metadata on wrapper
         wrapper.__workflow__ = True  # type: ignore[attr-defined]
         wrapper.__workflow_name__ = workflow_name  # type: ignore[attr-defined]
@@ -414,8 +414,7 @@ async def execute_workflow_with_context(
                         trace_params=trace_params,
                     )
                 except Exception as e:
-                    import traceback as _tb
-                    logger.error(f"TRACING: update_trace_via_api failed: {e}\n{_tb.format_exc()}")
+                    logger.error(f"TRACING: update_trace_via_api failed: {e}")
             except Exception as e:
                 logger.error(f"TRACING: unexpected error in tracing finally block: {e}")
 

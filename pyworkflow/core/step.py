@@ -173,8 +173,9 @@ def step(
                     run_id=ctx.run_id,
                     step_id=step_id,
                 )
-                cached = ctx.get_step_result(step_id)
-                return cached
+                return ctx.get_step_result(step_id)
+
+            # Check if step is already in progress (dispatched to Celery but not completed)
             # This prevents re-dispatch during resume when step is still running/retrying
             if ctx.is_step_in_progress(step_id):
                 logger.debug(

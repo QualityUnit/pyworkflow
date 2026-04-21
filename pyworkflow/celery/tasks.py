@@ -1836,16 +1836,13 @@ async def _start_workflow_on_worker(
         input_kwargs=serialize_kwargs(**kwargs),
         idempotency_key=idempotency_key,
         max_duration=workflow_meta.max_duration,
-        context={},  # Step context
+        context={},  # Step context (not from decorator)
         recovery_attempts=0,
         max_recovery_attempts=max_recovery_attempts,
         recover_on_worker_loss=recover_on_worker_loss,
     )
 
     await storage.create_run(run)
-
-    # Pyworkflow just created the run
-    # TODO - use the OLTP
 
     # Record workflow started event
     start_event = create_workflow_started_event(

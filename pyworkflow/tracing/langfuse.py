@@ -146,19 +146,17 @@ class LangfuseTracingProvider(BaseTracingProvider):
             val = trace_params.get(key)
             if val is not None:
                 body[api_key] = val
-        logger.info(f"TRACING API: host={self._host}, body_keys={list(body.keys())}, trace_params={trace_params}")
         try:
             import httpx
             from datetime import datetime, timezone
 
             async with httpx.AsyncClient() as client:
-                resp = await client.post(
+                await client.post(
                     f"{self._host}/api/public/ingestion",
                     json={"batch": [{"id": f"trace-update-{trace_id}", "type": "trace-create", "timestamp": datetime.now(timezone.utc).isoformat(), "body": body}]},
                     auth=(self._public_key, self._secret_key),
                     timeout=5,
                 )
-                logger.info(f"TRACING API: response status={resp.status_code}, body={resp.text[:500]}")
         except Exception as e:
             logger.error(f"TRACING API: failed: {e}", exc_info=True)
 

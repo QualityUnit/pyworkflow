@@ -293,7 +293,6 @@ def execute_step_task(
             try:
                 from pyworkflow.tracing import create_tracing_provider
 
-                logger.info(f"TRACING WORKER: creating provider for step {step_name}, tracing_keys={list(tracing.keys())}")
                 _tp = create_tracing_provider(tracing)
                 if _tp:
                     _trace_id = hashlib.md5(run_id.encode()).hexdigest()

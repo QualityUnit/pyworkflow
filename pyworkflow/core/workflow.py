@@ -225,7 +225,6 @@ async def execute_workflow_with_context(
     ctx.tracing = tracing or getattr(workflow_func, "__workflow_tracing__", None)  # 1. start(tracing=) or 2. @workflow(tracing=)
 
     # Initialize tracing provider
-    is_resume = bool(event_log)
     tracing_provider = None
     from pyworkflow.tracing import create_tracing_provider
 
@@ -239,10 +238,6 @@ async def execute_workflow_with_context(
             ctx.tracing = _global_tracing  # propagate to Celery workers
     if tracing_provider:
         ctx._trace_id = hashlib.md5(run_id.encode()).hexdigest()
-        logger.info(
-            f"Tracing provider initialized for workflow: {workflow_name} (resume={is_resume})",
-            run_id=run_id,
-        )
     ctx._tracing_provider = tracing_provider
 
     # Set cancellation state if requested before execution

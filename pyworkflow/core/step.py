@@ -747,7 +747,6 @@ async def _dispatch_step_to_celery(
         workflow_name=ctx.workflow_name,
         tracing=ctx.tracing,
         is_generator=is_generator,
-        root_span_id=getattr(ctx, '_root_span_id', None),
     )
 
     logger.info(

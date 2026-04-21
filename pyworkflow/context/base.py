@@ -135,8 +135,7 @@ class WorkflowContext(ABC):
         self._workflow_name = workflow_name
         self._tracing: dict[str, Any] | None = None
         self._tracing_provider: Any = None  # TracingProvider instance
-        self._trace_id: str | None = None  # Stable trace ID for Langfuse
-        self._root_span_id: str | None = None  # Root span ID for nesting
+        self._trace_id: str | None = None  # Stable trace ID
 
     @property
     def run_id(self) -> str:

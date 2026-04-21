@@ -96,7 +96,6 @@ def execute_step_task(
     workflow_name: str | None = None,
     tracing: dict[str, Any] | None = None,
     is_generator: bool = False,
-    root_span_id: str | None = None,
 ) -> Any:
     """
     Execute a workflow step on a Celery worker.

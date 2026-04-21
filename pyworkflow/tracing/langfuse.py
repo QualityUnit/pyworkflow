@@ -19,8 +19,6 @@ class LangfuseTracingProvider(BaseTracingProvider):
         self._public_key = public_key
         self._secret_key = secret_key
         self._host = host
-        self._trace_name: Optional[str] = None
-        self._session_id: Optional[str] = None
         try:
             from langfuse import Langfuse
             from opentelemetry.sdk.trace import TracerProvider
@@ -56,8 +54,8 @@ class LangfuseTracingProvider(BaseTracingProvider):
             trace_context = {"trace_id": trace_id}
             if parent_span_id:
                 trace_context["parent_span_id"] = parent_span_id
-            effective_trace_name = trace_name or self._trace_name or "workflow"
-            with propagate_attributes(trace_name=effective_trace_name, session_id=self._session_id):
+            effective_trace_name = trace_name or "workflow"
+            with propagate_attributes(trace_name=effective_trace_name):
                 span = self._langfuse.start_observation(
                     name=name, as_type=as_type, trace_context=trace_context,
                 )
@@ -129,12 +127,9 @@ class LangfuseTracingProvider(BaseTracingProvider):
     async def update_trace(
         self,
         trace_id: str,
+        name: Optional[str] = None,
         input: Any = None,
         output: Any = None,
-        metadata: Optional[dict] = None,
-        name: Optional[str] = None,
-        session_id: Optional[str] = None,
-        user_id: Optional[str] = None,
         trace_params: Optional[dict] = None,
     ) -> None:
         """Update trace attributes via Langfuse REST API. Called after SDK shutdown."""

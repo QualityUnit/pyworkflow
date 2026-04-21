@@ -67,12 +67,9 @@ class BaseTracingProvider(ABC):
     async def update_trace(
         self,
         trace_id: str,
+        name: Optional[str] = None,
         input: Any = None,
         output: Any = None,
-        metadata: Optional[dict] = None,
-        name: Optional[str] = None,
-        session_id: Optional[str] = None,
-        user_id: Optional[str] = None,
         trace_params: Optional[dict] = None,
     ) -> None:
         """Update trace-level attributes (called after shutdown)."""

@@ -1524,12 +1524,8 @@ async def _recover_workflow_on_worker(
     args = deserialize_args(run.input_args)
     kwargs = deserialize_kwargs(run.input_kwargs)
 
-    # Extract tracing config from workflow arguments (graph_state)
-    _recover_tracing = None
-    if args:
-        _first_arg = args[0] if args else None
-        if isinstance(_first_arg, dict):
-            _recover_tracing = _first_arg.get("tracing")
+    # Extract tracing config persisted at start
+    _recover_tracing = kwargs.pop("_tracing_config", None)
 
     # Execute workflow with event replay
     try:
@@ -1881,10 +1877,10 @@ async def _start_workflow_on_worker(
         created_at=datetime.now(UTC),
         started_at=datetime.now(UTC),
         input_args=serialize_args(*args),
-        input_kwargs=serialize_kwargs(**kwargs),
+        input_kwargs=serialize_kwargs(**kwargs, _tracing_config=tracing),
         idempotency_key=idempotency_key,
         max_duration=workflow_meta.max_duration,
-        context={},  # Step context (not from decorator)
+        context={},  # Step context data
         recovery_attempts=0,
         max_recovery_attempts=max_recovery_attempts,
         recover_on_worker_loss=recover_on_worker_loss,
@@ -2495,12 +2491,8 @@ async def _resume_workflow_on_worker(
     args = deserialize_args(run.input_args)
     kwargs = deserialize_kwargs(run.input_kwargs)
 
-    # Extract tracing config from workflow arguments (graph_state)
-    _resume_tracing = None
-    if args:
-        _first_arg = args[0] if args else None
-        if isinstance(_first_arg, dict):
-            _resume_tracing = _first_arg.get("tracing")
+    # Extract tracing config persisted at start
+    _resume_tracing = kwargs.pop("_tracing_config", None)
 
     # Execute workflow with event replay
     try:

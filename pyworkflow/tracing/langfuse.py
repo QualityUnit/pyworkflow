@@ -110,7 +110,6 @@ class LangfuseTracingProvider(BaseTracingProvider):
         output: Any = None,
         metadata: dict | None = None,
         usage_details: dict | None = None,
-        cost_details: dict | None = None,
         model: str | None = None,
     ) -> None:
         if not span:
@@ -118,7 +117,7 @@ class LangfuseTracingProvider(BaseTracingProvider):
         with contextlib.suppress(Exception):
             span.update(input=input, output=output, metadata=metadata)
             if usage_details is not None:
-                span.update(usage_details=usage_details, cost_details=cost_details, model=model)
+                span.update(usage_details=usage_details, model=model)
 
     # ------------------------------------------------------------------
     # Trace lifecycle

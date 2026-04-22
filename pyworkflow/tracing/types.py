@@ -22,7 +22,7 @@ Usage in integrating application::
 
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -53,8 +53,8 @@ class TracingStepResult(BaseModel):
     """
 
     model: str | None = None
-    llm_calls: List[LLMCallData] = Field(default_factory=list)
-    tool_calls: List[ToolCallData] = Field(default_factory=list)
+    llm_calls: list[LLMCallData] = Field(default_factory=list)
+    tool_calls: list[ToolCallData] = Field(default_factory=list)
 
     @property
     def total_input_tokens(self) -> int:

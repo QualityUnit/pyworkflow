@@ -53,7 +53,6 @@ class BaseTracingProvider(ABC):
         output: Any = None,
         metadata: dict | None = None,
         usage_details: dict | None = None,
-        cost_details: dict | None = None,
         model: str | None = None,
     ) -> None:
         """Update a span with input/output/metadata/usage."""

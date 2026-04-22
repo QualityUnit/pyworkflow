@@ -815,7 +815,9 @@ def _record_step_tracing(
         if not _td.get("llm_calls"):
             _td = _r
         tp.update_span(
-            span, input=step_input or None, output={"text_output": text_output},
+            span,
+            input=step_input or None,
+            output={"text_output": text_output},
         )
 
         llm_calls = _td.get("llm_calls", [])
@@ -860,7 +862,9 @@ def _record_step_tracing(
             ts = tp.start_child_span(span, _tc.get("name", "tool"))
             if ts:
                 tp.update_span(
-                    ts, input=_tc.get("input"), output=_tc.get("output"),
+                    ts,
+                    input=_tc.get("input"),
+                    output=_tc.get("output"),
                 )
                 tp.end_span(ts)
 

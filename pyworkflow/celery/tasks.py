@@ -315,15 +315,12 @@ def execute_step_task(
                         # Read tracing data: top-level fields (inheritance) or nested _tracing key (legacy)
                         _td = _r.get("_tracing") or {}
                         _td = _td if isinstance(_td, dict) else _td.__dict__
-                        if not _td.get("credits") and not _td.get("llm_calls"):
+                        if not _td.get("llm_calls"):
                             _td = _r
-                        _step_credits = _td.get("credits", 0)
-                        _step_meta = {"credits": float(_step_credits)} if _step_credits else None
                         _tp.update_span(
                             _step_span,
                             input=dict(kwargs) if kwargs else None,
                             output={"text_output": text_output},
-                            metadata=_step_meta,
                         )
 
                         llm_calls = _td.get("llm_calls", [])
@@ -339,10 +336,6 @@ def execute_step_task(
                                 )
                                 for lc in llm_calls
                             )
-                            t_cost = sum(
-                                (lc if isinstance(lc, dict) else lc.__dict__).get("cost", 0)
-                                for lc in llm_calls
-                            )
                             _tp.update_span(
                                 _step_span,
                                 usage_details={
@@ -350,7 +343,6 @@ def execute_step_task(
                                     "output_tokens": t_out,
                                     "total_tokens": t_in + t_out,
                                 },
-                                cost_details={"input": 0, "output": t_cost},
                                 model=_step_model,
                             )
                         elif llm_calls:
@@ -365,7 +357,6 @@ def execute_step_task(
                                             "output_tokens": _lc.get("output_tokens", 0),
                                             "total_tokens": _lc.get("total_tokens", 0),
                                         },
-                                        cost_details={"input": 0, "output": _lc.get("cost", 0)},
                                         model=_step_model,
                                     )
                                     _tp.end_span(gen)
@@ -375,13 +366,10 @@ def execute_step_task(
                             _tc = tc if isinstance(tc, dict) else tc.__dict__
                             ts = _tp.start_child_span(_step_span, _tc.get("name", "tool"))
                             if ts:
-                                _tc_credits = _tc.get("credits", 0)
-                                _tc_meta = {"credits": float(_tc_credits)} if _tc_credits else None
                                 _tp.update_span(
                                     ts,
                                     input=_tc.get("input"),
                                     output=_tc.get("output"),
-                                    metadata=_tc_meta,
                                 )
                                 _tp.end_span(ts)
 

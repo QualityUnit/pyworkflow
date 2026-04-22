@@ -808,9 +808,12 @@ def _record_step_tracing(
         )
         text_output = _r.get("text_output", "")
 
-        # Read tracing data via StepTracingData contract (_tracing key)
+        # Read tracing data: top-level fields (inheritance) or nested _tracing key (legacy)
         _td = _r.get("_tracing") or {}
         _td = _td if isinstance(_td, dict) else _td.__dict__
+        # Fall back to top-level keys when _tracing is empty
+        if not _td.get("credits") and not _td.get("llm_calls"):
+            _td = _r
         _step_credits = _td.get("credits", 0)
         _step_meta = {"credits": float(_step_credits)} if _step_credits else None
         tp.update_span(
@@ -818,6 +821,7 @@ def _record_step_tracing(
         )
 
         llm_calls = _td.get("llm_calls", [])
+        _step_model = _td.get("model")
         if llm_calls and is_generator:
             total_in = sum(
                 (lc if isinstance(lc, dict) else lc.__dict__).get("input_tokens", 0)
@@ -830,7 +834,6 @@ def _record_step_tracing(
             total_cost = sum(
                 (lc if isinstance(lc, dict) else lc.__dict__).get("cost", 0) for lc in llm_calls
             )
-            _first = llm_calls[0] if isinstance(llm_calls[0], dict) else llm_calls[0].__dict__
             tp.update_span(
                 span,
                 usage_details={
@@ -839,7 +842,7 @@ def _record_step_tracing(
                     "total_tokens": total_in + total_out,
                 },
                 cost_details={"input": 0, "output": total_cost},
-                model=_first.get("model"),
+                model=_step_model,
             )
         elif llm_calls:
             for lc in llm_calls:
@@ -854,7 +857,7 @@ def _record_step_tracing(
                             "total_tokens": _lc.get("total_tokens", 0),
                         },
                         cost_details={"input": 0, "output": _lc.get("cost", 0)},
-                        model=_lc.get("model"),
+                        model=_step_model,
                     )
                     tp.end_span(gen)
 

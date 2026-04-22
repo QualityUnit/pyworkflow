@@ -312,9 +312,11 @@ def execute_step_task(
                         )
                         text_output = _r.get("text_output", "")
 
-                        # Read tracing data via StepTracingData contract (_tracing key)
+                        # Read tracing data: top-level fields (inheritance) or nested _tracing key (legacy)
                         _td = _r.get("_tracing") or {}
                         _td = _td if isinstance(_td, dict) else _td.__dict__
+                        if not _td.get("credits") and not _td.get("llm_calls"):
+                            _td = _r
                         _step_credits = _td.get("credits", 0)
                         _step_meta = {"credits": float(_step_credits)} if _step_credits else None
                         _tp.update_span(
@@ -325,6 +327,7 @@ def execute_step_task(
                         )
 
                         llm_calls = _td.get("llm_calls", [])
+                        _step_model = _td.get("model")
                         if llm_calls and is_generator:
                             t_in = sum(
                                 (lc if isinstance(lc, dict) else lc.__dict__).get("input_tokens", 0)
@@ -340,11 +343,6 @@ def execute_step_task(
                                 (lc if isinstance(lc, dict) else lc.__dict__).get("cost", 0)
                                 for lc in llm_calls
                             )
-                            _first = (
-                                llm_calls[0]
-                                if isinstance(llm_calls[0], dict)
-                                else llm_calls[0].__dict__
-                            )
                             _tp.update_span(
                                 _step_span,
                                 usage_details={
@@ -353,7 +351,7 @@ def execute_step_task(
                                     "total_tokens": t_in + t_out,
                                 },
                                 cost_details={"input": 0, "output": t_cost},
-                                model=_first.get("model"),
+                                model=_step_model,
                             )
                         elif llm_calls:
                             for lc in llm_calls:
@@ -368,7 +366,7 @@ def execute_step_task(
                                             "total_tokens": _lc.get("total_tokens", 0),
                                         },
                                         cost_details={"input": 0, "output": _lc.get("cost", 0)},
-                                        model=_lc.get("model"),
+                                        model=_step_model,
                                     )
                                     _tp.end_span(gen)
 

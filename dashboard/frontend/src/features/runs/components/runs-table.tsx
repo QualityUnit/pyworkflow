@@ -103,7 +103,7 @@ export function RunsTable({
 
   // Local state for search input (to prevent re-renders while typing)
   const [localSearchQuery, setLocalSearchQuery] = useState('')
-  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Fetch workflows for the filter dropdown
   const { data: workflowsData } = useWorkflows()

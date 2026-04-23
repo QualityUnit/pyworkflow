@@ -99,7 +99,7 @@ jobs:
           unzip -l dist/*.whl | head -20
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: python-package-distributions
           path: dist/
@@ -312,7 +312,7 @@ jobs:
           echo "**Full Changelog**: https://github.com/QualityUnit/pyworkflow/commits/v${VERSION}" >> release-notes.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           body_path: release-notes.md

@@ -11,6 +11,9 @@
     "format:check": "prettier --check .",
     "format": "prettier --write ."
   },
+  "overrides": {
+    "follow-redirects": "^1.16.0"
+  },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.2",
     "@hookform/resolvers": "^5.2.2",

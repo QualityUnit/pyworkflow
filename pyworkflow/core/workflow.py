@@ -9,7 +9,9 @@ decorated with @workflow to enable:
 - Fault tolerance
 """
 
+import contextlib
 import functools
+import hashlib
 from collections.abc import Callable
 from typing import Any
 
@@ -34,6 +36,7 @@ def workflow(
     recover_on_worker_loss: bool | None = None,
     max_recovery_attempts: int | None = None,
     context_class: type | None = None,
+    tracing: dict[str, Any] | None = None,
 ) -> Callable:
     """
     Decorator to mark async functions as workflows.
@@ -53,6 +56,9 @@ def workflow(
         context_class: Optional StepContext subclass for step context access.
             When provided, enables get_step_context() and set_step_context()
             for passing context data to steps running on remote workers.
+        tracing: Optional tracing provider config dict. When provided, enables
+            observability tracing (e.g. Langfuse) for the workflow and its steps.
+            Example: {"provider": "langfuse", "public_key": "...", "secret_key": "...", "host": "..."}
 
     Returns:
         Decorated workflow function
@@ -127,6 +133,7 @@ def workflow(
             max_duration=max_duration,
             tags=validated_tags,
             context_class=context_class,
+            tracing=tracing,
         )
 
         # Store metadata on wrapper
@@ -142,6 +149,7 @@ def workflow(
             max_recovery_attempts  # None = use config default
         )
         wrapper.__workflow_context_class__ = context_class  # type: ignore[attr-defined]
+        wrapper.__workflow_tracing__ = tracing  # type: ignore[attr-defined]
 
         return wrapper
 
@@ -161,6 +169,7 @@ async def execute_workflow_with_context(
     runtime: str | None = None,
     storage_config: dict | None = None,
     parent_run_id: str | None = None,
+    tracing: dict | None = None,
 ) -> Any:
     """
     Execute workflow function with proper context setup.
@@ -210,6 +219,31 @@ async def execute_workflow_with_context(
     ctx._storage_config = storage_config
     ctx._parent_run_id = parent_run_id
 
+    # Tracing config resolution order:
+    # 1. pyworkflow.start(tracing={...}) — runtime creds (e.g. from FlowHunt)
+    # 2. @workflow(tracing={...}) — decorator-level config
+    # 3. configure(TRACING_CONFIG={...}) — global config
+    ctx.tracing = tracing or getattr(
+        workflow_func, "__workflow_tracing__", None
+    )  # 1. start(tracing=) or 2. @workflow(tracing=)
+
+    # Initialize tracing provider
+    tracing_provider = None
+    from pyworkflow.tracing import create_tracing_provider
+
+    if ctx.tracing:
+        tracing_provider = create_tracing_provider(ctx.tracing)  # source 1 or 2
+    if not tracing_provider:
+        from pyworkflow.config import get_config
+
+        _global_tracing = get_config().TRACING_CONFIG
+        tracing_provider = create_tracing_provider(_global_tracing)  # source 3
+        if tracing_provider:
+            ctx.tracing = _global_tracing  # propagate to Celery workers
+    if tracing_provider:
+        ctx._trace_id = hashlib.md5(run_id.encode()).hexdigest()
+    ctx._tracing_provider = tracing_provider
+
     # Set cancellation state if requested before execution
     if cancellation_requested:
         ctx.request_cancellation(reason="Cancellation requested before execution")
@@ -243,6 +277,7 @@ async def execute_workflow_with_context(
     try:
         # Note: Event replay is handled by LocalContext in its constructor
         # when event_log is provided
+        result = None  # For tracing in finally block
 
         logger.info(
             f"Executing workflow: {workflow_name}",
@@ -276,6 +311,7 @@ async def execute_workflow_with_context(
 
     except SuspensionSignal as e:
         # Workflow suspended (sleep/hook) - only happens in durable mode
+        # Don't end tracing - will continue on resume
         logger.info(
             f"Workflow suspended: {e.reason}",
             run_id=run_id,
@@ -341,6 +377,45 @@ async def execute_workflow_with_context(
         raise
 
     finally:
+        # Flush tracing data — wrapped in broad try/except to never crash the workflow
+        if tracing_provider:
+            try:
+                _trace_input = None
+                _trace_output = None
+                try:
+                    if args and isinstance(args[0], dict):
+                        _trace_input = args[0].get("input_value")
+                    if result is not None and isinstance(result, dict):
+                        _out = result.get("outputs", result)
+                        if isinstance(_out, dict):
+                            for v in _out.values():
+                                if isinstance(v, dict) and v.get("text_output"):
+                                    _trace_output = v["text_output"]
+                                    break
+                        if not _trace_output:
+                            _trace_output = result.get("text_output")
+                except Exception:
+                    pass
+                with contextlib.suppress(Exception):
+                    await tracing_provider.shutdown()
+                try:
+                    if ctx._trace_id:
+                        trace_params = (ctx.tracing or {}).get("trace_params", {})
+                        meta = trace_params.get("metadata") or {}
+                        meta["run_id"] = run_id
+                        trace_params["metadata"] = meta
+                        await tracing_provider.update_trace(
+                            trace_id=ctx._trace_id,
+                            name=workflow_name,
+                            input=_trace_input,
+                            output=_trace_output,
+                            trace_params=trace_params,
+                        )
+                except Exception as e:
+                    logger.error(f"TRACING: update_trace_via_api failed: {e}")
+            except Exception as e:
+                logger.error(f"TRACING: unexpected error in tracing finally block: {e}")
+
         # Clear step context if it was set
         if step_context_token is not None:
             from pyworkflow.context.step_context import _reset_step_context

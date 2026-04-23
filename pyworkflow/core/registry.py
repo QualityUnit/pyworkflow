@@ -23,6 +23,9 @@ class WorkflowMetadata:
     tags: list[str] | None = None
     description: str | None = None  # Docstring from the workflow function
     context_class: type | None = None  # StepContext subclass for step context access
+    tracing: dict[str, Any] | None = (
+        None  # Optional tracing provider config (e.g. Langfuse credentials)
+    )
 
     def __post_init__(self) -> None:
         if self.tags is None:
@@ -44,6 +47,9 @@ class StepMetadata:
     timeout: int | None = None
     metadata: dict[str, Any] | None = None
     force_local: bool = False
+    is_generator: bool = (
+        False  # If True, creates a Langfuse generation span instead of a regular span
+    )
 
     def __post_init__(self) -> None:
         if self.metadata is None:
@@ -73,6 +79,7 @@ class WorkflowRegistry:
         max_duration: str | None = None,
         tags: list[str] | None = None,
         context_class: type | None = None,
+        tracing: dict[str, Any] | None = None,
     ) -> None:
         """
         Register a workflow.
@@ -84,6 +91,7 @@ class WorkflowRegistry:
             max_duration: Optional maximum duration
             tags: Optional list of tags (max 3)
             context_class: Optional StepContext subclass for step context access
+            tracing: Optional tracing provider config dict (e.g. Langfuse credentials)
         """
         if name in self._workflows:
             existing = self._workflows[name]
@@ -101,6 +109,7 @@ class WorkflowRegistry:
             max_duration=max_duration,
             tags=tags or [],
             context_class=context_class,
+            tracing=tracing,
         )
 
         self._workflows[name] = workflow_meta
@@ -160,6 +169,7 @@ class WorkflowRegistry:
         timeout: int | None = None,
         metadata: dict[str, Any] | None = None,
         force_local: bool = False,
+        is_generator: bool = False,
     ) -> None:
         """
         Register a step.
@@ -173,6 +183,7 @@ class WorkflowRegistry:
             timeout: Optional timeout in seconds
             metadata: Optional metadata dict
             force_local: If True, always execute inline even in distributed runtimes
+            is_generator: If True, creates a Langfuse generation span instead of a regular span
         """
         if name in self._steps:
             existing = self._steps[name]
@@ -190,6 +201,7 @@ class WorkflowRegistry:
             timeout=timeout,
             metadata=metadata or {},
             force_local=force_local,
+            is_generator=is_generator,
         )
 
         self._steps[name] = step_meta
@@ -259,9 +271,12 @@ def register_workflow(
     max_duration: str | None = None,
     tags: list[str] | None = None,
     context_class: type | None = None,
+    tracing: dict[str, Any] | None = None,
 ) -> None:
     """Register a workflow in the global registry."""
-    _registry.register_workflow(name, func, original_func, max_duration, tags, context_class)
+    _registry.register_workflow(
+        name, func, original_func, max_duration, tags, context_class, tracing
+    )
 
 
 def get_workflow(name: str) -> WorkflowMetadata | None:
@@ -293,10 +308,19 @@ def register_step(
     timeout: int | None = None,
     metadata: dict[str, Any] | None = None,
     force_local: bool = False,
+    is_generator: bool = False,
 ) -> None:
     """Register a step in the global registry."""
     _registry.register_step(
-        name, func, original_func, max_retries, retry_delay, timeout, metadata, force_local
+        name,
+        func,
+        original_func,
+        max_retries,
+        retry_delay,
+        timeout,
+        metadata,
+        force_local,
+        is_generator,
     )
 
 

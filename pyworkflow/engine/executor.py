@@ -47,6 +47,7 @@ async def start(
     durable: bool | None = None,
     storage: StorageBackend | None = None,
     idempotency_key: str | None = None,
+    tracing: dict | None = None,
     **kwargs: Any,
 ) -> str:
     """
@@ -62,6 +63,8 @@ async def start(
         durable: Whether workflow is durable (None = use workflow/config default)
         storage: Storage backend instance (None = use configured storage)
         idempotency_key: Optional key for idempotent execution
+        tracing: Optional tracing provider config dict (e.g. Langfuse credentials).
+            Overrides the @workflow decorator's tracing parameter if provided.
         **kwargs: Keyword arguments for workflow
 
     Returns:
@@ -168,6 +171,7 @@ async def start(
         idempotency_key=idempotency_key,
         max_duration=workflow_meta.max_duration,
         metadata={},  # Run-level metadata
+        tracing=tracing,
     )
 
 

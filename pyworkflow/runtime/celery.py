@@ -116,6 +116,7 @@ class CeleryRuntime(Runtime):
         idempotency_key: str | None = None,
         max_duration: str | None = None,
         metadata: dict | None = None,
+        tracing: dict | None = None,
     ) -> str:
         """
         Start a workflow execution by dispatching to Celery workers.
@@ -152,6 +153,7 @@ class CeleryRuntime(Runtime):
             run_id=run_id,
             storage_config=storage_config,
             idempotency_key=idempotency_key,
+            tracing=tracing,
         )
 
         logger.info(

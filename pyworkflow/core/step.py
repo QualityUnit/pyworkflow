@@ -58,6 +58,7 @@ def step(
     timeout: int | None = None,
     metadata: dict[str, Any] | None = None,
     force_local: bool = False,
+    is_generator: bool = False,
 ) -> Callable:
     """
     Decorator to mark functions as workflow steps.
@@ -77,6 +78,8 @@ def step(
         force_local: If True, always execute inline even in distributed
             runtimes (e.g., Celery). Useful for lightweight steps where
             the overhead of message broker dispatch is undesirable.
+        is_generator: If True, creates a Langfuse generation span instead of
+            a regular span. Use for LLM/AI steps that produce generated content.
 
     Returns:
         Decorated step function
@@ -209,6 +212,7 @@ def step(
                     max_retries=max_retries,
                     retry_delay=retry_delay,
                     timeout=timeout,
+                    is_generator=is_generator,
                 )
 
             # Check if we're resuming from a retry
@@ -296,6 +300,9 @@ def step(
                     run_id=ctx.run_id,
                     step_id=step_id,
                 )
+
+                # Record tracing span for locally executed step
+                _record_step_tracing(ctx, step_name, step_id, is_generator, result, args, kwargs)
 
                 return result
 
@@ -458,6 +465,7 @@ def step(
             timeout=timeout,
             metadata=metadata,
             force_local=force_local,
+            is_generator=is_generator,
         )
 
         # Store metadata on wrapper
@@ -468,6 +476,7 @@ def step(
         wrapper.__step_timeout__ = timeout  # type: ignore[attr-defined]
         wrapper.__step_metadata__ = metadata or {}  # type: ignore[attr-defined]
         wrapper.__step_force_local__ = force_local  # type: ignore[attr-defined]
+        wrapper.__step_is_generator__ = is_generator  # type: ignore[attr-defined]
 
         return wrapper
 
@@ -627,6 +636,7 @@ async def _dispatch_step_to_celery(
     max_retries: int,
     retry_delay: str | int | list[int],
     timeout: int | None,
+    is_generator: bool = False,
 ) -> Any:
     """
     Dispatch step execution to Celery step worker.
@@ -736,6 +746,8 @@ async def _dispatch_step_to_celery(
         context_data=context_data,
         context_class_name=context_class_name,
         workflow_name=ctx.workflow_name,
+        tracing=ctx.tracing,
+        is_generator=is_generator,
     )
 
     logger.info(
@@ -753,3 +765,38 @@ async def _dispatch_step_to_celery(
         step_name=step_name,
         task_id=task_result.id,
     )
+
+
+def _record_step_tracing(
+    ctx: Any,
+    step_name: str,
+    step_id: str,
+    is_generator: bool,
+    result: Any,
+    step_args: tuple = (),
+    step_kwargs: dict | None = None,
+) -> None:
+    """Record a tracing span for a completed step. No-op if tracing is not configured."""
+    tp = getattr(ctx, "_tracing_provider", None)
+    if not tp:
+        return
+    try:
+        trace_id = getattr(ctx, "_trace_id", None)
+        if not trace_id:
+            return
+
+        step_input = dict(step_kwargs) if step_kwargs else {}
+        if step_args:
+            step_input["_args"] = [str(a)[:500] for a in step_args]
+
+        tp.record_step_span(
+            trace_id=trace_id,
+            step_name=step_name,
+            step_id=step_id,
+            is_generator=is_generator,
+            result=result,
+            step_input=step_input or None,
+            trace_name=ctx.workflow_name,
+        )
+    except Exception:
+        pass  # Never fail the workflow because of tracing

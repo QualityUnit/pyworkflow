@@ -784,90 +784,19 @@ def _record_step_tracing(
         trace_id = getattr(ctx, "_trace_id", None)
         if not trace_id:
             return
-        span = tp.start_span_on_trace(
-            trace_id,
-            f"{step_name}-{step_id}",
-            is_generator=is_generator,
-            trace_name=ctx.workflow_name,
-        )
-        if not span:
-            return
 
-        # Build input from actual step arguments
         step_input = dict(step_kwargs) if step_kwargs else {}
         if step_args:
             step_input["_args"] = [str(a)[:500] for a in step_args]
 
-        # Convert result to dict for uniform access
-        _r = (
-            result.model_dump()
-            if hasattr(result, "model_dump")
-            else result
-            if isinstance(result, dict)
-            else {}
+        tp.record_step_span(
+            trace_id=trace_id,
+            step_name=step_name,
+            step_id=step_id,
+            is_generator=is_generator,
+            result=result,
+            step_input=step_input or None,
+            trace_name=ctx.workflow_name,
         )
-        text_output = _r.get("text_output", "")
-
-        # Read tracing data: top-level fields (inheritance) or nested _tracing key (legacy)
-        _td = _r.get("_tracing") or {}
-        _td = _td if isinstance(_td, dict) else _td.__dict__
-        # Fall back to top-level keys when _tracing is empty
-        if not _td.get("llm_calls"):
-            _td = _r
-        tp.update_span(
-            span,
-            input=step_input or None,
-            output={"text_output": text_output},
-        )
-
-        llm_calls = _td.get("llm_calls", [])
-        _step_model = _td.get("model")
-        if llm_calls and is_generator:
-            total_in = sum(
-                (lc if isinstance(lc, dict) else lc.__dict__).get("input_tokens", 0)
-                for lc in llm_calls
-            )
-            total_out = sum(
-                (lc if isinstance(lc, dict) else lc.__dict__).get("output_tokens", 0)
-                for lc in llm_calls
-            )
-            tp.update_span(
-                span,
-                usage_details={
-                    "input_tokens": total_in,
-                    "output_tokens": total_out,
-                    "total_tokens": total_in + total_out,
-                },
-                model=_step_model,
-            )
-        elif llm_calls:
-            for lc in llm_calls:
-                _lc = lc if isinstance(lc, dict) else lc.__dict__
-                gen = tp.start_child_generation(span, "LLM Call")
-                if gen:
-                    tp.update_span(
-                        gen,
-                        usage_details={
-                            "input_tokens": _lc.get("input_tokens", 0),
-                            "output_tokens": _lc.get("output_tokens", 0),
-                            "total_tokens": _lc.get("total_tokens", 0),
-                        },
-                        model=_step_model,
-                    )
-                    tp.end_span(gen)
-
-        tool_calls = _td.get("tool_calls", [])
-        for tc in tool_calls:
-            _tc = tc if isinstance(tc, dict) else tc.__dict__
-            ts = tp.start_child_span(span, _tc.get("name", "tool"))
-            if ts:
-                tp.update_span(
-                    ts,
-                    input=_tc.get("input"),
-                    output=_tc.get("output"),
-                )
-                tp.end_span(ts)
-
-        tp.end_span(span)
     except Exception:
         pass  # Never fail the workflow because of tracing

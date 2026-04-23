@@ -295,85 +295,15 @@ def execute_step_task(
 
                 _tp = create_tracing_provider(tracing)
                 if _tp:
-                    _trace_id = hashlib.md5(run_id.encode()).hexdigest()
-                    _step_span = _tp.start_span_on_trace(
-                        _trace_id,
-                        f"{step_name}-{step_id}",
+                    _tp.record_step_span(
+                        trace_id=hashlib.md5(run_id.encode()).hexdigest(),
+                        step_name=step_name,
+                        step_id=step_id,
                         is_generator=is_generator,
+                        result=result,
+                        step_input=dict(kwargs) if kwargs else None,
                         trace_name=workflow_name or "workflow",
                     )
-                    if _step_span:
-                        _r = (
-                            result.model_dump()
-                            if hasattr(result, "model_dump")
-                            else result
-                            if isinstance(result, dict)
-                            else {}
-                        )
-                        text_output = _r.get("text_output", "")
-
-                        # Read tracing data: top-level fields (inheritance) or nested _tracing key (legacy)
-                        _td = _r.get("_tracing") or {}
-                        _td = _td if isinstance(_td, dict) else _td.__dict__
-                        if not _td.get("llm_calls"):
-                            _td = _r
-                        _tp.update_span(
-                            _step_span,
-                            input=dict(kwargs) if kwargs else None,
-                            output={"text_output": text_output},
-                        )
-
-                        llm_calls = _td.get("llm_calls", [])
-                        _step_model = _td.get("model")
-                        if llm_calls and is_generator:
-                            t_in = sum(
-                                (lc if isinstance(lc, dict) else lc.__dict__).get("input_tokens", 0)
-                                for lc in llm_calls
-                            )
-                            t_out = sum(
-                                (lc if isinstance(lc, dict) else lc.__dict__).get(
-                                    "output_tokens", 0
-                                )
-                                for lc in llm_calls
-                            )
-                            _tp.update_span(
-                                _step_span,
-                                usage_details={
-                                    "input_tokens": t_in,
-                                    "output_tokens": t_out,
-                                    "total_tokens": t_in + t_out,
-                                },
-                                model=_step_model,
-                            )
-                        elif llm_calls:
-                            for lc in llm_calls:
-                                _lc = lc if isinstance(lc, dict) else lc.__dict__
-                                gen = _tp.start_child_generation(_step_span, "LLM Call")
-                                if gen:
-                                    _tp.update_span(
-                                        gen,
-                                        usage_details={
-                                            "input_tokens": _lc.get("input_tokens", 0),
-                                            "output_tokens": _lc.get("output_tokens", 0),
-                                            "total_tokens": _lc.get("total_tokens", 0),
-                                        },
-                                        model=_step_model,
-                                    )
-                                    _tp.end_span(gen)
-
-                        tool_calls = _td.get("tool_calls", [])
-                        for tc in tool_calls:
-                            _tc = tc if isinstance(tc, dict) else tc.__dict__
-                            ts = _tp.start_child_span(_step_span, _tc.get("name", "tool"))
-                            if ts:
-                                _tp.update_span(
-                                    ts,
-                                    input=_tc.get("input"),
-                                    output=_tc.get("output"),
-                                )
-                                _tp.end_span(ts)
-
-                        _tp.end_span(_step_span)
                     run_async(_tp.shutdown())
             except Exception:
                 pass  # Never fail step because of tracing

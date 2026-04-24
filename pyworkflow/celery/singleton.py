@@ -11,8 +11,9 @@ Based on:
 
 import inspect
 import json
+from collections.abc import Callable
 from hashlib import md5
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 from uuid import uuid4
 
 from celery import Task
@@ -20,7 +21,10 @@ from celery.exceptions import WorkerLostError
 from loguru import logger
 
 if TYPE_CHECKING:
+    from redis import Redis
     from redis.sentinel import Sentinel
+
+T = TypeVar("T")
 
 
 def generate_lock_key(
@@ -74,10 +78,17 @@ class SingletonConfig:
 
 
 class RedisLockBackend:
-    """Redis backend for distributed locking with Sentinel support."""
+    """Redis backend for distributed locking with Sentinel support.
+
+    During Sentinel failover (master rotation), cached connections can raise
+    MasterNotFoundError or socket TimeoutError. On those, we refresh the client
+    via ``sentinel.master_for()`` and retry the operation once. See
+    ``_execute_with_refresh``.
+    """
 
     _sentinel: "Sentinel | None"
     _master_name: str | None
+    redis: "Redis"
 
     def __init__(
         self,
@@ -91,20 +102,61 @@ class RedisLockBackend:
             from redis.sentinel import Sentinel
 
             sentinels = self._parse_sentinel_url(url)
+            # socket_timeout=5 matches FlowHunt's production-tested value.
+            # The previous 0.5s was too tight during Sentinel failover windows.
             self._sentinel = Sentinel(
                 sentinels,
-                socket_timeout=0.5,
+                socket_timeout=5,
                 decode_responses=True,
             )
             self._master_name = sentinel_master or "mymaster"
-            self.redis = self._sentinel.master_for(
-                self._master_name,
-                decode_responses=True,
-            )
+            self.redis = self._build_master_client()
         else:
             self._sentinel = None
             self._master_name = None
             self.redis = redis.from_url(url, decode_responses=True)
+
+    def _build_master_client(self) -> "Redis":
+        """Get a fresh master client from Sentinel. Sentinel mode only."""
+        assert self._sentinel is not None and self._master_name is not None
+        return self._sentinel.master_for(
+            self._master_name,
+            decode_responses=True,
+        )
+
+    def _refresh_client(self) -> None:
+        """Re-resolve master via Sentinel after a failover-related error."""
+        if self._sentinel is None:
+            return
+        self.redis = self._build_master_client()
+        logger.info(
+            "Refreshed Redis master connection for sentinel master '{}'",
+            self._master_name,
+        )
+
+    def _execute_with_refresh(self, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+        """Run ``fn``; on Sentinel failover errors, refresh the client and retry once.
+
+        In non-sentinel mode this is a no-op passthrough — refresh has nothing
+        to do, so any exception propagates as before.
+        """
+        from redis.exceptions import ConnectionError as RedisConnectionError
+        from redis.exceptions import TimeoutError as RedisTimeoutError
+        from redis.sentinel import MasterNotFoundError
+
+        try:
+            return fn(*args, **kwargs)
+        except (MasterNotFoundError, RedisConnectionError, RedisTimeoutError) as exc:
+            if self._sentinel is None:
+                raise
+            logger.warning(
+                "Redis lock op hit sentinel failover error ({}: {}). "
+                "Refreshing master and retrying once.",
+                type(exc).__name__,
+                exc,
+            )
+            self._refresh_client()
+            return fn(*args, **kwargs)
 
     @staticmethod
     def _parse_sentinel_url(url: str) -> list[tuple[str, int]]:
@@ -142,15 +194,19 @@ class RedisLockBackend:
 
     def lock(self, lock_key: str, task_id: str, expiry: int | None = None) -> bool:
         """Acquire lock atomically. Returns True if acquired."""
-        return bool(self.redis.set(lock_key, task_id, nx=True, ex=expiry))
+        return bool(
+            self._execute_with_refresh(
+                lambda: self.redis.set(lock_key, task_id, nx=True, ex=expiry)
+            )
+        )
 
     def unlock(self, lock_key: str) -> None:
         """Release the lock."""
-        self.redis.delete(lock_key)
+        self._execute_with_refresh(lambda: self.redis.delete(lock_key))
 
     def get(self, lock_key: str) -> str | None:
         """Get the task ID holding the lock."""
-        return self.redis.get(lock_key)
+        return self._execute_with_refresh(lambda: self.redis.get(lock_key))
 
 
 class DuplicateTaskError(Exception):

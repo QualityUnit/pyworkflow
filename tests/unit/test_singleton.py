@@ -785,6 +785,132 @@ class TestRedisLockBackendSentinel:
             assert backend._sentinel is None
 
 
+class TestRedisLockBackendAutoRefresh:
+    """Sentinel failover recovery in RedisLockBackend.
+
+    When the Sentinel master rotates, the cached Redis client can raise
+    ``MasterNotFoundError`` or ``TimeoutError``. The backend should transparently
+    refresh the client via ``sentinel.master_for()`` and retry the operation once.
+    """
+
+    def _make_sentinel_backend(self, mock_sentinel_class, stale_client, fresh_client):
+        """Build a sentinel-backed backend where master_for returns stale then fresh."""
+        mock_sentinel = mock_sentinel_class.return_value
+        mock_sentinel.master_for.side_effect = [stale_client, fresh_client]
+
+        return RedisLockBackend(
+            "sentinel://host1:26379/0",
+            is_sentinel=True,
+            sentinel_master="mymaster",
+        )
+
+    def test_lock_recovers_from_master_not_found(self):
+        """MasterNotFoundError on lock() triggers refresh and succeeds on retry."""
+        from redis.sentinel import MasterNotFoundError
+
+        with patch("redis.sentinel.Sentinel") as mock_sentinel_class:
+            stale = MagicMock()
+            stale.set.side_effect = MasterNotFoundError("No master found for 'mymaster'")
+            fresh = MagicMock()
+            fresh.set.return_value = True
+
+            backend = self._make_sentinel_backend(mock_sentinel_class, stale, fresh)
+            result = backend.lock("test_key", "task_123", expiry=3600)
+
+            assert result is True
+            stale.set.assert_called_once()
+            fresh.set.assert_called_once_with("test_key", "task_123", nx=True, ex=3600)
+            # master_for called twice: initial + refresh
+            assert mock_sentinel_class.return_value.master_for.call_count == 2
+
+    def test_lock_recovers_from_timeout_error(self):
+        """Redis TimeoutError on lock() triggers refresh and succeeds on retry."""
+        from redis.exceptions import TimeoutError as RedisTimeoutError
+
+        with patch("redis.sentinel.Sentinel") as mock_sentinel_class:
+            stale = MagicMock()
+            stale.set.side_effect = RedisTimeoutError("Timeout reading from socket")
+            fresh = MagicMock()
+            fresh.set.return_value = True
+
+            backend = self._make_sentinel_backend(mock_sentinel_class, stale, fresh)
+            result = backend.lock("test_key", "task_123", expiry=3600)
+
+            assert result is True
+            assert mock_sentinel_class.return_value.master_for.call_count == 2
+
+    def test_lock_recovers_from_connection_error(self):
+        """Redis ConnectionError on lock() triggers refresh and succeeds on retry."""
+        from redis.exceptions import ConnectionError as RedisConnectionError
+
+        with patch("redis.sentinel.Sentinel") as mock_sentinel_class:
+            stale = MagicMock()
+            stale.set.side_effect = RedisConnectionError("Connection reset by peer")
+            fresh = MagicMock()
+            fresh.set.return_value = True
+
+            backend = self._make_sentinel_backend(mock_sentinel_class, stale, fresh)
+            assert backend.lock("test_key", "task_123", expiry=3600) is True
+            assert mock_sentinel_class.return_value.master_for.call_count == 2
+
+    def test_unlock_recovers_from_master_rotation(self):
+        """unlock() refreshes and retries once on Sentinel failover errors."""
+        from redis.sentinel import MasterNotFoundError
+
+        with patch("redis.sentinel.Sentinel") as mock_sentinel_class:
+            stale = MagicMock()
+            stale.delete.side_effect = MasterNotFoundError("No master found")
+            fresh = MagicMock()
+
+            backend = self._make_sentinel_backend(mock_sentinel_class, stale, fresh)
+            backend.unlock("test_key")
+
+            fresh.delete.assert_called_once_with("test_key")
+
+    def test_get_recovers_from_master_rotation(self):
+        """get() refreshes and retries once on Sentinel failover errors."""
+        from redis.sentinel import MasterNotFoundError
+
+        with patch("redis.sentinel.Sentinel") as mock_sentinel_class:
+            stale = MagicMock()
+            stale.get.side_effect = MasterNotFoundError("No master found")
+            fresh = MagicMock()
+            fresh.get.return_value = "task_123"
+
+            backend = self._make_sentinel_backend(mock_sentinel_class, stale, fresh)
+            assert backend.get("test_key") == "task_123"
+
+    def test_second_attempt_failure_propagates(self):
+        """If the retry also fails, the exception propagates."""
+        from redis.sentinel import MasterNotFoundError
+
+        with patch("redis.sentinel.Sentinel") as mock_sentinel_class:
+            stale = MagicMock()
+            stale.set.side_effect = MasterNotFoundError("No master found")
+            fresh = MagicMock()
+            fresh.set.side_effect = MasterNotFoundError("Still no master")
+
+            backend = self._make_sentinel_backend(mock_sentinel_class, stale, fresh)
+            with pytest.raises(MasterNotFoundError):
+                backend.lock("test_key", "task_123", expiry=3600)
+
+    def test_non_sentinel_mode_does_not_refresh(self):
+        """Non-sentinel backend has no refresh path — exceptions propagate."""
+        from redis.sentinel import MasterNotFoundError
+
+        with patch("redis.from_url") as mock_from_url:
+            mock_redis = MagicMock()
+            mock_redis.set.side_effect = MasterNotFoundError("No master found")
+            mock_from_url.return_value = mock_redis
+
+            backend = RedisLockBackend("redis://localhost:6379/0")
+            with pytest.raises(MasterNotFoundError):
+                backend.lock("test_key", "task_123", expiry=3600)
+
+            # Only the initial resolution — no refresh attempts.
+            assert mock_redis.set.call_count == 1
+
+
 class TestSingletonConfigSentinel:
     """Test SingletonConfig Sentinel properties."""
 

@@ -37,7 +37,7 @@ dependencies = [
     "loguru>=0.7.0",
 
     # CLI dependencies
-    "click>=8.0.0",
+    "click>=8.3.3",
     "inquirerpy>=0.3.4; python_version < '4.0'",
 
     # Utilities

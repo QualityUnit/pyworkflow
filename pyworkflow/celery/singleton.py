@@ -420,6 +420,16 @@ class SingletonWorkflowTask(Task):
 
         # Lock not acquired - check for existing task
         existing_task_id = self.get_existing_task_id(lock_key)
+
+        # Self-retry: when celery's Task.retry() calls apply_async with the
+        # same task_id we already hold, it's the running task re-queueing
+        # itself. Allow the queue write through — on_retry will release the
+        # lock before the retried message is picked up. Without this branch,
+        # apply_async would silently return AsyncResult without enqueueing,
+        # and the retry would be lost.
+        if existing_task_id == task_id:
+            return super().apply_async(args, kwargs, task_id=task_id, **options)
+
         if existing_task_id:
             logger.debug(
                 "Singleton: duplicate task blocked",
@@ -483,13 +493,17 @@ class SingletonWorkflowTask(Task):
                     error=str(exc),
                 )
 
-        # Log appropriately
+        # Log appropriately. Keep str(exc) out of the message string: when
+        # kwargs are passed, Loguru calls .format() on the message, which
+        # parses any `{` from the exception (e.g. JSON in the message) as a
+        # format spec and raises KeyError.
         if isinstance(exc, WorkerLostError):
             logger.warning("Task interrupted due to worker loss", task_id=task_id)
         else:
             logger.error(
-                f"Task {self.name} failed: {exc}",
+                f"Task {self.name} failed",
                 task_id=task_id,
+                error=str(exc),
                 traceback=einfo.traceback if einfo else None,
             )
 

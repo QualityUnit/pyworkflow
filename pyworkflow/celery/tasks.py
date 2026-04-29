@@ -442,8 +442,12 @@ def execute_step_task(
         if self.request.retries < max_retries:
             # Use exponential backoff for unexpected errors
             countdown = _calculate_exponential_backoff(self.request.retries)
+            # Don't inline str(e) into the message: Loguru calls .format() on
+            # the message when kwargs are present, and any `{` from the
+            # exception (e.g. a JSON body) is parsed as a format spec and
+            # raises KeyError, which would skip the retry below.
             logger.warning(
-                f"Step failed (unexpected): {step_name}, retrying in {countdown:.1f}s...: {str(e)}",
+                f"Step failed (unexpected): {step_name}, retrying in {countdown:.1f}s...",
                 run_id=run_id,
                 step_id=step_id,
                 error=str(e),

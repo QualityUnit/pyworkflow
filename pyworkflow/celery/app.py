@@ -415,7 +415,7 @@ def create_celery_app(
         "beat_schedule": {
             "pyworkflow-data-retention": {
                 "task": "pyworkflow.run_data_retention",
-                "schedule": timedelta(hours=24),
+                "schedule": timedelta(hours=1),
                 "options": {"queue": "pyworkflow.default"},
             },
             "pyworkflow-streams-drain-scheduled": {

@@ -51,7 +51,7 @@ dependencies = [
 [project.optional-dependencies]
 # Storage backends
 redis = [
-    "redis>=5.0.0",
+    "redis>=8.0.0",
 ]
 
 sqlite = [
@@ -80,7 +80,7 @@ mysql = [
 
 # All storage backends
 all = [
-    "redis>=5.0.0",
+    "redis>=8.0.0",
     "aiosqlite>=0.19.0",
     "asyncpg>=0.29.0",
     "aiomysql>=0.2.0",
@@ -113,7 +113,7 @@ dev = [
     "flower>=2.0.0",  # Celery web UI
 
     # Include all storage backends for development
-    "redis>=5.0.0",
+    "redis>=8.0.0",
     "aiosqlite>=0.19.0",
     "asyncpg>=0.29.0",
 ]

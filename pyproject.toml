@@ -37,13 +37,13 @@ dependencies = [
     "loguru>=0.7.0",
 
     # CLI dependencies
-    "click>=8.3.3",
+    "click>=8.4.1",
     "inquirerpy>=0.3.4; python_version < '4.0'",
 
     # Utilities
     "httpx>=0.25.0",
     "python-dateutil>=2.8.0",
-    "filelock>=3.12.0",
+    "filelock>=3.29.3",
     "pyyaml>=6.0.0",
     "croniter>=2.0.0",
 ]
@@ -67,7 +67,7 @@ aws = [
     "aws-durable-execution-sdk-python>=0.1.0",
 ]
 dynamodb = [
-    "aiobotocore>=3.6.0",
+    "aiobotocore>=3.7.0",
 ]
 
 cassandra = [
@@ -96,12 +96,12 @@ dev = [
     "pytest-cov>=4.1.0",
     "pytest-celery>=0.0.0",
     "pytest-mock>=3.12.0",
-    "moto[dynamodb]>=5.2.0",  # AWS mocking for DynamoDB tests
+    "moto[dynamodb]>=5.2.2",  # AWS mocking for DynamoDB tests
 
     # Code quality
-    "black>=23.0.0",
-    "ruff>=0.15.12",
-    "mypy>=1.7.0",
+    "black>=26.5.1",
+    "ruff>=0.15.17",
+    "mypy>=2.1.0",
     "pre-commit>=4.6.0",
 
     # Type stubs

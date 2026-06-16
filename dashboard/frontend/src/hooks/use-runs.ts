@@ -2,7 +2,7 @@
  * React Query hooks for workflow runs.
  */
 
-import { useQuery, keepPreviousData } from '@tanstack/react-query'
+import { useQuery, useInfiniteQuery, keepPreviousData } from '@tanstack/react-query'
 import {
   listRuns,
   getRun,
@@ -37,6 +37,23 @@ export function useRuns({ params = {}, autoRefresh = true }: UseRunsOptions = {}
     refetchInterval: autoRefresh ? REFRESH_INTERVAL : false,
     refetchOnWindowFocus: false,
     placeholderData: keepPreviousData,
+  })
+}
+
+/**
+ * Cursor-paginated runs list. Each page fetches a bounded number of summary rows (see `limit` in
+ * params) and follows `next_cursor` for subsequent pages, so the Runs page never fetches the whole
+ * table at once (issue #482). Auto-refresh only re-fetches already-loaded pages.
+ */
+export function useRunsInfinite({ params = {}, autoRefresh = true }: UseRunsOptions = {}) {
+  return useInfiniteQuery({
+    queryKey: ['runs-infinite', params],
+    queryFn: ({ pageParam }) =>
+      listRuns({ ...params, cursor: pageParam as string | undefined }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    refetchInterval: autoRefresh ? REFRESH_INTERVAL : false,
+    refetchOnWindowFocus: false,
   })
 }
 

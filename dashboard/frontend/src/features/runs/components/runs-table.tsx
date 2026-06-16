@@ -57,6 +57,9 @@ interface RunsTableProps {
   onDateRangeChange?: (range: DateRange) => void
   filters?: RunsFilters
   onFiltersChange?: (filters: RunsFilters) => void
+  hasNextPage?: boolean
+  isFetchingNextPage?: boolean
+  onLoadMore?: () => void
 }
 
 function formatDuration(seconds: number | null): string {
@@ -89,6 +92,9 @@ export function RunsTable({
   onDateRangeChange,
   filters,
   onFiltersChange,
+  hasNextPage,
+  isFetchingNextPage,
+  onLoadMore,
 }: RunsTableProps) {
   const navigate = useNavigate()
   const [sorting, setSorting] = useState<SortingState>([
@@ -551,7 +557,20 @@ export function RunsTable({
         </div>
       </div>
 
-      <DataTablePagination table={table} className="mt-auto" />
+      <div className="mt-auto flex items-center justify-between gap-4">
+        <DataTablePagination table={table} className="flex-1" />
+        {hasNextPage && onLoadMore && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8"
+            onClick={onLoadMore}
+            disabled={isFetchingNextPage}
+          >
+            {isFetchingNextPage ? 'Loading...' : 'Load more'}
+          </Button>
+        )}
+      </div>
     </div>
   )
 }

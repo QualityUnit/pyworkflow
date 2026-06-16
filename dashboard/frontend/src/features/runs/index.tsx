@@ -11,8 +11,13 @@ import { GithubStarButton } from '@/components/github-star-button'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { RefreshButton } from '@/components/refresh-button'
 import { Badge } from '@/components/ui/badge'
-import { useRuns, REFRESH_INTERVAL } from '@/hooks/use-runs'
+import { Button } from '@/components/ui/button'
+import { useRunsInfinite, REFRESH_INTERVAL } from '@/hooks/use-runs'
 import { RunsTable } from './components/runs-table'
+
+// Page size for cursor-paginated fetches. Kept small so the dashboard never scatter-gathers the
+// whole runs table on every poll (issue #482); additional pages load on demand.
+const RUNS_PAGE_SIZE = 100
 
 export interface DateRange {
   from: Date | null
@@ -55,7 +60,7 @@ export function RunsList({ query }: RunsListProps) {
       start_time?: string
       end_time?: string
     } = {
-      limit: 1000,
+      limit: RUNS_PAGE_SIZE,
     }
 
     // Use URL query param if provided, otherwise use search filter
@@ -84,11 +89,24 @@ export function RunsList({ query }: RunsListProps) {
     return params
   }, [query, filters.searchQuery, filters.statusFilter, filters.workflowFilter, dateRange.from, dateRange.to, fromTime, toTime])
 
-  // Fetch runs with server-side filtering
-  const { data, isLoading, isFetching, error, refetch } = useRuns({
+  // Fetch runs with server-side filtering and cursor pagination
+  const {
+    data,
+    isLoading,
+    isFetching,
+    error,
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useRunsInfinite({
     params: apiParams,
     autoRefresh: autoRefreshEnabled,
   })
+
+  // Flatten the cursor-paginated pages into a single list for the table.
+  const runs = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data])
+  const loadedCount = runs.length
 
   const clearQueryFilter = () => {
     navigate({ to: '/runs', search: {} })
@@ -132,7 +150,9 @@ export function RunsList({ query }: RunsListProps) {
               {query ? `Search: ${query}` : 'Workflow Runs'}
             </h2>
             <p className="text-muted-foreground">
-              {data ? `${data.count} run${data.count !== 1 ? 's' : ''}` : 'Loading...'}
+              {data
+                ? `${loadedCount}${hasNextPage ? '+' : ''} run${loadedCount !== 1 ? 's' : ''}`
+                : 'Loading...'}
             </p>
           </div>
           {query && (
@@ -164,12 +184,15 @@ export function RunsList({ query }: RunsListProps) {
           <div className="-mx-4 flex-1 overflow-auto px-4 py-1 lg:flex-row lg:space-x-12 lg:space-y-0">
             <div className="@container/content h-full">
               <RunsTable
-                runs={data.items}
+                runs={runs}
                 onPageChange={handlePageChange}
                 dateRange={dateRange}
                 onDateRangeChange={setDateRange}
                 filters={filters}
                 onFiltersChange={handleFiltersChange}
+                hasNextPage={hasNextPage}
+                isFetchingNextPage={isFetchingNextPage}
+                onLoadMore={() => fetchNextPage()}
               />
             </div>
           </div>

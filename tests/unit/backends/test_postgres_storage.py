@@ -531,6 +531,31 @@ class TestWorkflowRunOperations:
 
         assert len(runs) == 1
         assert runs[0].run_id == "run_1"
+        # list_runs returns summaries: heavy payload columns are not fetched and carry defaults,
+        # while lightweight fields (incl. error) survive. See issue #482.
+        assert runs[0].input_args == "[]"
+        assert runs[0].input_kwargs == "{}"
+        assert runs[0].result is None
+        assert runs[0].context == {}
+        assert runs[0].error is None
+
+        # The query must not SELECT * (avoids scatter-gathering wide rows across Citus shards) and
+        # must order by the keyset tuple (created_at, run_id).
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "SELECT *" not in sql
+        assert "input_args" not in sql
+        assert "ORDER BY created_at DESC, run_id DESC" in sql
+
+    @pytest.mark.asyncio
+    async def test_list_runs_cursor_uses_keyset(self, mock_backend):
+        """Cursor pagination compares the (created_at, run_id) tuple, not created_at alone."""
+        backend, mock_conn = mock_backend
+        mock_conn.fetch.return_value = []
+
+        await backend.list_runs(limit=10, cursor="run_1")
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "(created_at, run_id) <" in sql
 
 
 class TestEventOperations:

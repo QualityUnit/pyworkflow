@@ -308,17 +308,13 @@ class CitusStorageBackend(PostgresStorageBackend):
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_runs_created_at ON workflow_runs(created_at DESC)"
             )
-            # Covering index backing the unfiltered Runs list (issue #482): keyset order is
-            # (created_at DESC, run_id DESC) and the INCLUDE columns are exactly the summary
-            # projection (RUN_SUMMARY_COLUMNS) minus the key columns, so each shard can answer the
-            # scatter-gather from an index-only scan instead of heap-fetching wide rows.
+            # Composite index backing keyset pagination + ORDER BY created_at DESC, run_id DESC
+            # for the unfiltered Runs list (issue #482). The summary column projection
+            # (RUN_SUMMARY_COLUMNS) already drops the heavy payload columns from the scatter-gather;
+            # no INCLUDE covering columns, to avoid duplicating the summary columns into the index.
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_runs_created_at_run_id "
-                "ON workflow_runs(created_at DESC, run_id DESC) "
-                "INCLUDE (workflow_name, status, updated_at, started_at, completed_at, error, "
-                "idempotency_key, max_duration, recovery_attempts, max_recovery_attempts, "
-                "recover_on_worker_loss, parent_run_id, nesting_depth, continued_from_run_id, "
-                "continued_to_run_id)"
+                "ON workflow_runs(created_at DESC, run_id DESC)"
             )
             # Non-unique index: Citus cannot enforce global uniqueness on non-distribution columns
             await conn.execute(

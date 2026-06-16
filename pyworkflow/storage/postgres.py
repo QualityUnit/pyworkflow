@@ -39,6 +39,17 @@ from pyworkflow.storage.schemas import (
     WorkflowRun,
 )
 
+# Columns needed by list/summary views (the Runs list, CLI table). Deliberately excludes the heavy
+# unbounded payload columns (input_args, input_kwargs, result, metadata) which a list view never
+# renders. Selecting only these avoids scatter-gathering wide rows across every Citus shard.
+# See issue #482. Keep `error` — it is shown in the list view and is normally short.
+RUN_SUMMARY_COLUMNS = (
+    "run_id, workflow_name, status, created_at, updated_at, started_at, completed_at, "
+    "error, idempotency_key, max_duration, recovery_attempts, max_recovery_attempts, "
+    "recover_on_worker_loss, parent_run_id, nesting_depth, continued_from_run_id, "
+    "continued_to_run_id"
+)
+
 
 class PostgresMigrationRunner(MigrationRunner):
     """PostgreSQL-specific migration runner."""
@@ -428,6 +439,12 @@ class PostgresStorageBackend(StorageBackend):
             )
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_runs_created_at ON workflow_runs(created_at DESC)"
+            )
+            # Composite index backing keyset pagination + ORDER BY created_at DESC, run_id DESC
+            # (see list_runs / issue #482).
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_runs_created_at_run_id "
+                "ON workflow_runs(created_at DESC, run_id DESC)"
             )
             await conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency_key ON workflow_runs(idempotency_key) WHERE idempotency_key IS NOT NULL"
@@ -852,7 +869,12 @@ class PostgresStorageBackend(StorageBackend):
         limit: int = 100,
         cursor: str | None = None,
     ) -> tuple[list[WorkflowRun], str | None]:
-        """List workflow runs with optional filtering and pagination."""
+        """List workflow runs with optional filtering and pagination.
+
+        Note: the returned WorkflowRun objects are *summaries* — the heavy payload columns
+        (input_args, input_kwargs, result, metadata) are NOT fetched and carry placeholder
+        defaults. Use get_run() when the full payload is required. See issue #482.
+        """
         pool = await self._get_pool()
 
         conditions = []
@@ -860,8 +882,12 @@ class PostgresStorageBackend(StorageBackend):
         param_idx = 1
 
         if cursor:
+            # Keyset pagination on (created_at, run_id). created_at is not unique, so paginating on
+            # it alone would skip/duplicate rows that share a timestamp. The composite tuple compare
+            # is a stable total order matching ORDER BY created_at DESC, run_id DESC.
             conditions.append(
-                f"created_at < (SELECT created_at FROM workflow_runs WHERE run_id = ${param_idx})"
+                f"(created_at, run_id) < "
+                f"(SELECT created_at, run_id FROM workflow_runs WHERE run_id = ${param_idx})"
             )
             params.append(cursor)
             param_idx += 1
@@ -893,9 +919,9 @@ class PostgresStorageBackend(StorageBackend):
         params.append(limit + 1)  # Fetch one extra to determine if there are more
 
         sql = f"""
-            SELECT * FROM workflow_runs
+            SELECT {RUN_SUMMARY_COLUMNS} FROM workflow_runs
             {where_clause}
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, run_id DESC
             LIMIT ${param_idx}
         """
 
@@ -906,7 +932,7 @@ class PostgresStorageBackend(StorageBackend):
         if has_more:
             rows = rows[:limit]
 
-        runs = [self._row_to_workflow_run(row) for row in rows]
+        runs = [self._row_to_workflow_run_summary(row) for row in rows]
         next_cursor = runs[-1].run_id if runs and has_more else None
 
         return runs, next_cursor
@@ -1738,6 +1764,36 @@ class PostgresStorageBackend(StorageBackend):
             idempotency_key=row["idempotency_key"],
             max_duration=row["max_duration"],
             context=json.loads(row["metadata"]) if row["metadata"] else {},
+            recovery_attempts=row["recovery_attempts"],
+            max_recovery_attempts=row["max_recovery_attempts"],
+            recover_on_worker_loss=row["recover_on_worker_loss"],
+            parent_run_id=row["parent_run_id"],
+            nesting_depth=row["nesting_depth"],
+            continued_from_run_id=row["continued_from_run_id"],
+            continued_to_run_id=row["continued_to_run_id"],
+        )
+
+    def _row_to_workflow_run_summary(self, row: asyncpg.Record) -> WorkflowRun:
+        """Convert a summary row (RUN_SUMMARY_COLUMNS) to a WorkflowRun.
+
+        The heavy payload columns are not selected by list_runs, so they are filled with their
+        schema defaults. Callers needing the real payload must use get_run(). See issue #482.
+        """
+        return WorkflowRun(
+            run_id=row["run_id"],
+            workflow_name=row["workflow_name"],
+            status=RunStatus(row["status"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            started_at=row["started_at"],
+            completed_at=row["completed_at"],
+            input_args="[]",
+            input_kwargs="{}",
+            result=None,
+            error=row["error"],
+            idempotency_key=row["idempotency_key"],
+            max_duration=row["max_duration"],
+            context={},
             recovery_attempts=row["recovery_attempts"],
             max_recovery_attempts=row["max_recovery_attempts"],
             recover_on_worker_loss=row["recover_on_worker_loss"],

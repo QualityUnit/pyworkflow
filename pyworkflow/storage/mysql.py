@@ -31,6 +31,15 @@ from pyworkflow.storage.schemas import (
     WorkflowRun,
 )
 
+# Columns needed by list/summary views. Excludes the heavy payload columns
+# (input_args, input_kwargs, result, metadata) which a list view never renders. See issue #482.
+RUN_SUMMARY_COLUMNS = (
+    "run_id, workflow_name, status, created_at, updated_at, started_at, completed_at, "
+    "error, idempotency_key, max_duration, recovery_attempts, max_recovery_attempts, "
+    "recover_on_worker_loss, parent_run_id, nesting_depth, continued_from_run_id, "
+    "continued_to_run_id"
+)
+
 
 class MySQLMigrationRunner(MigrationRunner):
     """MySQL-specific migration runner."""
@@ -286,6 +295,7 @@ class MySQLStorageBackend(StorageBackend):
                         INDEX idx_runs_status (status),
                         INDEX idx_runs_workflow_name (workflow_name),
                         INDEX idx_runs_created_at (created_at DESC),
+                        INDEX idx_runs_created_at_run_id (created_at DESC, run_id DESC),
                         UNIQUE INDEX idx_runs_idempotency_key (idempotency_key),
                         INDEX idx_runs_parent_run_id (parent_run_id),
                         FOREIGN KEY (parent_run_id) REFERENCES workflow_runs(run_id)
@@ -607,15 +617,23 @@ class MySQLStorageBackend(StorageBackend):
         limit: int = 100,
         cursor: str | None = None,
     ) -> tuple[list[WorkflowRun], str | None]:
-        """List workflow runs with optional filtering and pagination."""
+        """List workflow runs with optional filtering and pagination.
+
+        Note: the returned WorkflowRun objects are *summaries* — the heavy payload columns
+        (input_args, input_kwargs, result, metadata) are NOT fetched and carry placeholder
+        defaults. Use get_run() when the full payload is required. See issue #482.
+        """
         pool = self._ensure_connected()
 
         conditions = []
         params: list[Any] = []
 
         if cursor:
+            # Keyset pagination on (created_at, run_id) — created_at is not unique, so paginating on
+            # it alone would skip/duplicate rows sharing a timestamp. See issue #482.
             conditions.append(
-                "created_at < (SELECT created_at FROM workflow_runs WHERE run_id = %s)"
+                "(created_at, run_id) < "
+                "(SELECT created_at, run_id FROM workflow_runs WHERE run_id = %s)"
             )
             params.append(cursor)
 
@@ -640,9 +658,9 @@ class MySQLStorageBackend(StorageBackend):
         params.append(limit + 1)  # Fetch one extra to determine if there are more
 
         sql = f"""
-            SELECT * FROM workflow_runs
+            SELECT {RUN_SUMMARY_COLUMNS} FROM workflow_runs
             {where_clause}
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, run_id DESC
             LIMIT %s
         """
 
@@ -654,7 +672,7 @@ class MySQLStorageBackend(StorageBackend):
         if has_more:
             rows = rows[:limit]
 
-        runs = [self._row_to_workflow_run(row) for row in rows]
+        runs = [self._row_to_workflow_run_summary(row) for row in rows]
         next_cursor = runs[-1].run_id if runs and has_more else None
 
         return runs, next_cursor
@@ -1477,6 +1495,36 @@ class MySQLStorageBackend(StorageBackend):
             idempotency_key=row["idempotency_key"],
             max_duration=row["max_duration"],
             context=json.loads(row["metadata"]) if row["metadata"] else {},
+            recovery_attempts=row["recovery_attempts"],
+            max_recovery_attempts=row["max_recovery_attempts"],
+            recover_on_worker_loss=bool(row["recover_on_worker_loss"]),
+            parent_run_id=row["parent_run_id"],
+            nesting_depth=row["nesting_depth"],
+            continued_from_run_id=row["continued_from_run_id"],
+            continued_to_run_id=row["continued_to_run_id"],
+        )
+
+    def _row_to_workflow_run_summary(self, row: dict) -> WorkflowRun:
+        """Convert a summary row (RUN_SUMMARY_COLUMNS) to a WorkflowRun.
+
+        Heavy payload columns are not selected by list_runs, so they are filled with their schema
+        defaults. Callers needing the real payload must use get_run(). See issue #482.
+        """
+        return WorkflowRun(
+            run_id=row["run_id"],
+            workflow_name=row["workflow_name"],
+            status=RunStatus(row["status"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            started_at=row["started_at"],
+            completed_at=row["completed_at"],
+            input_args="[]",
+            input_kwargs="{}",
+            result=None,
+            error=row["error"],
+            idempotency_key=row["idempotency_key"],
+            max_duration=row["max_duration"],
+            context={},
             recovery_attempts=row["recovery_attempts"],
             max_recovery_attempts=row["max_recovery_attempts"],
             recover_on_worker_loss=bool(row["recover_on_worker_loss"]),

@@ -31,6 +31,16 @@ from pyworkflow.storage.schemas import (
     WorkflowRun,
 )
 
+# Columns needed by list/summary views, in the exact order consumed by
+# _row_to_workflow_run_summary (positional). Excludes the heavy payload columns
+# (input_args, input_kwargs, result, metadata) which a list view never renders. See issue #482.
+RUN_SUMMARY_COLUMNS = (
+    "run_id, workflow_name, status, created_at, updated_at, started_at, completed_at, "
+    "error, idempotency_key, max_duration, recovery_attempts, max_recovery_attempts, "
+    "recover_on_worker_loss, parent_run_id, nesting_depth, continued_from_run_id, "
+    "continued_to_run_id"
+)
+
 
 class SQLiteMigrationRunner(MigrationRunner):
     """SQLite-specific migration runner."""
@@ -248,6 +258,12 @@ class SQLiteStorageBackend(StorageBackend):
         )
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_runs_created_at ON workflow_runs(created_at DESC)"
+        )
+        # Composite index backing keyset pagination + ORDER BY created_at DESC, run_id DESC
+        # (see list_runs / issue #482).
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_runs_created_at_run_id "
+            "ON workflow_runs(created_at DESC, run_id DESC)"
         )
         await db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency_key ON workflow_runs(idempotency_key) WHERE idempotency_key IS NOT NULL"
@@ -597,15 +613,24 @@ class SQLiteStorageBackend(StorageBackend):
         limit: int = 100,
         cursor: str | None = None,
     ) -> tuple[list[WorkflowRun], str | None]:
-        """List workflow runs with optional filtering and pagination."""
+        """List workflow runs with optional filtering and pagination.
+
+        Note: the returned WorkflowRun objects are *summaries* — the heavy payload columns
+        (input_args, input_kwargs, result, metadata) are NOT fetched and carry placeholder
+        defaults. Use get_run() when the full payload is required. See issue #482.
+        """
         db = self._ensure_connected()
 
         conditions = []
         params: list[Any] = []
 
         if cursor:
+            # Keyset pagination on (created_at, run_id) — created_at is not unique, so paginating on
+            # it alone would skip/duplicate rows sharing a timestamp. SQLite supports row-value
+            # comparison (>= 3.15). See issue #482.
             conditions.append(
-                "created_at < (SELECT created_at FROM workflow_runs WHERE run_id = ?)"
+                "(created_at, run_id) < "
+                "(SELECT created_at, run_id FROM workflow_runs WHERE run_id = ?)"
             )
             params.append(cursor)
 
@@ -630,9 +655,9 @@ class SQLiteStorageBackend(StorageBackend):
         params.append(limit + 1)  # Fetch one extra to determine if there are more
 
         sql = f"""
-            SELECT * FROM workflow_runs
+            SELECT {RUN_SUMMARY_COLUMNS} FROM workflow_runs
             {where_clause}
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, run_id DESC
             LIMIT ?
         """
 
@@ -643,7 +668,7 @@ class SQLiteStorageBackend(StorageBackend):
         if has_more:
             rows = rows[:limit]
 
-        runs = [self._row_to_workflow_run(row) for row in rows]
+        runs = [self._row_to_workflow_run_summary(row) for row in rows]
         next_cursor = runs[-1].run_id if runs and has_more else None
 
         return runs, next_cursor
@@ -1799,6 +1824,37 @@ class SQLiteStorageBackend(StorageBackend):
             nesting_depth=row[18],
             continued_from_run_id=row[19],
             continued_to_run_id=row[20],
+        )
+
+    def _row_to_workflow_run_summary(self, row: Any) -> WorkflowRun:
+        """Convert a summary row to a WorkflowRun.
+
+        Positional mapping MUST match the order of RUN_SUMMARY_COLUMNS. The heavy payload columns
+        are not selected by list_runs, so they are filled with their schema defaults. Callers
+        needing the real payload must use get_run(). See issue #482.
+        """
+        return WorkflowRun(
+            run_id=row[0],
+            workflow_name=row[1],
+            status=RunStatus(row[2]),
+            created_at=datetime.fromisoformat(row[3]),
+            updated_at=datetime.fromisoformat(row[4]),
+            started_at=datetime.fromisoformat(row[5]) if row[5] else None,
+            completed_at=datetime.fromisoformat(row[6]) if row[6] else None,
+            input_args="[]",
+            input_kwargs="{}",
+            result=None,
+            error=row[7],
+            idempotency_key=row[8],
+            max_duration=row[9],
+            context={},
+            recovery_attempts=row[10],
+            max_recovery_attempts=row[11],
+            recover_on_worker_loss=bool(row[12]),
+            parent_run_id=row[13],
+            nesting_depth=row[14],
+            continued_from_run_id=row[15],
+            continued_to_run_id=row[16],
         )
 
     def _row_to_event(self, row: Any) -> Event:

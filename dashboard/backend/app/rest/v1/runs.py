@@ -28,7 +28,7 @@ async def list_runs(
     end_time: datetime | None = Query(
         None, description="Filter runs started before this time (ISO 8601)"
     ),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum results"),
+    limit: int = Query(100, ge=1, le=200, description="Maximum results"),
     cursor: str | None = Query(None, description="Run ID to start after (for pagination)"),
     storage: StorageBackend = Depends(get_storage),
 ) -> RunListResponse:

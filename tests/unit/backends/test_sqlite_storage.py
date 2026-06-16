@@ -478,34 +478,33 @@ class TestWorkflowRunOperations:
         """Test listing workflow runs."""
         backend, mock_conn = mock_backend
 
+        # Summary projection row: 17 columns in RUN_SUMMARY_COLUMNS order (no heavy payload cols).
         row = (
-            "run_1",
-            "test_workflow",
-            "completed",
-            "2024-01-01T12:00:00+00:00",
-            "2024-01-01T12:00:01+00:00",
-            None,
-            None,
-            "[]",
-            "{}",
-            None,
-            None,
-            None,
-            None,
-            "{}",
-            0,
-            3,
-            1,
-            None,
-            0,
-            None,
-            None,
+            "run_1",  # run_id
+            "test_workflow",  # workflow_name
+            "completed",  # status
+            "2024-01-01T12:00:00+00:00",  # created_at
+            "2024-01-01T12:00:01+00:00",  # updated_at
+            None,  # started_at
+            None,  # completed_at
+            None,  # error
+            None,  # idempotency_key
+            None,  # max_duration
+            0,  # recovery_attempts
+            3,  # max_recovery_attempts
+            1,  # recover_on_worker_loss
+            None,  # parent_run_id
+            0,  # nesting_depth
+            None,  # continued_from_run_id
+            None,  # continued_to_run_id
         )
 
+        captured_sql: list[str] = []
         mock_cursor = create_mock_cursor(fetchall_result=[row])
 
         @asynccontextmanager
-        async def mock_execute(*args, **kwargs):
+        async def mock_execute(sql, *args, **kwargs):
+            captured_sql.append(sql)
             yield mock_cursor
 
         mock_conn.execute = mock_execute
@@ -514,6 +513,13 @@ class TestWorkflowRunOperations:
 
         assert len(runs) == 1
         assert runs[0].run_id == "run_1"
+        # Heavy payload columns are not fetched -> defaults; error (lightweight) survives.
+        assert runs[0].input_args == "[]"
+        assert runs[0].result is None
+        assert runs[0].error is None
+        # No SELECT *, keyset ordering on (created_at, run_id). See issue #482.
+        assert "SELECT *" not in captured_sql[0]
+        assert "ORDER BY created_at DESC, run_id DESC" in captured_sql[0]
 
 
 class TestEventOperations:

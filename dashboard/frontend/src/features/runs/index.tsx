@@ -11,7 +11,6 @@ import { GithubStarButton } from '@/components/github-star-button'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { RefreshButton } from '@/components/refresh-button'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { useRunsInfinite, REFRESH_INTERVAL } from '@/hooks/use-runs'
 import { RunsTable } from './components/runs-table'
 

@@ -972,9 +972,7 @@ class TestReleaseLockKeyReproduction:
         app.conf.broker_url = "redis://localhost:6379/0"
         return app
 
-    def test_release_lock_unlocks_generated_key_for_kwargs_dispatch(
-        self, mock_celery_app
-    ):
+    def test_release_lock_unlocks_generated_key_for_kwargs_dispatch(self, mock_celery_app):
         class StepTask(SingletonWorkflowTask):
             name = "pyworkflow.execute_step"
             unique_on = ["run_id", "step_id"]

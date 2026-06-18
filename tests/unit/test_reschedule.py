@@ -179,7 +179,11 @@ class TestReschedule:
 
     def test_multiple_inflight_tasks_all_reenqueued(self, fake_backend):
         t1 = _make_singleton_task(name="pyworkflow.execute_step")
-        t2 = _make_singleton_task(name="pyworkflow.resume_workflow", queue="pyworkflow.schedules", routing_key="pyworkflow.schedules")
+        t2 = _make_singleton_task(
+            name="pyworkflow.resume_workflow",
+            queue="pyworkflow.schedules",
+            routing_key="pyworkflow.schedules",
+        )
         _track(fake_backend, t1, "task-1", {"run_id": "r1", "step_id": "s1"})
         _track(fake_backend, t2, "task-2", {"run_id": "r2", "step_id": "s2"})
 
@@ -290,9 +294,7 @@ class TestConsumerStopHook:
         assert "celery.worker.consumer:Tasks" in reschedule.RescheduleConsumerStep.requires
         # And its stop() delegates to on_consumer_stop.
         called = {}
-        monkeypatch.setattr(
-            reschedule, "on_consumer_stop", lambda c: called.setdefault("c", c)
-        )
+        monkeypatch.setattr(reschedule, "on_consumer_stop", lambda c: called.setdefault("c", c))
         step = object.__new__(reschedule.RescheduleConsumerStep)  # skip Step.__init__
         sentinel = MagicMock()
         step.stop(sentinel)

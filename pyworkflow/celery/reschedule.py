@@ -164,12 +164,8 @@ def track_task_start(
     )
     key = _registry_key()
     try:
-        backend._execute_with_refresh(
-            lambda: backend.redis.hset(key, task_id, descriptor)
-        )
-        backend._execute_with_refresh(
-            lambda: backend.redis.expire(key, _REGISTRY_TTL_SECONDS)
-        )
+        backend._execute_with_refresh(lambda: backend.redis.hset(key, task_id, descriptor))
+        backend._execute_with_refresh(lambda: backend.redis.expire(key, _REGISTRY_TTL_SECONDS))
     except Exception as exc:
         logger.warning(f"reschedule: failed to record in-flight task {task_id}: {exc}")
 
@@ -182,9 +178,7 @@ def track_task_end(task_id: str | None) -> None:
     if backend is None:
         return
     try:
-        backend._execute_with_refresh(
-            lambda: backend.redis.hdel(_registry_key(), task_id)
-        )
+        backend._execute_with_refresh(lambda: backend.redis.hdel(_registry_key(), task_id))
     except Exception as exc:
         logger.warning(f"reschedule: failed to clear in-flight task {task_id}: {exc}")
 

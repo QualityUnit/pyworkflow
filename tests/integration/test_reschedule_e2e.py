@@ -73,9 +73,15 @@ def _spawn_worker(env: dict, hostname: str, logfile) -> subprocess.Popen:
     # start_new_session so we can signal the whole group (main + prefork children).
     return subprocess.Popen(
         [
-            sys.executable, "-m", "pyworkflow.cli",
-            "--module", APP_MODULE,
-            "worker", "run", "--loglevel", "warning",
+            sys.executable,
+            "-m",
+            "pyworkflow.cli",
+            "--module",
+            APP_MODULE,
+            "worker",
+            "run",
+            "--loglevel",
+            "warning",
         ],
         env={**env, "HOSTNAME": hostname},
         stdout=logfile,
@@ -133,9 +139,15 @@ def test_sigterm_reschedule_resumes_workflow(tmp_path):
             # 2. Start the workflow (separate CLI process, same broker/storage).
             started = subprocess.run(
                 [
-                    sys.executable, "-m", "pyworkflow.cli",
-                    "--module", APP_MODULE,
-                    "workflows", "run", WORKFLOW, "--no-wait",
+                    sys.executable,
+                    "-m",
+                    "pyworkflow.cli",
+                    "--module",
+                    APP_MODULE,
+                    "workflows",
+                    "run",
+                    WORKFLOW,
+                    "--no-wait",
                 ],
                 env=env,
                 capture_output=True,
@@ -157,9 +169,9 @@ def test_sigterm_reschedule_resumes_workflow(tmp_path):
 
             # 4. SIGTERM A and wait until it LOGS the re-enqueue (handler fired).
             worker_a.send_signal(signal.SIGTERM)
-            assert _wait_for(
-                lambda: RESCHEDULE_LOG in log_a.read_text(), timeout=30
-            ), f"worker A never logged a reschedule on SIGTERM\n{log_a.read_text()}"
+            assert _wait_for(lambda: RESCHEDULE_LOG in log_a.read_text(), timeout=30), (
+                f"worker A never logged a reschedule on SIGTERM\n{log_a.read_text()}"
+            )
 
             # 5. Hard-kill A's whole group so it cannot complete the step itself;
             #    only the re-enqueued copy on a fresh worker can finish it.

@@ -290,7 +290,30 @@ def on_consumer_stop(consumer: Any) -> None:
         except Exception as exc:
             logger.warning(f"reschedule: failed to cancel task consumer: {exc}")
 
+    # Cancelling is not enough on the Redis transport: a BRPOP this worker already
+    # issued is accepted by the server and will still pop the *next* message pushed
+    # to those queues -- including the copy we are about to re-enqueue. The dying
+    # worker then exits before recording it in `unacked`, so the message is lost
+    # entirely (neither in the ready list nor restorable via visibility_timeout).
+    # Drop the consumer's broker connection so any in-flight BRPOP is aborted
+    # server-side *before* we re-publish; the re-enqueue itself uses the producer
+    # pool (a separate connection), so it is unaffected.
+    _abort_consumer_fetching(consumer)
+
     reschedule_inflight_on_shutdown()
+
+
+def _abort_consumer_fetching(consumer: Any) -> None:
+    """Close the consumer's broker connection to abort any in-flight BRPOP."""
+    conn = getattr(consumer, "connection", None)
+    if conn is None:
+        return
+    try:
+        # collect() tears down channels + the underlying socket, aborting the
+        # pending BRPOP. Never raises into shutdown.
+        conn.collect()
+    except Exception as exc:
+        logger.warning(f"reschedule: failed to drop consumer connection: {exc}")
 
 
 class RescheduleConsumerStep(bootsteps.StartStopStep):

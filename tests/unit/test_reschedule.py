@@ -261,6 +261,28 @@ class TestConsumerStopHook:
         consumer.task_consumer.cancel.assert_called_once()  # stop fetching first
         task.apply_async.assert_called_once()  # then re-enqueue
 
+    def test_consumer_connection_dropped_before_reenqueue(self, fake_backend, _stopping):
+        # Cancelling the consumer is not enough on Redis: a BRPOP this worker
+        # already issued can still grab the re-enqueued copy and lose it on exit.
+        # The connection must be dropped (aborting the in-flight BRPOP) *before*
+        # the message is re-published.
+        task = _make_singleton_task()
+        fake_backend.registry[task.name] = task
+        _track(fake_backend, task, "task-1", {"run_id": "r1", "step_id": "s1"})
+
+        order = []
+        consumer = MagicMock()
+        consumer.connection.collect.side_effect = lambda *_, **__: order.append("collect")
+        task.apply_async.side_effect = lambda *_, **__: order.append("apply_async")
+
+        reschedule.on_consumer_stop(consumer)
+
+        consumer.connection.collect.assert_called_once()
+        assert order == [
+            "collect",
+            "apply_async",
+        ], "connection must be dropped before the task is re-enqueued"
+
     def test_consumer_stop_is_noop_when_not_shutting_down(self, fake_backend, monkeypatch):
         # Transient consumer restart (e.g. broker reconnect): flags are clear.
         from celery.worker import state

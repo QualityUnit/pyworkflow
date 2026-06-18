@@ -2,7 +2,7 @@
 Unit tests for SingletonWorkflowTask and related functionality.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -950,3 +950,62 @@ class TestSingletonConfigSentinel:
 
         config = SingletonConfig(mock_app)
         assert config.sentinel_master is None
+
+
+class TestReleaseLockKeyReproduction:
+    """
+    The SIGTERM reschedule path (pyworkflow/celery/reschedule.py) releases a
+    running task's singleton lock by calling release_lock() with the task's
+    captured args/kwargs, then re-enqueues. This verifies release_lock() unlocks
+    exactly the key generate_lock() produced for a keyword-arg dispatch (how
+    execute_step_task is actually called).
+    """
+
+    @pytest.fixture
+    def mock_celery_app(self):
+        app = MagicMock()
+        app.conf.get.side_effect = lambda key, default=None: {
+            "singleton_key_prefix": "pyworkflow:lock:",
+            "singleton_lock_expiry": 3600,
+            "singleton_raise_on_duplicate": False,
+        }.get(key, default)
+        app.conf.broker_url = "redis://localhost:6379/0"
+        return app
+
+    def test_release_lock_unlocks_generated_key_for_kwargs_dispatch(
+        self, mock_celery_app
+    ):
+        class StepTask(SingletonWorkflowTask):
+            name = "pyworkflow.execute_step"
+            unique_on = ["run_id", "step_id"]
+
+            def run(self, run_id, step_id, args_json=None, storage_config=None):
+                return None
+
+        task = StepTask()
+        task.bind(mock_celery_app)
+
+        backend = MagicMock()
+        with patch.object(
+            SingletonWorkflowTask,
+            "singleton_backend",
+            new_callable=PropertyMock,
+            return_value=backend,
+        ):
+            # Mirrors the real dispatch: keyword-only args.
+            task.release_lock(
+                task_args=[],
+                task_kwargs={
+                    "run_id": "run_123",
+                    "step_id": "step_456",
+                    "args_json": "[]",
+                },
+            )
+
+        expected_key = generate_lock_key(
+            "pyworkflow.execute_step",
+            ["run_123", "step_456"],
+            {},
+            key_prefix="pyworkflow:lock:",
+        )
+        backend.unlock.assert_called_once_with(expected_key)

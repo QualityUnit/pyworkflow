@@ -12,12 +12,19 @@ warnings in Celery logs. This is a known compatibility issue between Python 3.13
 garbage collector and Celery's saferepr module. It does not affect functionality.
 """
 
+import contextlib
 import os
 from datetime import timedelta
 from typing import Any
 
 from celery import Celery
-from celery.signals import worker_init, worker_process_init, worker_shutdown
+from celery.signals import (
+    task_postrun,
+    task_prerun,
+    worker_init,
+    worker_process_init,
+    worker_shutdown,
+)
 from kombu import Exchange, Queue
 
 from pyworkflow.observability.logging import configure_logging
@@ -281,6 +288,9 @@ def create_celery_app(
         PYWORKFLOW_CELERY_SENTINEL_MASTER: Sentinel master name (used if sentinel_master_name param not provided)
         PYWORKFLOW_WORKER_MAX_MEMORY: Max memory per worker child (KB) (used if worker_max_memory_per_child param not provided)
         PYWORKFLOW_WORKER_MAX_TASKS: Max tasks per worker child (used if worker_max_tasks_per_child param not provided)
+        PYWORKFLOW_RESCHEDULE_ON_SIGTERM: Re-enqueue in-flight tasks immediately when a worker is shut down
+            (SIGTERM / spot reclaim), instead of waiting out the broker visibility_timeout. Default on; set to
+            "0"/"false"/"no" to disable. Implemented as a consumer bootstep; see pyworkflow/celery/reschedule.py.
 
     Examples:
         # Default configuration (uses env vars if set, otherwise localhost Redis)
@@ -471,6 +481,14 @@ def create_celery_app(
     # to ensure proper initialization AFTER process forking.
     # See on_worker_init() and on_worker_process_init() below.
 
+    # Re-enqueue in-flight tasks on worker shutdown (SIGTERM / spot reclaim) so a
+    # live worker resumes them within seconds instead of waiting out the broker
+    # visibility_timeout. Hooked as a consumer bootstep so it fires exactly as the
+    # consumer is torn down (event-based). See pyworkflow/celery/reschedule.py.
+    from pyworkflow.celery.reschedule import RescheduleConsumerStep
+
+    app.steps["consumer"].add(RescheduleConsumerStep)
+
     # Auto-discover workflows from environment variable or configured modules
     discover_workflows()
 
@@ -553,6 +571,29 @@ def on_worker_shutdown(**kwargs):
     finally:
         # Close the persistent event loop
         close_worker_loop()
+
+
+@task_prerun.connect
+def on_task_prerun(task_id=None, task=None, args=None, kwargs=None, **_):
+    """
+    Track the task now executing in this child process so it can be re-enqueued
+    if the worker is shut down (SIGTERM) before the task finishes.
+
+    Wrapped defensively: tracking must never interfere with task execution.
+    """
+    from pyworkflow.celery.reschedule import track_task_start
+
+    with contextlib.suppress(Exception):
+        track_task_start(task, task_id, args, kwargs)
+
+
+@task_postrun.connect
+def on_task_postrun(task_id=None, **_):
+    """Clear the in-flight task once it has finished (clean completion)."""
+    from pyworkflow.celery.reschedule import track_task_end
+
+    with contextlib.suppress(Exception):
+        track_task_end(task_id)
 
 
 def get_celery_app() -> Celery:

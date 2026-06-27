@@ -437,15 +437,15 @@ files = [
 
 [[package]]
 name = "aws-durable-execution-sdk-python"
-version = "1.5.0"
+version = "1.6.0"
 description = "AWS Durable Execution SDK for Python"
 optional = true
 python-versions = ">=3.11"
 groups = ["main"]
 markers = "extra == \"all\" or extra == \"aws\""
 files = [
-    {file = "aws_durable_execution_sdk_python-1.5.0-py3-none-any.whl", hash = "sha256:828ccaa737e94e2ad9854832d7310bb6f74adc556ce7b1de80914d0ea91fe035"},
-    {file = "aws_durable_execution_sdk_python-1.5.0.tar.gz", hash = "sha256:2d06936ee9c724737a35f40cf6f90b50cb1c950ea6cea30fbf86121b3f5f7a93"},
+    {file = "aws_durable_execution_sdk_python-1.6.0-py3-none-any.whl", hash = "sha256:f96538bff3bfd9155459829590bfb31cebcde9ac149ee8819a7d6a45d12b5e8d"},
+    {file = "aws_durable_execution_sdk_python-1.6.0.tar.gz", hash = "sha256:1d3c60dfd7164eae531b390868c281ca1d0c2a17ed061ba5b76019b4cc057d78"},
 ]
 
 [package.dependencies]
@@ -3639,4 +3639,4 @@ sqlite = ["aiosqlite"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11"
-content-hash = "d2a58d5a0166beb6f939b8cd356b993218f56120bbcbc8c7b573e58f7bfab424"
+content-hash = "a6f53b58b8fc17ebad3c30200530600a1e29e06446d00239d0940c86f47d3e89"

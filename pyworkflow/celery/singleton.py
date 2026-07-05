@@ -323,7 +323,11 @@ class SingletonWorkflowTask(Task):
 
             # Bind arguments to function signature
             sig = inspect.signature(self.run)
-            bound = sig.bind(*task_args, **task_kwargs).arguments
+            bound_sig = sig.bind(*task_args, **task_kwargs)
+            # Include declared defaults so unique_on may reference parameters
+            # the caller did not pass explicitly (e.g. dedup_scope).
+            bound_sig.apply_defaults()
+            bound = bound_sig.arguments
 
             unique_args: list[Any] = []
             for key in unique_on:

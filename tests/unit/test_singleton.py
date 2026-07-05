@@ -1007,3 +1007,41 @@ class TestReleaseLockKeyReproduction:
             key_prefix="pyworkflow:lock:",
         )
         backend.unlock.assert_called_once_with(expected_key)
+
+
+class TestResumeDedupScope:
+    """The resume task's singleton key must separate immediate vs deadline resumes.
+
+    A deadline (countdown) resume holds its singleton lock for the whole
+    countdown; without scope separation it swallows every immediate resume
+    (e.g. resume_hook wake-ups) enqueued meanwhile.
+    """
+
+    def test_lock_key_differs_by_dedup_scope(self):
+        from pyworkflow.celery.tasks import resume_workflow_task
+
+        immediate = resume_workflow_task.generate_lock(
+            resume_workflow_task.name,
+            ["run_x"],
+            {"storage_config": None, "dedup_scope": "immediate"},
+        )
+        deadline = resume_workflow_task.generate_lock(
+            resume_workflow_task.name,
+            ["run_x"],
+            {"storage_config": None, "dedup_scope": "deadline"},
+        )
+        assert immediate != deadline
+
+    def test_lock_key_defaults_to_immediate_scope(self):
+        """Callers not passing dedup_scope must match explicit 'immediate'."""
+        from pyworkflow.celery.tasks import resume_workflow_task
+
+        default_key = resume_workflow_task.generate_lock(
+            resume_workflow_task.name, ["run_x"], {"storage_config": None}
+        )
+        explicit_key = resume_workflow_task.generate_lock(
+            resume_workflow_task.name,
+            ["run_x"],
+            {"storage_config": None, "dedup_scope": "immediate"},
+        )
+        assert default_key == explicit_key

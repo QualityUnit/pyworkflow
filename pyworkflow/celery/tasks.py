@@ -2038,12 +2038,13 @@ async def _start_workflow_on_worker(
     name="pyworkflow.resume_workflow",
     base=SingletonWorkflowTask,
     queue="pyworkflow.schedules",
-    unique_on=["run_id"],
+    unique_on=["run_id", "dedup_scope"],
 )
 def resume_workflow_task(
     run_id: str,
     storage_config: dict[str, Any] | None = None,
     triggered_by_hook_id: str | None = None,
+    dedup_scope: str = "immediate",
 ) -> Any | None:
     """
     Resume a suspended workflow.
@@ -2716,10 +2717,15 @@ def schedule_workflow_resumption(
         triggered_by=triggered_by,
     )
 
-    # Schedule the resume task
+    # Schedule the resume task. Delayed (deadline) resumes hold their
+    # singleton lock for the whole countdown; scoping them separately keeps
+    # them from swallowing immediate resumes (e.g. resume_hook wake-ups)
+    # enqueued while the countdown is pending. Extra resume executions are
+    # harmless: try_claim_run drops all but the first.
+    dedup_scope = "deadline" if delay_seconds > 0 else "immediate"
     resume_workflow_task.apply_async(
         args=[run_id],
-        kwargs={"storage_config": storage_config},
+        kwargs={"storage_config": storage_config, "dedup_scope": dedup_scope},
         countdown=delay_seconds,
     )
 

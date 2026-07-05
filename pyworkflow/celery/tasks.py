@@ -371,6 +371,19 @@ def execute_step_task(
                     hook_id=hook_id or "",
                 )
             )
+            # step_hook(on_timeout="return") carries the hook deadline: schedule
+            # a resume at expiry so the workflow wakes even if nobody ever calls
+            # resume_hook (the step re-executes and receives STEP_HOOK_TIMEOUT).
+            # A racing resume_hook is harmless — duplicate resumes are dropped
+            # by try_claim_run.
+            resume_at = e.data.get("resume_at")
+            if resume_at is not None:
+                schedule_workflow_resumption(
+                    run_id,
+                    resume_at,
+                    storage_config,
+                    triggered_by="step_hook_timeout",
+                )
             return None
 
         # Other SuspensionSignals are not supported from steps

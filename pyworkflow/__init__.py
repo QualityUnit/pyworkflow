@@ -29,7 +29,7 @@ Quick Start:
     >>> run_id = await start(my_workflow, "Alice")
 """
 
-__version__ = "0.3.6"
+__version__ = "0.3.7"
 
 # Configuration
 from pyworkflow.config import (
@@ -140,7 +140,11 @@ from pyworkflow.primitives.step_checkpoint import (
     load_step_checkpoint,
     save_step_checkpoint,
 )
-from pyworkflow.primitives.step_hook import step_hook
+from pyworkflow.primitives.step_hook import (
+    STEP_HOOK_TIMEOUT,
+    StepHookTimeout,
+    step_hook,
+)
 
 # Runtime
 from pyworkflow.runtime import LocalRuntime, Runtime, get_runtime, register_runtime
@@ -290,6 +294,8 @@ __all__ = [
     "load_step_checkpoint",
     "delete_step_checkpoint",
     "step_hook",
+    "StepHookTimeout",
+    "STEP_HOOK_TIMEOUT",
     # Streams
     "stream_workflow",
     "stream_step",

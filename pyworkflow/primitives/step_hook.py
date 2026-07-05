@@ -25,7 +25,8 @@ Usage:
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal
 
 from loguru import logger
 from pydantic import BaseModel
@@ -35,12 +36,29 @@ from pyworkflow.core.exceptions import SuspensionSignal
 from pyworkflow.primitives.step_checkpoint import get_step_run_id
 
 
+class StepHookTimeout:
+    """Sentinel returned by ``step_hook(on_timeout="return")`` when the hook expires.
+
+    Check with ``isinstance(result, StepHookTimeout)`` or compare against the
+    ``STEP_HOOK_TIMEOUT`` singleton.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "STEP_HOOK_TIMEOUT"
+
+
+STEP_HOOK_TIMEOUT = StepHookTimeout()
+
+
 async def step_hook(
     name: str,
     *,
     timeout: str | int | None = None,
     on_created: Callable[[str], Awaitable[None]] | None = None,
     payload_schema: type[BaseModel] | None = None,
+    on_timeout: Literal["suspend", "return"] = "suspend",
 ) -> Any:
     """
     Wait for an external event from within a @step function.
@@ -58,9 +76,14 @@ async def step_hook(
         timeout: Optional max wait time (str duration or seconds)
         on_created: Optional async callback with the hook token
         payload_schema: Optional Pydantic model for payload validation
+        on_timeout: What to do when ``timeout`` elapses without a resume.
+            "suspend" (default): keep waiting for resume_hook() — legacy behavior.
+            "return": the runtime schedules a resume at the deadline and this
+            call returns the ``STEP_HOOK_TIMEOUT`` sentinel on re-execution.
 
     Returns:
-        Payload from resume_hook()
+        Payload from resume_hook(), or ``STEP_HOOK_TIMEOUT`` when the hook
+        expired and ``on_timeout="return"``
 
     Raises:
         RuntimeError: If called outside a step context
@@ -107,11 +130,11 @@ async def step_hook(
 
     events = await storage.get_events(ctx.run_id)
     hook_received = None
-    hook_created = False
+    hook_created_event = None
 
     for event in events:
         if event.type == EventType.HOOK_CREATED and event.data.get("hook_id") == hook_id:
-            hook_created = True
+            hook_created_event = event
         elif event.type == EventType.HOOK_RECEIVED and event.data.get("hook_id") == hook_id:
             hook_received = event
 
@@ -127,17 +150,53 @@ async def step_hook(
         )
         return payload
 
-    # If hook was already created but not received, re-suspend
-    if hook_created:
+    # If hook was already created but not received, check expiry, else re-suspend
+    if hook_created_event is not None:
+        expires_at: datetime | None = None
+        expires_at_raw = hook_created_event.data.get("expires_at")
+        if expires_at_raw:
+            expires_at = datetime.fromisoformat(expires_at_raw)
+
+        if on_timeout == "return" and expires_at is not None and datetime.now(UTC) >= expires_at:
+            from pyworkflow.engine.events import create_hook_expired_event
+            from pyworkflow.storage.schemas import HookStatus
+
+            await storage.record_event(
+                create_hook_expired_event(run_id=ctx.run_id, hook_id=hook_id)
+            )
+            try:
+                await storage.update_hook_status(hook_id, HookStatus.EXPIRED)
+            except Exception:
+                # Best-effort: the HOOK_EXPIRED event is authoritative for replay;
+                # a failed status update must not fail the step.
+                logger.warning(
+                    f"Step hook '{name}' expired but status update failed",
+                    run_id=ctx.run_id,
+                    hook_id=hook_id,
+                )
+            logger.info(
+                f"Step hook '{name}' expired, returning timeout sentinel",
+                run_id=ctx.run_id,
+                hook_id=hook_id,
+            )
+            return STEP_HOOK_TIMEOUT
+
         logger.debug(
             f"Step hook '{name}' already created, re-suspending",
             run_id=ctx.run_id,
             hook_id=hook_id,
         )
+        # Re-arm the deadline resume only for on_timeout="return" with a future
+        # deadline: the runtime schedules a resume at resume_at, and scheduling
+        # one in the past would busy-loop resume → re-suspend.
+        resume_data: dict[str, Any] = {}
+        if on_timeout == "return" and expires_at is not None and datetime.now(UTC) < expires_at:
+            resume_data["resume_at"] = expires_at
         raise SuspensionSignal(
             reason=f"step_hook:{hook_id}",
             hook_id=hook_id,
             step_id=step_run_id,
+            **resume_data,
         )
 
     # Parse timeout
@@ -179,8 +238,6 @@ async def step_hook(
         payload_schema=payload_schema.__name__ if payload_schema else None,
     )
     if timeout_seconds:
-        from datetime import UTC, datetime, timedelta
-
         hook_record.expires_at = datetime.now(UTC) + timedelta(seconds=timeout_seconds)
 
     await storage.create_hook(hook_record)
@@ -197,9 +254,15 @@ async def step_hook(
     if on_created:
         await on_created(token)
 
-    # Raise SuspensionSignal to suspend the step
+    # Raise SuspensionSignal to suspend the step. For on_timeout="return",
+    # carry the deadline so the runtime schedules a resume at expiry — without
+    # it, an expired hook nobody resumes would suspend the workflow forever.
+    suspend_data: dict[str, Any] = {}
+    if on_timeout == "return" and hook_record.expires_at is not None:
+        suspend_data["resume_at"] = hook_record.expires_at
     raise SuspensionSignal(
         reason=f"step_hook:{hook_id}",
         hook_id=hook_id,
         step_id=step_run_id,
+        **suspend_data,
     )

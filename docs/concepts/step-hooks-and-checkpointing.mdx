@@ -1,0 +1,325 @@
+---
+title: 'Step Hooks & Checkpointing'
+description: 'Durably suspend and resume from *inside* a @step — the correct way to do human-in-the-loop for AI-agent steps'
+---
+
+<Note>
+  This supersedes the restriction stated in [Hooks](/concepts/hooks): *"Hooks
+  can only be called from workflow-level code, not from within `@step`
+  functions."* That is true of the workflow-level `hook()`. The
+  **`step_hook()`** primitive documented here exists precisely to give a step
+  the same durable suspend/resume, by re-executing the step and replaying its
+  state from a checkpoint. Use it when the thing that must wait for an external
+  event lives deep inside a step (e.g. a tool call inside an agent loop) and
+  cannot be lifted to the workflow level.
+</Note>
+
+## The problem this solves
+
+A step runs to completion on one worker. If it needs to wait for an external
+event — a human approval, a webhook, a visitor answering a UI prompt — the
+naive implementations are all wrong:
+
+- **Block the worker** (`while not done: sleep`, or a Redis `BLPOP`): the worker
+  thread/process is pinned for the entire wait. If the external party never
+  responds, the resource is held until a timeout — and **nothing survives a
+  worker crash**. The in-memory state (the agent's message history, the pending
+  tool call) is gone; on restart the step re-runs from scratch and re-prompts.
+- **Lift the wait to the workflow** with `hook()`: correct and durable, but only
+  possible when you can restructure the code so the suspend point is at
+  workflow level. An LLM agent loop that decides *mid-stream* to call a
+  human-in-the-loop tool cannot be lifted — the decision is non-deterministic
+  and happens inside the step.
+
+`step_hook()` + the step checkpoint API give you durable suspend/resume **without
+leaving the step**. The worker is freed on suspend. On resume the step
+re-executes from the top, but reads its prior state back from a checkpoint
+instead of recomputing it.
+
+## The API
+
+Three checkpoint calls and one hook call, all imported from `pyworkflow`:
+
+```python
+from pyworkflow import (
+    step,
+    step_hook,
+    save_step_checkpoint,
+    load_step_checkpoint,
+    delete_step_checkpoint,
+    STEP_HOOK_TIMEOUT,
+)
+
+@step
+async def review_step(draft: str):
+    # 1. On first entry, checkpoint is None. On resume, it holds what we saved.
+    checkpoint = await load_step_checkpoint()
+    if checkpoint is None:
+        state = await expensive_setup(draft)          # runs once, ever
+        await save_step_checkpoint({"state": state})   # persisted to storage
+    else:
+        state = checkpoint["state"]                    # restored on resume
+
+    # 2. Suspend the step until resume_hook() delivers a payload.
+    #    on_created fires once, with the token to hand to the external system.
+    async def notify(token: str):
+        await send_to_reviewer(token)
+
+    feedback = await step_hook(
+        "human_review",
+        timeout="24h",
+        on_created=notify,
+        on_timeout="return",        # deadline is durable; see below
+    )
+    if feedback is STEP_HOOK_TIMEOUT:
+        return await finalize_without_review(state)
+
+    # 3. Continue with restored state + the hook payload.
+    result = await finalize(state, feedback)
+    await delete_step_checkpoint()                      # cleanup
+    return result
+```
+
+### How `step_hook()` works (mechanics)
+
+Source: `pyworkflow/primitives/step_hook.py`, `pyworkflow/primitives/step_checkpoint.py`.
+
+1. **First call** records a `HOOK_CREATED` event, creates a `Hook` row
+   (`status=PENDING`, `expires_at` if a timeout was given), fires `on_created(token)`,
+   and raises `SuspensionSignal`. The step wrapper
+   (`pyworkflow/core/step.py:309`) re-raises it, suspending the workflow and
+   **freeing the worker**.
+2. **`resume_hook(token, payload)`** records a `HOOK_RECEIVED` event and
+   schedules the run to resume.
+3. **On resume the step re-executes from the top.** `step_hook()` scans the
+   event log for its `hook_id`; finding `HOOK_RECEIVED`, it returns the payload
+   instead of suspending again. The `hook_id` is deterministic
+   (`step_hook_{name}_{counter}` — a per-context counter, `step_hook.py:121-125`),
+   so the same call site gets the same id across re-executions.
+4. Everything *before* the `step_hook()` call runs again. That is why state you
+   don't want to recompute (LLM turns already taken, expensive setup) must be
+   read back from `load_step_checkpoint()`, not recomputed.
+
+### The idempotency contract
+
+> **A step that uses `step_hook()` MUST be idempotent up to each suspend point.**
+
+Re-execution is the mechanism, not a bug. Anything non-deterministic or
+side-effecting that ran before the hook (LLM calls, external writes, streamed
+output) will run *again* on resume unless you gate it on a checkpoint. The
+checkpoint is your "already did this" record. This is the single most important
+thing to get right — see the worked example.
+
+### Durable timeouts: `on_timeout="return"`
+
+`BLPOP`'s only redeeming feature is its timeout. `step_hook` gives you a
+**durable** one. With `on_timeout="return"` (requires pyworkflow ≥ 0.3.7,
+`#549`), the runtime schedules a resume at `expires_at` and, when the deadline
+passes with no `resume_hook`, the call returns the `STEP_HOOK_TIMEOUT` sentinel
+on re-execution instead of hanging forever. Unlike a `BLPOP` timeout, this
+survives a worker crash — the deadline lives in the event log, not in a parked
+thread.
+
+### Where it's wired
+
+`set_step_execution_context()` is installed on both execution paths, so
+checkpointing works whether the step runs dispatched or inline:
+
+- Celery step worker: `pyworkflow/celery/tasks.py:270`
+- Local runtime: `pyworkflow/core/step.py:277`
+
+---
+
+## Worked example: refactoring the FlowHunt "hook-as-tool" (issue #5485)
+
+This is the concrete migration the rest of this page exists for. It takes the
+`HookToolAdapter` dispatch off its ad-hoc Redis `BLPOP` and onto `step_hook()` +
+`save_step_checkpoint()`.
+
+### What exists today (the "random implementation")
+
+FlowHunt exposes a flow **hook** component (e.g. `EvaluateClientJs`) to the AI
+agent as a LangChain tool (`HookToolAdapter`). When the agent calls it, today's
+code (in the `flowhunt` repo):
+
+| Concern | Current mechanism | File |
+|---|---|---|
+| Wait for the visitor | `BLPOP` on a Redis list, on a **64-thread pool** | `flow_engine_v3/internal/tools/hook_tool_adapter.py` (`_HOOK_WAIT_EXECUTOR`, `await_tool_call_result`) |
+| Route the response | `resume_hook` checks a Redis "pending" marker and `PUBLISH`es, **bypassing pyworkflow** | `app/application/flow_session/flow_session_management_service.py` (the `is_pending_tool_call` branch) |
+| Redis plumbing | `register_/is_pending_/publish_/await_/try_pop_/clear_tool_call_result` | `app/infrastructure/flows/repository/runtime_cache_repository.py` |
+
+Its own docstring admits the fatal flaw
+(`hook_tool_adapter.py`, "Known limitation (replay)"): *"the dispatch lives only
+in Redis and not in pyworkflow's event log, it is intentionally not durable
+across a worker crash… the step re-executes from the top and the LLM may
+re-emit the tool call, re-prompting the visitor."*
+
+**Why it's wrong, precisely:**
+
+1. **Resource leak under the normal case.** Every in-flight hook-tool call parks
+   a thread on `BLPOP` for up to `hook_timeout_seconds` (default 300s). Visitors
+   routinely abandon chats. The pool caps concurrency at 64 abandoned
+   conversations before new hook tools cannot dispatch at all.
+2. **No durability.** A worker restart (deploy, OOM, spot reclaim) loses the
+   in-memory agent state *and* the pending Redis wait. The run either strands or
+   re-prompts the visitor. This is exactly the failure class checkpointing was
+   built to eliminate.
+3. **Two protocols through one endpoint.** `resume_hook` has to sniff Redis to
+   decide whether an incoming `hook_id` is a real pyworkflow hook or a
+   tool-call, because the tool-call path deliberately never entered pyworkflow.
+
+### Why you can't just "call `step_hook()` inside the tool"
+
+The tempting one-liner — replace the `BLPOP` in `HookToolAdapter._arun` with
+`await step_hook(...)` — **does not work**, for two structural reasons. Both must
+be handled by the refactor:
+
+1. **The agent middleware swallows the suspension.** The tool runs inside a
+   LangGraph graph built by `create_agent(...)` with
+   `ToolErrorIgnoreMiddleware` in the stack
+   (`ai_agent/step.py:721-731`). That middleware catches exceptions raised by a
+   tool and rewrites them into a `ToolMessage`. A `SuspensionSignal` raised from
+   inside the tool would be **caught and turned into a tool error**, never
+   reaching `pyworkflow/core/step.py:309`. Suspension has to be raised
+   **outside** the graph, at the step boundary.
+2. **`astream` can't be resumed mid-tool without a checkpointer.** The step
+   drives the agent with `agent_executor.astream({"messages": messages})`
+   (`ai_agent/step.py:774`) and **no LangGraph checkpointer is configured**. On
+   step re-execution the graph would re-run from the first message, re-issuing
+   every prior (non-deterministic) LLM turn. The transcript must be captured and
+   fed back so the graph continues from where it left off.
+
+### The pattern: checkpoint the transcript, suspend at the step boundary
+
+The suspension lives **inside the step but outside the graph**. The tool's job
+shrinks to "surface a request and the args"; the step owns suspend/resume.
+
+```
+  astream loop  ──emits interrupt──►  ai_agent step catches it
+                                          │
+                                          ├─ save_step_checkpoint({
+                                          │     "messages": messages_to_dict(transcript),
+                                          │     "pending_tool_call_id": id,
+                                          │  })
+                                          │
+                                          └─ await step_hook(name,
+                                                 on_created=emit_to_visitor,
+                                                 timeout=..., on_timeout="return")
+                                                    │  raises SuspensionSignal
+                                                    ▼
+                                          workflow suspends, worker freed
+                                                    │
+                                   resume_hook(token, payload)  ← existing HTTP path
+                                                    ▼
+                                          step re-executes from top
+                                          ├─ load_step_checkpoint() → transcript
+                                          ├─ step_hook() returns payload (from event log)
+                                          ├─ append ToolMessage(payload, tool_call_id)
+                                          └─ astream({"messages": transcript})  continues
+```
+
+The last point is the key insight, and it reuses machinery the step **already
+has**: the `GraphRecursionError` handler at `ai_agent/step.py:781-810` already
+performs exactly this kind of transcript surgery — appending synthetic
+`ToolMessage`s to satisfy `tool_call`/`tool_result` pairing and re-invoking.
+Seeding `astream` with a transcript whose last AI `tool_calls` are already
+answered by `ToolMessage`s makes LangGraph continue from the *next* agent node —
+**it does not re-call the LLM for the turn that's already answered.** That is
+what makes the replay deterministic without a LangGraph checkpointer.
+
+### Concrete change list
+
+**A. Surface the request out of the graph instead of blocking.**
+In `HookToolAdapter._arun` (`hook_tool_adapter.py`), stop calling
+`register_pending_tool_call` / `await_tool_call_result`. Instead the tool emits
+its request (the existing `emit_tool_request`) and hands control back to the
+step. Two viable seams:
+
+- *Preferred (LangGraph-native):* return a `Command` / raise a whitelisted
+  `HookInterrupt` that the step catches around the `astream` loop. The runner
+  already threads `ToolMessage | Command` through its handlers
+  (`agent_runner.py:709-905`), so the type plumbing exists.
+- Whichever seam: it must carry `hook_name`, the tool `args`, and the pending
+  `tool_call_id` up to the step.
+
+**B. Own suspend/resume in the step.**
+In `ai_agent` (`ai_agent/step.py`), wrap the `astream` loop so that when a hook
+interrupt surfaces:
+1. `save_step_checkpoint({"messages": messages_to_dict(accumulated), "pending_tool_call_id": id, "hook_args": args})`.
+2. `payload = await step_hook(hook_name, on_created=<emit to visitor>, timeout=<hook_timeout>, on_timeout="return")`.
+3. On re-execution, first thing: `checkpoint = await load_step_checkpoint()`;
+   if present, rebuild `messages` from it, append
+   `ToolMessage(content=<post_hook(payload)>, tool_call_id=…)`, and resume
+   `astream` from that transcript. `delete_step_checkpoint()` once the agent
+   produces its final answer.
+4. If `payload is STEP_HOOK_TIMEOUT`, inject a "visitor did not respond"
+   `ToolMessage` and let the agent finish — the durable equivalent of today's
+   `TimeoutError`.
+
+`on_created(token)` replaces `emit_tool_request(... request_id ...)`: emit the
+pyworkflow **token** (`run_id:hook_id`) to the widget. Keep the hook's existing
+`post_hook(payload, params, ctx)` call to shape the tool result.
+
+**C. Delete the Redis bypass in `resume_hook`.**
+In `flow_session_management_service.py`, remove the entire
+`if runtime_cache.is_pending_tool_call(hook_id): …` branch. With the tool now a
+real `step_hook`, `hook_id` is `step_hook_<name>_<n>` and the **existing**
+`pyworkflow.resume_hook(token, payload_data)` path (already in that method)
+handles it. No sniffing, one protocol. Token formats already match:
+`create_hook_token(run_id, hook_id)` == the `f"{run_id}:{hook_id}"` that method
+already builds.
+
+**D. Delete the dead Redis plumbing.**
+Remove from `runtime_cache_repository.py` (and its interface
+`app/domain/flows/runtime_cache/repository.py`):
+`register_pending_tool_call`, `is_pending_tool_call`,
+`unregister_pending_tool_call`, `publish_tool_call_result`,
+`await_tool_call_result`, `try_pop_tool_call_result`,
+`clear_tool_call_result`, and the `_tool_call_pending_key` /
+`_tool_call_result_key` helpers. Remove `_HOOK_WAIT_EXECUTOR` from the adapter.
+(The credits and `pending_ui_outputs` namespaces in that repo are unrelated —
+keep them.)
+
+**E. Re-evaluate the force-local variant.**
+`ai_agent_force_local` (`ai_agent/step.py:900`) exists because a *dispatched*
+step that blocks for minutes made suspend/resume racy (#5485). With a real
+`step_hook`, the step no longer blocks — it suspends and frees the worker, which
+is the dispatched-worker case `step_hook` is explicitly wired for
+(`celery/tasks.py:270`). The force-local workaround is likely removable, but
+treat that as a **follow-up to validate**, not an assumption — verify a
+dispatched hook-tool suspends and resumes cleanly before deleting it.
+
+### What this buys
+
+- No parked threads. A suspended run costs storage, not a worker slot. 64
+  abandoned chats is no longer a ceiling.
+- Crash-durable. A deploy or OOM mid-wait resumes from the checkpoint; the
+  visitor is **not** re-prompted. The adapter's "Known limitation (replay)"
+  disclaimer is deleted, not merely documented.
+- One resume protocol. Design-time hooks and hook-tools both flow through
+  `pyworkflow.resume_hook`.
+
+### Gotchas specific to this step
+
+- **Generator step.** `ai_agent` is `@step(..., is_generator=True)` and streams
+  partial output before the hook. Re-executed output must not be re-emitted to
+  the visitor — gate already-streamed chunks on the checkpoint, or only stream
+  deltas produced *after* the restored transcript.
+- **Credits.** The current adapter validates credits at dispatch
+  (`validate_credits_for_step`). Keep that on the first pass only; on
+  checkpoint-resume the credit was already charged — don't double-charge.
+- **`messages_to_dict` / `messages_from_dict`.** Use LangChain's serialization
+  for the transcript so tool-call ids and content blocks round-trip; ad-hoc
+  dict-building drops `tool_calls`.
+- **Idempotency of side-effecting tools.** Any tool that ran *before* the hook
+  and had side effects will not re-run (it's in the restored transcript), which
+  is correct — but make sure your checkpoint captures the transcript *including*
+  those tool results, or they'll re-execute.
+
+## See also
+
+- [Hooks](/concepts/hooks) — workflow-level `hook()` (lift the wait out of the
+  step when you can).
+- [Fault Tolerance](/concepts/fault-tolerance) — how suspended runs recover
+  after a worker crash.
+- [Steps](/concepts/steps) — retry semantics and the step lifecycle.

@@ -228,9 +228,12 @@ class InMemoryStorageBackend(StorageBackend):
         with self._lock:
             events = list(self._events.get(run_id, []))
 
-            # Filter by event types
+            # Filter by event types. event_types is a list of string values
+            # (e.g. "hook.received"); e.type is an EventType enum, so compare on
+            # its .value to match — comparing the enum directly never matches a
+            # string and would silently drop every event.
             if event_types:
-                events = [e for e in events if e.type in event_types]
+                events = [e for e in events if e.type.value in event_types]
 
             # Sort by sequence
             events.sort(key=lambda e: e.sequence or 0)

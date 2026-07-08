@@ -274,7 +274,9 @@ def step(
 
             # Set up step execution context for checkpoint/hook primitives
             step_exec_key = f"{ctx.run_id}:{step_id}"
-            step_exec_tokens = set_step_execution_context(step_exec_key, ctx.storage)
+            step_exec_tokens = set_step_execution_context(
+                step_exec_key, ctx.storage, step_id=step_id, step_name=step_name
+            )
 
             try:
                 # Execute step function

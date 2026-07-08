@@ -202,6 +202,237 @@ class TestStepHook:
             reset_context(ctx_token)
 
 
+class TestStepHookInlineSuspension:
+    """End-to-end tests for step_hook() suspension on the inline (local runtime) path.
+
+    Regression coverage for the bug where a step suspending via step_hook() on the
+    inline path recorded no STEP_SUSPENDED event, so replay saw the step's
+    STEP_STARTED without a STEP_SUSPENDED, treated it as still in progress, and
+    re-suspended forever.
+    """
+
+    @pytest.mark.asyncio
+    async def test_local_runtime_completes_after_resume_hook(self):
+        """A local-runtime step that suspends via step_hook() completes after resume."""
+        from pyworkflow import configure, reset_config, start
+        from pyworkflow.core.step import step
+        from pyworkflow.core.workflow import workflow
+        from pyworkflow.primitives.resume_hook import create_hook_token, resume_hook
+        from pyworkflow.primitives.step_hook import step_hook
+        from pyworkflow.serialization.decoder import deserialize_args
+
+        reset_config()
+
+        @step(name="inline_review_step")
+        async def review_step():
+            feedback = await step_hook("review")
+            return {"feedback": feedback}
+
+        @workflow(name="inline_review_workflow")
+        async def review_workflow():
+            return await review_step()
+
+        try:
+            storage = InMemoryStorageBackend()
+            configure(storage=storage)
+            run_id = await start(review_workflow, durable=True, storage=storage)
+
+            # The workflow suspends waiting for the hook.
+            run = await storage.get_run(run_id)
+            assert run.status == RunStatus.SUSPENDED
+
+            # A STEP_SUSPENDED event must be recorded on the inline path so that
+            # replay does not treat the step as still in progress.
+            from pyworkflow.engine.events import EventType
+
+            events = await storage.get_events(run_id)
+            suspended = [e for e in events if e.type == EventType.STEP_SUSPENDED]
+            assert len(suspended) == 1, "STEP_SUSPENDED must be recorded on the inline path"
+
+            # Deliver the external answer. resume_hook() drives the local runtime
+            # to resume the workflow synchronously.
+            token = create_hook_token(run_id, "step_hook_review_0")
+            await resume_hook(token, {"approved": True}, storage=storage)
+
+            # The run must now be COMPLETE and carry the payload returned by step_hook().
+            run = await storage.get_run(run_id)
+            assert run.status == RunStatus.COMPLETED, (
+                f"run should be COMPLETED after resume, got {run.status}"
+            )
+            result = deserialize_args(run.result)[0]
+            assert result == {"feedback": {"approved": True}}
+        finally:
+            reset_config()
+
+    @pytest.mark.asyncio
+    async def test_crash_replay_reexecutes_without_duplicate_hook(self):
+        """After suspension, a fresh executor replay re-executes the step and
+        completes once resumed, without re-creating the visitor-facing hook."""
+        from pyworkflow import configure, reset_config, resume, start
+        from pyworkflow.core.step import step
+        from pyworkflow.core.workflow import workflow
+        from pyworkflow.engine.events import EventType
+        from pyworkflow.primitives.step_hook import step_hook
+        from pyworkflow.serialization.decoder import deserialize_args
+
+        reset_config()
+
+        body_executions = 0
+        on_created_calls = 0
+
+        @step(name="crash_replay_step")
+        async def review_step():
+            nonlocal body_executions
+            body_executions += 1
+
+            async def notify(_token):
+                nonlocal on_created_calls
+                on_created_calls += 1
+
+            feedback = await step_hook("approval", on_created=notify)
+            return {"feedback": feedback, "runs": body_executions}
+
+        @workflow(name="crash_replay_workflow")
+        async def review_workflow():
+            return await review_step()
+
+        try:
+            storage = InMemoryStorageBackend()
+            configure(storage=storage)
+            run_id = await start(review_workflow, durable=True, storage=storage)
+
+            assert body_executions == 1
+            assert on_created_calls == 1
+            run = await storage.get_run(run_id)
+            assert run.status == RunStatus.SUSPENDED
+
+            # Simulate delivery of the hook WITHOUT the local runtime auto-resuming
+            # (i.e. crash between resume_hook recording and resume). Record the
+            # HOOK_RECEIVED event directly.
+            from pyworkflow.engine.events import create_hook_received_event
+            from pyworkflow.serialization.encoder import serialize
+
+            hook_id = "step_hook_approval_0"
+            await storage.record_event(
+                create_hook_received_event(
+                    run_id=run_id,
+                    hook_id=hook_id,
+                    payload=serialize({"approved": True}),
+                )
+            )
+
+            # Fresh executor replays from the event log and resumes.
+            resume_result = await resume(run_id, storage=storage)
+            assert resume_result["feedback"] == {"approved": True}
+
+            # The step body re-executed on resume (idempotent re-execution).
+            assert body_executions == 2
+            # The visitor-facing hook must NOT be re-created on replay: on_created
+            # fires only once, and only one HOOK_CREATED event exists.
+            assert on_created_calls == 1
+            events = await storage.get_events(run_id)
+            hook_created = [
+                e
+                for e in events
+                if e.type == EventType.HOOK_CREATED and e.data.get("hook_id") == hook_id
+            ]
+            assert len(hook_created) == 1, "hook must not be re-created on replay"
+
+            run = await storage.get_run(run_id)
+            assert run.status == RunStatus.COMPLETED
+            payload = deserialize_args(run.result)[0]
+            assert payload["feedback"] == {"approved": True}
+        finally:
+            reset_config()
+
+    @pytest.mark.asyncio
+    async def test_fast_answer_from_on_created_completes(self):
+        """A hook answered from within on_created (before the suspension bookkeeping
+        exists) is not lost: the run completes on the local runtime."""
+        from pyworkflow import configure, reset_config, start
+        from pyworkflow.core.step import step
+        from pyworkflow.core.workflow import workflow
+        from pyworkflow.primitives.resume_hook import resume_hook
+        from pyworkflow.primitives.step_hook import step_hook
+        from pyworkflow.serialization.decoder import deserialize_args
+
+        reset_config()
+
+        @step(name="fast_answer_step")
+        async def review_step():
+            async def answer_immediately(token):
+                # Deliver the answer synchronously, before the workflow has
+                # finished recording its suspension.
+                await resume_hook(token, {"approved": True, "fast": True}, storage=storage)
+
+            feedback = await step_hook("fast_review", on_created=answer_immediately)
+            return {"feedback": feedback}
+
+        @workflow(name="fast_answer_workflow")
+        async def review_workflow():
+            return await review_step()
+
+        try:
+            storage = InMemoryStorageBackend()
+            configure(storage=storage)
+            run_id = await start(review_workflow, durable=True, storage=storage)
+
+            run = await storage.get_run(run_id)
+            assert run.status == RunStatus.COMPLETED, (
+                f"fast-answered run should be COMPLETED, got {run.status}"
+            )
+            result = deserialize_args(run.result)[0]
+            assert result == {"feedback": {"approved": True, "fast": True}}
+        finally:
+            reset_config()
+
+
+class TestStepHookCounterAPI:
+    """Tests for the public step-hook counter API used by cross-process restore."""
+
+    @pytest.mark.asyncio
+    async def test_counter_get_set_round_trip(self):
+        """get_step_hook_counter/set_step_hook_counter round-trip through the context."""
+        storage = InMemoryStorageBackend()
+        ctx = LocalContext(
+            run_id="counter_run", workflow_name="test_workflow", storage=storage, durable=True
+        )
+        assert ctx.get_step_hook_counter() == 0
+        ctx.set_step_hook_counter(7)
+        assert ctx.get_step_hook_counter() == 7
+        # Backing storage stays the private attribute.
+        assert ctx._step_hook_counter == 7
+
+    @pytest.mark.asyncio
+    async def test_restored_counter_reproduces_deterministic_hook_id(self):
+        """A restored counter reproduces the same deterministic hook id on re-execution."""
+        storage = InMemoryStorageBackend()
+        run_id = "counter_run_2"
+        await storage.create_run(
+            WorkflowRun(run_id=run_id, workflow_name="test_workflow", status=RunStatus.RUNNING)
+        )
+        ctx = LocalContext(
+            run_id=run_id, workflow_name="test_workflow", storage=storage, durable=True
+        )
+        ctx._is_step_worker = True
+
+        # Simulate a checkpoint/restore across a process boundary: the app poked
+        # the counter to 3 before re-executing the step.
+        ctx.set_step_hook_counter(3)
+
+        ctx_token = set_context(ctx)
+        step_tokens = set_step_execution_context(f"{run_id}:step_test_abc123", storage)
+        try:
+            with pytest.raises(SuspensionSignal) as exc_info:
+                await step_hook("resume_point")
+            assert exc_info.value.data["hook_id"] == "step_hook_resume_point_3"
+            # The counter advanced past the restored value.
+            assert ctx.get_step_hook_counter() == 4
+        finally:
+            reset_step_execution_context(step_tokens)
+            reset_context(ctx_token)
+
+
 class TestStepHookTimeout:
     """Tests for step_hook() timeout semantics (on_timeout="return")."""
 

@@ -136,6 +136,8 @@ class WorkflowContext(ABC):
         self._tracing: dict[str, Any] | None = None
         self._tracing_provider: Any = None  # TracingProvider instance
         self._trace_id: str | None = None  # Stable trace ID
+        # Monotonic counter backing deterministic step_hook() ids within this run.
+        self._step_hook_counter: int = 0
 
     @property
     def run_id(self) -> str:
@@ -160,6 +162,39 @@ class WorkflowContext(ABC):
     def tracing_provider(self) -> Any:
         """Get the active TracingProvider instance, or None."""
         return self._tracing_provider
+
+    # =========================================================================
+    # Step-hook counter (public API for cross-process checkpoint/restore)
+    # =========================================================================
+
+    def get_step_hook_counter(self) -> int:
+        """
+        Get the current step_hook() counter for this run.
+
+        step_hook() derives deterministic hook ids as
+        ``f"step_hook_{name}_{counter}"`` from a monotonic per-run counter.
+        Apps that checkpoint a step and restore it in a fresh process (so the
+        step body re-executes from the top) must restore this counter before
+        re-execution so the same step_hook() call reproduces the same hook id
+        and matches the recorded HOOK_CREATED/HOOK_RECEIVED events.
+
+        Returns:
+            The number of step_hook() calls made so far in this run.
+        """
+        return getattr(self, "_step_hook_counter", 0)
+
+    def set_step_hook_counter(self, value: int) -> None:
+        """
+        Set the step_hook() counter for this run.
+
+        Use together with :meth:`get_step_hook_counter` to restore the counter
+        when re-executing a checkpointed step across a process boundary. See
+        :meth:`get_step_hook_counter` for the full rationale.
+
+        Args:
+            value: The counter value to restore.
+        """
+        self._step_hook_counter = value
 
     # =========================================================================
     # Abstract methods - must be implemented by subclasses

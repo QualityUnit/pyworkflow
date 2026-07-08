@@ -25,7 +25,9 @@ from pyworkflow.core.exceptions import (
 from pyworkflow.core.registry import get_workflow_by_func
 from pyworkflow.core.workflow import execute_workflow_with_context
 from pyworkflow.engine.events import (
+    EventType,
     create_cancellation_requested_event,
+    create_step_suspended_event,
     create_workflow_cancelled_event,
     create_workflow_continued_as_new_event,
 )
@@ -38,6 +40,56 @@ class ConfigurationError(Exception):
     """Configuration error for PyWorkflow."""
 
     pass
+
+
+async def record_step_suspended_if_needed(
+    storage: StorageBackend,
+    run_id: str,
+    signal: SuspensionSignal,
+) -> None:
+    """
+    Record a STEP_SUSPENDED event when a step suspended via ``step_hook()``.
+
+    Call this immediately after recording WORKFLOW_SUSPENDED on any *inline*
+    execution path (the local runtime, or a ``force_local`` step running inside
+    a Celery orchestration task). On the inline path the step function raises the
+    SuspensionSignal in-process, so no step worker is involved to record the
+    event. Without STEP_SUSPENDED, replay sees the step's STEP_STARTED with no
+    terminal event, treats it as still in progress, and re-suspends forever.
+
+    Being the single writer immediately after WORKFLOW_SUSPENDED gives correct
+    ordering by construction (no polling for the suspend event). The write is
+    deduplicated via ``has_event`` so it is safe to call unconditionally and
+    alongside the Celery step worker's own recorder.
+
+    No-op unless ``signal`` is a step_hook suspension (reason prefix
+    ``step_hook:``).
+    """
+    reason = signal.reason
+    if not reason or not reason.startswith("step_hook:"):
+        return
+
+    data = signal.data or {}
+    step_id = data.get("step_id")
+    if not step_id:
+        return
+    hook_id = data.get("hook_id") or ""
+    step_name = data.get("step_name") or ""
+
+    already_recorded = await storage.has_event(
+        run_id, EventType.STEP_SUSPENDED.value, step_id=step_id
+    )
+    if already_recorded:
+        return
+
+    await storage.record_event(
+        create_step_suspended_event(
+            run_id=run_id,
+            step_id=step_id,
+            step_name=step_name,
+            hook_id=hook_id,
+        )
+    )
 
 
 async def start(
@@ -309,6 +361,11 @@ async def _execute_workflow_local(
             child_id=child_id,
         )
         await storage.record_event(suspended_event)
+
+        # Record STEP_SUSPENDED for inline step_hook suspensions (no step worker
+        # records it on this path). Immediately after WORKFLOW_SUSPENDED so the
+        # ordering is correct by construction.
+        await record_step_suspended_if_needed(storage, run_id, e)
 
         logger.info(
             f"Workflow suspended: {e.reason}",

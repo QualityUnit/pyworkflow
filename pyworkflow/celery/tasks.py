@@ -45,6 +45,7 @@ from pyworkflow.engine.events import (
     create_workflow_started_event,
     create_workflow_suspended_event,
 )
+from pyworkflow.engine.executor import record_step_suspended_if_needed
 from pyworkflow.serialization.decoder import deserialize_args, deserialize_kwargs
 from pyworkflow.serialization.encoder import serialize_args, serialize_kwargs
 from pyworkflow.storage.base import StorageBackend
@@ -267,7 +268,9 @@ def execute_step_task(
             set_step_execution_context,
         )
 
-        step_exec_tokens = set_step_execution_context(step_exec_key, storage)
+        step_exec_tokens = set_step_execution_context(
+            step_exec_key, storage, step_id=step_id, step_name=step_name
+        )
     except Exception as e:
         logger.warning(f"Failed to set up step execution context: {e}")
 
@@ -658,12 +661,20 @@ async def _record_step_suspended(
 
     Does NOT schedule workflow resumption — that happens when resume_hook()
     is called externally.
+
+    Deduplicated: if a STEP_SUSPENDED already exists for this step (e.g. the
+    engine recorded it inline on a force_local step, or a prior worker attempt
+    recorded it), this is a no-op so dispatched runs do not double-record.
     """
     from pyworkflow.engine.events import create_step_suspended_event
 
     storage = _get_storage_backend(storage_config)
     if hasattr(storage, "connect"):
         await storage.connect()
+
+    # Short-circuit if already recorded (engine inline path or prior attempt).
+    if await storage.has_event(run_id, EventType.STEP_SUSPENDED.value, step_id=step_id):
+        return
 
     # Wait for WORKFLOW_SUSPENDED event to avoid sequence number race
     max_wait_attempts = 50
@@ -1132,6 +1143,9 @@ async def _execute_child_workflow_on_worker(
         )
         await storage.record_event(suspended_event)
 
+        # Record STEP_SUSPENDED for an inline (force_local) step_hook suspension.
+        await record_step_suspended_if_needed(storage, child_run_id, e)
+
         logger.debug(
             f"Child workflow suspended: {workflow_name}",
             parent_run_id=parent_run_id,
@@ -1532,6 +1546,9 @@ async def _recover_workflow_on_worker(
         )
         await storage.record_event(suspended_event)
 
+        # Record STEP_SUSPENDED for an inline (force_local) step_hook suspension.
+        await record_step_suspended_if_needed(storage, run_id, e)
+
         logger.info(
             f"Recovered workflow suspended: {e.reason}",
             run_id=run_id,
@@ -1925,6 +1942,9 @@ async def _start_workflow_on_worker(
         )
         await storage.record_event(suspended_event)
 
+        # Record STEP_SUSPENDED for an inline (force_local) step_hook suspension.
+        await record_step_suspended_if_needed(storage, run_id, e)
+
         logger.info(
             f"Workflow suspended on worker: {e.reason}",
             run_id=run_id,
@@ -1959,7 +1979,8 @@ async def _start_workflow_on_worker(
         # resume_hook() may have recorded HOOK_RECEIVED and scheduled a resume task
         # while the workflow was still running (before status was set to SUSPENDED).
         # That resume task would have failed try_claim_run and been discarded.
-        if hook_id and e.reason.startswith("hook:"):
+        # Covers both workflow-level hook() ("hook:") and step_hook() suspensions.
+        if hook_id and (e.reason.startswith("hook:") or e.reason.startswith("step_hook:")):
             hook_received = await storage.has_event(
                 run_id, EventType.HOOK_RECEIVED.value, hook_id=hook_id
             )
@@ -2544,6 +2565,9 @@ async def _resume_workflow_on_worker(
         )
         await storage.record_event(suspended_event)
 
+        # Record STEP_SUSPENDED for an inline (force_local) step_hook suspension.
+        await record_step_suspended_if_needed(storage, run_id, e)
+
         logger.info(
             f"Workflow suspended again on worker: {e.reason}",
             run_id=run_id,
@@ -2576,8 +2600,9 @@ async def _resume_workflow_on_worker(
                 )
                 return None
 
-        # For hook suspensions, check if hook was already received (race condition)
-        if hook_id and e.reason.startswith("hook:"):
+        # For hook suspensions, check if hook was already received (race condition).
+        # Covers both workflow-level hook() ("hook:") and step_hook() suspensions.
+        if hook_id and (e.reason.startswith("hook:") or e.reason.startswith("step_hook:")):
             hook_received = await storage.has_event(
                 run_id, EventType.HOOK_RECEIVED.value, hook_id=hook_id
             )

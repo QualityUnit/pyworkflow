@@ -42,6 +42,42 @@ class ConfigurationError(Exception):
     pass
 
 
+async def step_suspended_already_recorded(
+    storage: StorageBackend,
+    run_id: str,
+    step_id: str,
+) -> bool:
+    """
+    Report whether a STEP_SUSPENDED is already recorded for the current
+    suspension of ``step_id``.
+
+    A step can suspend multiple times on the same deterministic step_id —
+    sequential step_hook() rounds within one step, and crash-replay
+    re-suspension. Each round records a fresh STEP_STARTED, so dedup must be
+    scoped to the *current* start: a STEP_SUSPENDED counts only if it appears
+    after the most recent STEP_STARTED for this step_id. Deduping on "a
+    STEP_SUSPENDED ever exists" would drop every suspension after the first,
+    leaving a STEP_STARTED with no matching STEP_SUSPENDED so replay keeps the
+    step in progress and re-suspends forever.
+
+    One type-filtered ``get_events`` scan (ordered by sequence) keeps the cost
+    bounded on every backend.
+    """
+    events = await storage.get_events(
+        run_id,
+        event_types=[EventType.STEP_STARTED.value, EventType.STEP_SUSPENDED.value],
+    )
+    suspended_since_last_start = False
+    for event in events:
+        if event.data.get("step_id") != step_id:
+            continue
+        if event.type == EventType.STEP_STARTED:
+            suspended_since_last_start = False
+        elif event.type == EventType.STEP_SUSPENDED:
+            suspended_since_last_start = True
+    return suspended_since_last_start
+
+
 async def record_step_suspended_if_needed(
     storage: StorageBackend,
     run_id: str,
@@ -59,8 +95,9 @@ async def record_step_suspended_if_needed(
 
     Being the single writer immediately after WORKFLOW_SUSPENDED gives correct
     ordering by construction (no polling for the suspend event). The write is
-    deduplicated via ``has_event`` so it is safe to call unconditionally and
-    alongside the Celery step worker's own recorder.
+    deduplicated per-start (see :func:`step_suspended_already_recorded`) so it is
+    safe to call unconditionally and alongside the Celery step worker's own
+    recorder, while still recording one event per suspension round.
 
     No-op unless ``signal`` is a step_hook suspension (reason prefix
     ``step_hook:``).
@@ -76,10 +113,7 @@ async def record_step_suspended_if_needed(
     hook_id = data.get("hook_id") or ""
     step_name = data.get("step_name") or ""
 
-    already_recorded = await storage.has_event(
-        run_id, EventType.STEP_SUSPENDED.value, step_id=step_id
-    )
-    if already_recorded:
+    if await step_suspended_already_recorded(storage, run_id, step_id):
         return
 
     await storage.record_event(

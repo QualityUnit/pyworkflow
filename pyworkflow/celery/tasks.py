@@ -45,7 +45,10 @@ from pyworkflow.engine.events import (
     create_workflow_started_event,
     create_workflow_suspended_event,
 )
-from pyworkflow.engine.executor import record_step_suspended_if_needed
+from pyworkflow.engine.executor import (
+    record_step_suspended_if_needed,
+    step_suspended_already_recorded,
+)
 from pyworkflow.serialization.decoder import deserialize_args, deserialize_kwargs
 from pyworkflow.serialization.encoder import serialize_args, serialize_kwargs
 from pyworkflow.storage.base import StorageBackend
@@ -662,9 +665,11 @@ async def _record_step_suspended(
     Does NOT schedule workflow resumption — that happens when resume_hook()
     is called externally.
 
-    Deduplicated: if a STEP_SUSPENDED already exists for this step (e.g. the
-    engine recorded it inline on a force_local step, or a prior worker attempt
-    recorded it), this is a no-op so dispatched runs do not double-record.
+    Deduplicated per suspension round: if a STEP_SUSPENDED already exists for
+    this step *since its most recent STEP_STARTED* (e.g. the engine recorded it
+    inline on a force_local step, or a prior worker attempt recorded it), this is
+    a no-op. A step that suspends again on the same step_id in a later round
+    still records its own STEP_SUSPENDED.
     """
     from pyworkflow.engine.events import create_step_suspended_event
 
@@ -672,8 +677,9 @@ async def _record_step_suspended(
     if hasattr(storage, "connect"):
         await storage.connect()
 
-    # Short-circuit if already recorded (engine inline path or prior attempt).
-    if await storage.has_event(run_id, EventType.STEP_SUSPENDED.value, step_id=step_id):
+    # Short-circuit only if already recorded for the current start (engine inline
+    # path or prior attempt) — not for an earlier round on the same step_id.
+    if await step_suspended_already_recorded(storage, run_id, step_id):
         return
 
     # Wait for WORKFLOW_SUSPENDED event to avoid sequence number race

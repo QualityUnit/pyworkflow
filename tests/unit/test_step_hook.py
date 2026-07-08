@@ -386,6 +386,138 @@ class TestStepHookInlineSuspension:
         finally:
             reset_config()
 
+    @pytest.mark.asyncio
+    async def test_two_sequential_step_hooks_in_one_step_completes(self):
+        """A step that suspends twice on the SAME step_id (two sequential
+        step_hook rounds) completes — the second suspension must record its own
+        STEP_SUSPENDED, not be deduped away by the first round's event."""
+        from pyworkflow import configure, reset_config, start
+        from pyworkflow.core.step import _generate_step_id, step
+        from pyworkflow.core.workflow import workflow
+        from pyworkflow.engine.events import EventType
+        from pyworkflow.primitives.resume_hook import create_hook_token, resume_hook
+        from pyworkflow.primitives.step_hook import step_hook
+        from pyworkflow.serialization.decoder import deserialize_args
+
+        reset_config()
+
+        @step(name="two_round_step")
+        async def review_step():
+            first = await step_hook("round_one")
+            second = await step_hook("round_two")
+            return {"first": first, "second": second}
+
+        @workflow(name="two_round_workflow")
+        async def review_workflow():
+            return await review_step()
+
+        try:
+            storage = InMemoryStorageBackend()
+            configure(storage=storage)
+            run_id = await start(review_workflow, durable=True, storage=storage)
+
+            # Suspended on round one.
+            assert (await storage.get_run(run_id)).status == RunStatus.SUSPENDED
+
+            # Answer round one -> local runtime resumes -> suspends on round two.
+            await resume_hook(
+                create_hook_token(run_id, "step_hook_round_one_0"),
+                {"n": 1},
+                storage=storage,
+            )
+            assert (await storage.get_run(run_id)).status == RunStatus.SUSPENDED
+
+            # Answer round two -> run completes.
+            await resume_hook(
+                create_hook_token(run_id, "step_hook_round_two_1"),
+                {"n": 2},
+                storage=storage,
+            )
+            run = await storage.get_run(run_id)
+            assert run.status == RunStatus.COMPLETED, (
+                f"two-round run should be COMPLETED, got {run.status}"
+            )
+            result = deserialize_args(run.result)[0]
+            assert result == {"first": {"n": 1}, "second": {"n": 2}}
+
+            # One STEP_SUSPENDED per suspended STEP_STARTED cycle for this step_id:
+            # every start ended in a suspension except the final one that completed.
+            events = await storage.get_events(run_id)
+            step_id = _generate_step_id("two_round_step", (), {})
+            started = [
+                e
+                for e in events
+                if e.type == EventType.STEP_STARTED and e.data.get("step_id") == step_id
+            ]
+            suspended = [
+                e
+                for e in events
+                if e.type == EventType.STEP_SUSPENDED and e.data.get("step_id") == step_id
+            ]
+            completed = [
+                e
+                for e in events
+                if e.type == EventType.STEP_COMPLETED and e.data.get("step_id") == step_id
+            ]
+            assert len(completed) == 1
+            assert len(suspended) == 2
+            assert len(suspended) == len(started) - 1
+        finally:
+            reset_config()
+
+    @pytest.mark.asyncio
+    async def test_crash_replay_between_sequential_step_hooks_completes(self):
+        """Crash-replay across the SECOND suspension: after the round-one answer
+        is replayed by a fresh executor and the step re-suspends on round two,
+        a fresh executor replays again and completes after the round-two answer."""
+        from pyworkflow import configure, reset_config, resume, start
+        from pyworkflow.core.step import step
+        from pyworkflow.core.workflow import workflow
+        from pyworkflow.engine.events import create_hook_received_event
+        from pyworkflow.primitives.step_hook import step_hook
+        from pyworkflow.serialization.encoder import serialize
+
+        reset_config()
+
+        @step(name="two_round_crash_step")
+        async def review_step():
+            first = await step_hook("r1")
+            second = await step_hook("r2")
+            return {"first": first, "second": second}
+
+        @workflow(name="two_round_crash_workflow")
+        async def review_workflow():
+            return await review_step()
+
+        try:
+            storage = InMemoryStorageBackend()
+            configure(storage=storage)
+            run_id = await start(review_workflow, durable=True, storage=storage)
+            assert (await storage.get_run(run_id)).status == RunStatus.SUSPENDED
+
+            # Crash between rounds: record the round-one answer directly (no
+            # auto-resume), then replay with a fresh executor.
+            await storage.record_event(
+                create_hook_received_event(
+                    run_id=run_id, hook_id="step_hook_r1_0", payload=serialize({"n": 1})
+                )
+            )
+            await resume(run_id, storage=storage)
+            assert (await storage.get_run(run_id)).status == RunStatus.SUSPENDED
+
+            # Crash again mid-second-suspension: record the round-two answer and
+            # replay once more; the run must complete.
+            await storage.record_event(
+                create_hook_received_event(
+                    run_id=run_id, hook_id="step_hook_r2_1", payload=serialize({"n": 2})
+                )
+            )
+            result = await resume(run_id, storage=storage)
+            assert result == {"first": {"n": 1}, "second": {"n": 2}}
+            assert (await storage.get_run(run_id)).status == RunStatus.COMPLETED
+        finally:
+            reset_config()
+
 
 class TestStepHookCounterAPI:
     """Tests for the public step-hook counter API used by cross-process restore."""

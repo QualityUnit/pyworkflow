@@ -25,7 +25,9 @@ from pyworkflow.core.exceptions import (
 from pyworkflow.core.registry import get_workflow_by_func
 from pyworkflow.core.workflow import execute_workflow_with_context
 from pyworkflow.engine.events import (
+    EventType,
     create_cancellation_requested_event,
+    create_step_suspended_event,
     create_workflow_cancelled_event,
     create_workflow_continued_as_new_event,
 )
@@ -38,6 +40,90 @@ class ConfigurationError(Exception):
     """Configuration error for PyWorkflow."""
 
     pass
+
+
+async def step_suspended_already_recorded(
+    storage: StorageBackend,
+    run_id: str,
+    step_id: str,
+) -> bool:
+    """
+    Report whether a STEP_SUSPENDED is already recorded for the current
+    suspension of ``step_id``.
+
+    A step can suspend multiple times on the same deterministic step_id —
+    sequential step_hook() rounds within one step, and crash-replay
+    re-suspension. Each round records a fresh STEP_STARTED, so dedup must be
+    scoped to the *current* start: a STEP_SUSPENDED counts only if it appears
+    after the most recent STEP_STARTED for this step_id. Deduping on "a
+    STEP_SUSPENDED ever exists" would drop every suspension after the first,
+    leaving a STEP_STARTED with no matching STEP_SUSPENDED so replay keeps the
+    step in progress and re-suspends forever.
+
+    One type-filtered ``get_events`` scan (ordered by sequence) keeps the cost
+    bounded on every backend.
+    """
+    events = await storage.get_events(
+        run_id,
+        event_types=[EventType.STEP_STARTED.value, EventType.STEP_SUSPENDED.value],
+    )
+    suspended_since_last_start = False
+    for event in events:
+        if event.data.get("step_id") != step_id:
+            continue
+        if event.type == EventType.STEP_STARTED:
+            suspended_since_last_start = False
+        elif event.type == EventType.STEP_SUSPENDED:
+            suspended_since_last_start = True
+    return suspended_since_last_start
+
+
+async def record_step_suspended_if_needed(
+    storage: StorageBackend,
+    run_id: str,
+    signal: SuspensionSignal,
+) -> None:
+    """
+    Record a STEP_SUSPENDED event when a step suspended via ``step_hook()``.
+
+    Call this immediately after recording WORKFLOW_SUSPENDED on any *inline*
+    execution path (the local runtime, or a ``force_local`` step running inside
+    a Celery orchestration task). On the inline path the step function raises the
+    SuspensionSignal in-process, so no step worker is involved to record the
+    event. Without STEP_SUSPENDED, replay sees the step's STEP_STARTED with no
+    terminal event, treats it as still in progress, and re-suspends forever.
+
+    Being the single writer immediately after WORKFLOW_SUSPENDED gives correct
+    ordering by construction (no polling for the suspend event). The write is
+    deduplicated per-start (see :func:`step_suspended_already_recorded`) so it is
+    safe to call unconditionally and alongside the Celery step worker's own
+    recorder, while still recording one event per suspension round.
+
+    No-op unless ``signal`` is a step_hook suspension (reason prefix
+    ``step_hook:``).
+    """
+    reason = signal.reason
+    if not reason or not reason.startswith("step_hook:"):
+        return
+
+    data = signal.data or {}
+    step_id = data.get("step_id")
+    if not step_id:
+        return
+    hook_id = data.get("hook_id") or ""
+    step_name = data.get("step_name") or ""
+
+    if await step_suspended_already_recorded(storage, run_id, step_id):
+        return
+
+    await storage.record_event(
+        create_step_suspended_event(
+            run_id=run_id,
+            step_id=step_id,
+            step_name=step_name,
+            hook_id=hook_id,
+        )
+    )
 
 
 async def start(
@@ -309,6 +395,11 @@ async def _execute_workflow_local(
             child_id=child_id,
         )
         await storage.record_event(suspended_event)
+
+        # Record STEP_SUSPENDED for inline step_hook suspensions (no step worker
+        # records it on this path). Immediately after WORKFLOW_SUSPENDED so the
+        # ordering is correct by construction.
+        await record_step_suspended_if_needed(storage, run_id, e)
 
         logger.info(
             f"Workflow suspended: {e.reason}",

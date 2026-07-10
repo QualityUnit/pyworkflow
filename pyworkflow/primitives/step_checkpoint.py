@@ -26,11 +26,18 @@ from loguru import logger
 # Step execution context for checkpoint operations
 _step_run_id: ContextVar[str | None] = ContextVar("_step_run_id", default=None)
 _step_storage: ContextVar[Any] = ContextVar("_step_storage", default=None)
+# Deterministic step id / name of the currently executing step. These identify
+# the step in the event log (STEP_STARTED / STEP_SUSPENDED / STEP_COMPLETED),
+# whereas _step_run_id is the composite "run_id:step_id" checkpoint key.
+_step_id: ContextVar[str | None] = ContextVar("_step_id", default=None)
+_step_name: ContextVar[str | None] = ContextVar("_step_name", default=None)
 
 
 def set_step_execution_context(
     step_run_id: str,
     storage: Any,
+    step_id: str | None = None,
+    step_name: str | None = None,
 ) -> tuple:
     """
     Set the step execution context for checkpoint and hook operations.
@@ -40,20 +47,28 @@ def set_step_execution_context(
     Args:
         step_run_id: Unique identifier for this step execution (run_id:step_id)
         storage: Storage backend instance
+        step_id: Deterministic step id, as used in the event log. Lets
+            step_hook() attach the correct id to its SuspensionSignal so the
+            engine can record a matching STEP_SUSPENDED event.
+        step_name: Human-readable step name, recorded alongside STEP_SUSPENDED.
 
     Returns:
         Tokens for resetting context
     """
     t1 = _step_run_id.set(step_run_id)
     t2 = _step_storage.set(storage)
-    return (t1, t2)
+    t3 = _step_id.set(step_id)
+    t4 = _step_name.set(step_name)
+    return (t1, t2, t3, t4)
 
 
 def reset_step_execution_context(tokens: tuple) -> None:
     """Reset the step execution context."""
-    t1, t2 = tokens
+    t1, t2, t3, t4 = tokens
     _step_run_id.reset(t1)
     _step_storage.reset(t2)
+    _step_id.reset(t3)
+    _step_name.reset(t4)
 
 
 def get_step_run_id() -> str | None:
@@ -64,6 +79,16 @@ def get_step_run_id() -> str | None:
 def get_step_storage() -> Any:
     """Get the current storage from step context."""
     return _step_storage.get()
+
+
+def get_step_id() -> str | None:
+    """Get the deterministic step id of the currently executing step, if known."""
+    return _step_id.get()
+
+
+def get_step_name() -> str | None:
+    """Get the name of the currently executing step, if known."""
+    return _step_name.get()
 
 
 async def save_step_checkpoint(data: dict) -> None:

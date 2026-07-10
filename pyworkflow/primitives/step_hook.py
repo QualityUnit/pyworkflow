@@ -33,7 +33,7 @@ from pydantic import BaseModel
 
 from pyworkflow.context import get_context, has_context
 from pyworkflow.core.exceptions import SuspensionSignal
-from pyworkflow.primitives.step_checkpoint import get_step_run_id
+from pyworkflow.primitives.step_checkpoint import get_step_id, get_step_name, get_step_run_id
 
 
 class StepHookTimeout:
@@ -118,6 +118,20 @@ async def step_hook(
             "Use hook() for workflow-level hooks."
         )
 
+    # Identify the step in the event log. The engine records a STEP_SUSPENDED
+    # event from the SuspensionSignal below (so replay does not treat the step
+    # as still in progress), and that event must carry the *deterministic*
+    # step id — not the composite "run_id:step_id" checkpoint key. Prefer the
+    # id/name plumbed through the step execution context; fall back to stripping
+    # the run_id prefix off step_run_id for callers that did not provide them.
+    signal_step_id = get_step_id()
+    if signal_step_id is None:
+        prefix = f"{ctx.run_id}:"
+        signal_step_id = (
+            step_run_id[len(prefix) :] if step_run_id.startswith(prefix) else step_run_id
+        )
+    signal_step_name = get_step_name()
+
     # Generate deterministic hook_id based on step_run_id and hook name
     # This ensures the same hook call gets the same ID on re-execution
     hook_counter = getattr(ctx, "_step_hook_counter", 0)
@@ -195,7 +209,8 @@ async def step_hook(
         raise SuspensionSignal(
             reason=f"step_hook:{hook_id}",
             hook_id=hook_id,
-            step_id=step_run_id,
+            step_id=signal_step_id,
+            step_name=signal_step_name,
             **resume_data,
         )
 
@@ -263,6 +278,7 @@ async def step_hook(
     raise SuspensionSignal(
         reason=f"step_hook:{hook_id}",
         hook_id=hook_id,
-        step_id=step_run_id,
+        step_id=signal_step_id,
+        step_name=signal_step_name,
         **suspend_data,
     )

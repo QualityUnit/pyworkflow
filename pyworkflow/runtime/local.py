@@ -246,6 +246,7 @@ class LocalRuntime(Runtime):
 
                 # Record WORKFLOW_SUSPENDED event
                 from pyworkflow.engine.events import create_workflow_suspended_event
+                from pyworkflow.engine.executor import record_step_suspended_if_needed
 
                 step_id = e.data.get("step_id") if e.data else None
                 step_name = e.data.get("step_name") if e.data else None
@@ -263,6 +264,19 @@ class LocalRuntime(Runtime):
                     child_id=child_id,
                 )
                 await storage.record_event(suspended_event)
+
+                # Record STEP_SUSPENDED for inline step_hook suspensions.
+                await record_step_suspended_if_needed(storage, run_id, e)
+
+                # Fast-answer race: resume_hook() may have delivered the answer
+                # from within on_created(), before this suspension was recorded.
+                # The resume it scheduled ran too early to make progress (the
+                # STEP_SUSPENDED marker did not exist yet). Now that the
+                # bookkeeping exists, re-drive the workflow so the answer is not
+                # lost.
+                if await self._hook_already_answered(e, run_id, hook_id, storage):
+                    await self.resume_workflow(run_id, storage)
+                    return run_id
 
             # Enhanced logging for retry suspensions
             if e.reason.startswith("retry:"):
@@ -436,6 +450,7 @@ class LocalRuntime(Runtime):
 
             # Record WORKFLOW_SUSPENDED event
             from pyworkflow.engine.events import create_workflow_suspended_event
+            from pyworkflow.engine.executor import record_step_suspended_if_needed
 
             step_id = e.data.get("step_id") if e.data else None
             step_name = e.data.get("step_name") if e.data else None
@@ -454,12 +469,21 @@ class LocalRuntime(Runtime):
             )
             await storage.record_event(suspended_event)
 
+            # Record STEP_SUSPENDED for inline step_hook suspensions.
+            await record_step_suspended_if_needed(storage, run_id, e)
+
             logger.info(
                 f"Workflow suspended again: {e.reason}",
                 run_id=run_id,
                 workflow_name=run.workflow_name,
                 reason=e.reason,
             )
+
+            # Fast-answer race: if the answer already arrived (e.g. resume_hook()
+            # fired from within on_created during this resume), re-drive the
+            # workflow now that the suspension bookkeeping exists.
+            if await self._hook_already_answered(e, run_id, hook_id, storage):
+                return await self.resume_workflow(run_id, storage)
 
             return None
 
@@ -505,6 +529,30 @@ class LocalRuntime(Runtime):
             )
 
             raise
+
+    async def _hook_already_answered(
+        self,
+        signal: SuspensionSignal,
+        run_id: str,
+        hook_id: str | None,
+        storage: "StorageBackend",
+    ) -> bool:
+        """
+        Report whether a hook/step_hook suspension was already answered.
+
+        Covers the "fast answer" race where resume_hook() records HOOK_RECEIVED
+        (and, on the local runtime, synchronously drives a resume) from within
+        on_created(), before the suspension bookkeeping exists. That early resume
+        cannot make progress, so the caller must re-drive the workflow once the
+        suspension (including STEP_SUSPENDED) has been recorded.
+        """
+        from pyworkflow.engine.events import EventType
+
+        if not hook_id or not signal.reason:
+            return False
+        if not (signal.reason.startswith("hook:") or signal.reason.startswith("step_hook:")):
+            return False
+        return await storage.has_event(run_id, EventType.HOOK_RECEIVED.value, hook_id=hook_id)
 
     async def schedule_resume(
         self,

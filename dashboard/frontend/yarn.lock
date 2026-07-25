@@ -360,10 +360,10 @@
   resolved "https://registry.npmjs.org/@floating-ui/utils/-/utils-0.2.11.tgz"
   integrity sha512-RiB/yIh78pcIxl6lLMG0CgBXAZ2Y0eVHqMPYugu+9U0AeT6YBeiJpf7lbdJNIugFP5SIjwNRgo4DhR1Qxi26Gg==
 
-"@hookform/resolvers@^5.4.0":
-  version "5.4.0"
-  resolved "https://registry.npmjs.org/@hookform/resolvers/-/resolvers-5.4.0.tgz"
-  integrity sha512-EIsqr/t/qbinPIhGjMdtvutIN1Kk4uwbROE9/UQ93CAVGR7GkA7Y92+fX80OzXi/OB67jVFYwKGO1WzkxmkFZw==
+"@hookform/resolvers@^5.4.3":
+  version "5.4.3"
+  resolved "https://registry.yarnpkg.com/@hookform/resolvers/-/resolvers-5.4.3.tgz#7cfdf3252474b2a23da6ed19c7a1c62f5e269e98"
+  integrity sha512-jtS1DEvkT1ql8ImIDQL+UmkhEnDmt3Bp7Yt4q5XQpc0JiQ8b8+I7yT/KQze4gw9Ocmi9xa9ef6zxifizPgdp3A==
   dependencies:
     "@standard-schema/utils" "^0.3.0"
 

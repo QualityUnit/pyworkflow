@@ -251,13 +251,16 @@ def step(
             else:
                 current_attempt = 1
 
-            # A ONE_THREAD run persists no per-step STEP_STARTED/STEP_COMPLETED:
-            # nothing resumes between steps, so the journal only has to carry
-            # what survives a suspension. Hook events are untouched — a hook is
-            # still a real suspension point and its events are what replay reads
-            # to hand back the payload. validate_event_limits() is skipped with
-            # them because it loads the whole journal just to count it, which is
-            # the cost this strategy exists to avoid.
+            # A ONE_THREAD run skips STEP_STARTED: nothing dispatches, so the
+            # in-progress tracking it feeds has no reader, and replay ignores it.
+            # STEP_COMPLETED is NOT skipped — replay.py restores step results
+            # from it, and a ONE_THREAD run still suspends on hooks and sleeps,
+            # where dropping it would re-execute every step already done in an
+            # earlier pass (re-emitting its side effects and re-charging its
+            # cost). validate_event_limits() goes with STEP_STARTED because it
+            # loads the whole journal just to count it, which is the cost this
+            # strategy exists to avoid; the runaway guard still fires at every
+            # suspension point.
             if not _run_is_one_thread:
                 # Validate event limits before executing step
                 await ctx.validate_event_limits()
@@ -297,19 +300,17 @@ def step(
                 # Execute step function
                 result = await func(*args, **kwargs)
 
-                # Record completion event (see the STEP_STARTED note above:
-                # ONE_THREAD keeps the journal free of per-step events)
-                if not _run_is_one_thread:
-                    completion_event = create_step_completed_event(
-                        run_id=ctx.run_id,
-                        step_id=step_id,
-                        result=serialize(result),
-                        step_name=step_name,
-                    )
-                    await ctx.storage.record_event(completion_event)  # type: ignore[union-attr]
+                # Record completion event. Recorded under every strategy: this
+                # is what replay reads to skip a step that already ran.
+                completion_event = create_step_completed_event(
+                    run_id=ctx.run_id,
+                    step_id=step_id,
+                    result=serialize(result),
+                    step_name=step_name,
+                )
+                await ctx.storage.record_event(completion_event)  # type: ignore[union-attr]
 
-                # Cache result for replay. Always: downstream steps in this same
-                # pass read upstream results from here, not from the journal.
+                # Cache result for replay
                 ctx.cache_step_result(step_id, result)
 
                 # Clear retry state on success

@@ -26,6 +26,9 @@ from pyworkflow.core.strategy import (
     coerce_workflow_run_strategy,
 )
 from pyworkflow.core.workflow import execute_workflow_with_context, workflow
+from pyworkflow.engine.events import EventType
+from pyworkflow.primitives.hooks import hook
+from pyworkflow.primitives.resume_hook import resume_hook
 from pyworkflow.storage.file import FileStorageBackend
 
 
@@ -265,3 +268,99 @@ class TestStrategyResolutionOrder:
             kwargs={},
         )
         assert seen == [WorkflowRunStrategy.DISTRIBUTED]
+
+
+class TestOneThreadEventPersistence:
+    """ONE_THREAD drops STEP_STARTED but keeps STEP_COMPLETED.
+
+    STEP_STARTED only feeds the in-progress tracking that guards re-dispatch,
+    and a ONE_THREAD run never dispatches. STEP_COMPLETED is what replay reads
+    to skip a step that already ran, so dropping it would re-execute every step
+    completed before a suspension — re-emitting its side effects and re-charging
+    its cost on every resume.
+    """
+
+    @pytest.mark.asyncio
+    async def test_one_thread_records_only_completion(self, tmp_path):
+        @step(name="ees_events_one_thread")
+        async def a_step():
+            return "ok"
+
+        ctx = _celery_ctx(tmp_path, "run_ev_one", WorkflowRunStrategy.ONE_THREAD)
+        set_context(ctx)
+        try:
+            await a_step()
+        finally:
+            set_context(None)
+
+        types = [e.type for e in await ctx.storage.get_events("run_ev_one")]
+        assert EventType.STEP_COMPLETED in types
+        assert EventType.STEP_STARTED not in types
+
+    @pytest.mark.asyncio
+    async def test_distributed_force_local_records_both(self, tmp_path):
+        """The DISTRIBUTED path is untouched: a force_local step still records
+        both events, which test_force_local.py also pins."""
+
+        @step(name="ees_events_distributed", force_local=True)
+        async def a_step():
+            return "ok"
+
+        ctx = _celery_ctx(tmp_path, "run_ev_dist", WorkflowRunStrategy.DISTRIBUTED)
+        set_context(ctx)
+        try:
+            await a_step()
+        finally:
+            set_context(None)
+
+        types = [e.type for e in await ctx.storage.get_events("run_ev_dist")]
+        assert EventType.STEP_COMPLETED in types
+        assert EventType.STEP_STARTED in types
+
+    @pytest.mark.asyncio
+    async def test_step_before_a_hook_is_not_re_executed_on_resume(self, tmp_path):
+        """The reason STEP_COMPLETED survives ONE_THREAD. A hook suspends the
+        run; on resume the step that already completed must not run again."""
+        runs: list[str] = []
+
+        @step(name="ees_pre_hook_step")
+        async def pre_hook_step():
+            runs.append("ran")
+            return "value"
+
+        @workflow(name="ees_hook_wf", workflow_run_strategy=WorkflowRunStrategy.ONE_THREAD)
+        async def hook_wf():
+            value = await pre_hook_step()
+            await hook("ees_ask", timeout="1h")
+            return value
+
+        storage = FileStorageBackend(base_path=str(tmp_path))
+        with pytest.raises(SuspensionSignal):
+            await execute_workflow_with_context(
+                workflow_func=hook_wf,
+                run_id="run_hook_once",
+                workflow_name="ees_hook_wf",
+                storage=storage,
+                args=(),
+                kwargs={},
+                runtime="celery",
+            )
+        assert runs == ["ran"]
+
+        events = await storage.get_events("run_hook_once")
+        hook_id = next(e.data["hook_id"] for e in events if e.type == EventType.HOOK_CREATED)
+        await resume_hook(f"run_hook_once:{hook_id}", {"answer": 1}, storage=storage)
+
+        result = await execute_workflow_with_context(
+            workflow_func=hook_wf,
+            run_id="run_hook_once",
+            workflow_name="ees_hook_wf",
+            storage=storage,
+            args=(),
+            kwargs={},
+            event_log=await storage.get_events("run_hook_once"),
+            runtime="celery",
+        )
+
+        assert result == "value"
+        assert runs == ["ran"], "the step before the hook re-executed on resume"

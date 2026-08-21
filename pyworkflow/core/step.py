@@ -23,6 +23,7 @@ from loguru import logger
 from pyworkflow.context import get_context, has_context
 from pyworkflow.core.exceptions import FatalError, RetryableError, SuspensionSignal
 from pyworkflow.core.registry import register_step
+from pyworkflow.core.strategy import WorkflowRunStrategy
 from pyworkflow.core.validation import validate_step_parameters
 from pyworkflow.engine.events import (
     create_step_completed_event,
@@ -198,8 +199,14 @@ def step(
             # Also check metadata dict for force_local (allows passing via
             # metadata={"force_local": True} when the dedicated parameter
             # is not yet available in the installed version).
+            #
+            # A run on the ONE_THREAD strategy skips dispatch for every step, so
+            # force_local is redundant under it — the whole run is already
+            # inline. force_local keeps its meaning as a per-step opt-out of the
+            # DISTRIBUTED default.
             _is_force_local = force_local or (metadata or {}).get("force_local", False)
-            if ctx.runtime == "celery" and not _is_force_local:
+            _run_is_one_thread = ctx.workflow_run_strategy is WorkflowRunStrategy.ONE_THREAD
+            if ctx.runtime == "celery" and not _is_force_local and not _run_is_one_thread:
                 # Validate parameters before dispatching to Celery
                 validate_step_parameters(func, args, kwargs, step_name)
                 return await _dispatch_step_to_celery(
@@ -244,19 +251,27 @@ def step(
             else:
                 current_attempt = 1
 
-            # Validate event limits before executing step
-            await ctx.validate_event_limits()
+            # A ONE_THREAD run persists no per-step STEP_STARTED/STEP_COMPLETED:
+            # nothing resumes between steps, so the journal only has to carry
+            # what survives a suspension. Hook events are untouched — a hook is
+            # still a real suspension point and its events are what replay reads
+            # to hand back the payload. validate_event_limits() is skipped with
+            # them because it loads the whole journal just to count it, which is
+            # the cost this strategy exists to avoid.
+            if not _run_is_one_thread:
+                # Validate event limits before executing step
+                await ctx.validate_event_limits()
 
-            # Record step start event
-            start_event = create_step_started_event(
-                run_id=ctx.run_id,
-                step_id=step_id,
-                step_name=step_name,
-                args=serialize_args(*args),
-                kwargs=serialize_kwargs(**kwargs),
-                attempt=current_attempt,
-            )
-            await ctx.storage.record_event(start_event)  # type: ignore[union-attr]
+                # Record step start event
+                start_event = create_step_started_event(
+                    run_id=ctx.run_id,
+                    step_id=step_id,
+                    step_name=step_name,
+                    args=serialize_args(*args),
+                    kwargs=serialize_kwargs(**kwargs),
+                    attempt=current_attempt,
+                )
+                await ctx.storage.record_event(start_event)  # type: ignore[union-attr]
 
             logger.info(
                 f"Executing step: {step_name} (attempt {current_attempt}/{max_retries + 1})",
@@ -282,16 +297,19 @@ def step(
                 # Execute step function
                 result = await func(*args, **kwargs)
 
-                # Record completion event
-                completion_event = create_step_completed_event(
-                    run_id=ctx.run_id,
-                    step_id=step_id,
-                    result=serialize(result),
-                    step_name=step_name,
-                )
-                await ctx.storage.record_event(completion_event)  # type: ignore[union-attr]
+                # Record completion event (see the STEP_STARTED note above:
+                # ONE_THREAD keeps the journal free of per-step events)
+                if not _run_is_one_thread:
+                    completion_event = create_step_completed_event(
+                        run_id=ctx.run_id,
+                        step_id=step_id,
+                        result=serialize(result),
+                        step_name=step_name,
+                    )
+                    await ctx.storage.record_event(completion_event)  # type: ignore[union-attr]
 
-                # Cache result for replay
+                # Cache result for replay. Always: downstream steps in this same
+                # pass read upstream results from here, not from the journal.
                 ctx.cache_step_result(step_id, result)
 
                 # Clear retry state on success

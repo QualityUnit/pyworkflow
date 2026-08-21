@@ -20,6 +20,10 @@ from pydantic import BaseModel
 
 from pyworkflow.context.base import StepFunction, WorkflowContext
 from pyworkflow.core.exceptions import SuspensionSignal
+from pyworkflow.core.strategy import (
+    DEFAULT_WORKFLOW_RUN_STRATEGY,
+    WorkflowRunStrategy,
+)
 from pyworkflow.utils.duration import parse_duration
 
 
@@ -104,6 +108,7 @@ class LocalContext(WorkflowContext):
 
         # Runtime environment (e.g., "celery", "temporal", None for local)
         self._runtime: str | None = None
+        self._workflow_run_strategy: WorkflowRunStrategy = DEFAULT_WORKFLOW_RUN_STRATEGY
         self._storage_config: dict[str, Any] | None = None
         self._is_step_worker: bool = False
         self._parent_run_id: str | None = None
@@ -282,6 +287,20 @@ class LocalContext(WorkflowContext):
             Runtime slug string or None for local execution
         """
         return self._runtime
+
+    @property
+    def workflow_run_strategy(self) -> WorkflowRunStrategy:
+        """
+        Get the execution strategy for this run.
+
+        ``DISTRIBUTED`` dispatches each step to a step worker on a distributed
+        runtime; ``ONE_THREAD`` runs every step inline. Read by the ``@step``
+        decorator to decide whether to dispatch.
+
+        Returns:
+            The run's strategy, defaulting to ``DISTRIBUTED``
+        """
+        return self._workflow_run_strategy
 
     @property
     def storage_config(self) -> dict[str, Any] | None:

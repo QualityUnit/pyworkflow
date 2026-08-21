@@ -11,6 +11,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from pyworkflow.core.strategy import WorkflowRunStrategy
+
 
 @dataclass
 class WorkflowMetadata:
@@ -26,6 +28,8 @@ class WorkflowMetadata:
     tracing: dict[str, Any] | None = (
         None  # Optional tracing provider config (e.g. Langfuse credentials)
     )
+    # Declared default execution strategy; start(workflow_run_strategy=...) wins
+    workflow_run_strategy: WorkflowRunStrategy | None = None
 
     def __post_init__(self) -> None:
         if self.tags is None:
@@ -80,6 +84,7 @@ class WorkflowRegistry:
         tags: list[str] | None = None,
         context_class: type | None = None,
         tracing: dict[str, Any] | None = None,
+        workflow_run_strategy: WorkflowRunStrategy | None = None,
     ) -> None:
         """
         Register a workflow.
@@ -92,6 +97,8 @@ class WorkflowRegistry:
             tags: Optional list of tags (max 3)
             context_class: Optional StepContext subclass for step context access
             tracing: Optional tracing provider config dict (e.g. Langfuse credentials)
+            workflow_run_strategy: Optional default execution strategy for the
+                workflow; start(workflow_run_strategy=...) overrides it
         """
         if name in self._workflows:
             existing = self._workflows[name]
@@ -110,6 +117,7 @@ class WorkflowRegistry:
             tags=tags or [],
             context_class=context_class,
             tracing=tracing,
+            workflow_run_strategy=workflow_run_strategy,
         )
 
         self._workflows[name] = workflow_meta
@@ -272,10 +280,18 @@ def register_workflow(
     tags: list[str] | None = None,
     context_class: type | None = None,
     tracing: dict[str, Any] | None = None,
+    workflow_run_strategy: WorkflowRunStrategy | None = None,
 ) -> None:
     """Register a workflow in the global registry."""
     _registry.register_workflow(
-        name, func, original_func, max_duration, tags, context_class, tracing
+        name,
+        func,
+        original_func,
+        max_duration,
+        tags,
+        context_class,
+        tracing,
+        workflow_run_strategy,
     )
 
 

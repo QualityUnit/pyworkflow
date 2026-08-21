@@ -20,6 +20,7 @@ from pyworkflow.core.exceptions import (
     SuspensionSignal,
     WorkflowNotFoundError,
 )
+from pyworkflow.core.strategy import WorkflowRunStrategy
 from pyworkflow.runtime.base import Runtime
 
 if TYPE_CHECKING:
@@ -135,6 +136,7 @@ class LocalRuntime(Runtime):
         max_duration: str | None = None,
         metadata: dict | None = None,
         tracing: dict | None = None,
+        workflow_run_strategy: WorkflowRunStrategy | None = None,
     ) -> str:
         """Start a workflow execution in the current process."""
         from pyworkflow.core.workflow import execute_workflow_with_context
@@ -192,6 +194,7 @@ class LocalRuntime(Runtime):
                 kwargs=kwargs,
                 durable=durable,
                 tracing=tracing,
+                workflow_run_strategy=workflow_run_strategy,
             )
 
             if durable and storage is not None:

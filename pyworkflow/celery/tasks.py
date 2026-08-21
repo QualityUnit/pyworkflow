@@ -914,6 +914,7 @@ def start_workflow_task(
     storage_config: dict[str, Any] | None = None,
     idempotency_key: str | None = None,
     tracing: dict[str, Any] | None = None,
+    workflow_run_strategy: str | None = None,
 ) -> str:
     """
     Start a workflow execution.
@@ -966,6 +967,7 @@ def start_workflow_task(
             idempotency_key=idempotency_key,
             run_id=run_id,
             tracing=tracing,
+            workflow_run_strategy=workflow_run_strategy,
         )
     )
 
@@ -1496,6 +1498,7 @@ async def _recover_workflow_on_worker(
 
     # Extract tracing config persisted at start
     _recover_tracing = kwargs.pop("_tracing_config", None)
+    _recover_strategy = kwargs.pop("_workflow_run_strategy", None)
 
     # Execute workflow with event replay
     try:
@@ -1511,6 +1514,7 @@ async def _recover_workflow_on_worker(
             storage_config=storage_config,
             parent_run_id=run.parent_run_id,
             tracing=workflow_meta.tracing or _recover_tracing,
+            workflow_run_strategy=(_recover_strategy or workflow_meta.workflow_run_strategy),
         )
 
         # Update run status to completed
@@ -1650,6 +1654,7 @@ async def _start_workflow_on_worker(
     idempotency_key: str | None = None,
     run_id: str | None = None,
     tracing: dict[str, Any] | None = None,
+    workflow_run_strategy: str | None = None,
 ) -> str:
     """
     Internal function to start workflow on Celery worker.
@@ -1850,7 +1855,11 @@ async def _start_workflow_on_worker(
         created_at=datetime.now(UTC),
         started_at=datetime.now(UTC),
         input_args=serialize_args(*args),
-        input_kwargs=serialize_kwargs(**kwargs, _tracing_config=tracing),
+        input_kwargs=serialize_kwargs(
+            **kwargs,
+            _tracing_config=tracing,
+            _workflow_run_strategy=workflow_run_strategy,
+        ),
         idempotency_key=idempotency_key,
         max_duration=workflow_meta.max_duration,
         context={},  # Step context data
@@ -1884,6 +1893,7 @@ async def _start_workflow_on_worker(
             runtime="celery",
             storage_config=storage_config,
             tracing=tracing or workflow_meta.tracing,
+            workflow_run_strategy=(workflow_run_strategy or workflow_meta.workflow_run_strategy),
         )
 
         # Update run status to completed
@@ -2471,6 +2481,7 @@ async def _resume_workflow_on_worker(
 
     # Extract tracing config persisted at start
     _resume_tracing = kwargs.pop("_tracing_config", None)
+    _resume_strategy = kwargs.pop("_workflow_run_strategy", None)
 
     # Execute workflow with event replay
     try:
@@ -2487,6 +2498,7 @@ async def _resume_workflow_on_worker(
             storage_config=storage_config,
             parent_run_id=run.parent_run_id,
             tracing=workflow_meta.tracing or _resume_tracing,
+            workflow_run_strategy=(_resume_strategy or workflow_meta.workflow_run_strategy),
         )
 
         # Update run status to completed

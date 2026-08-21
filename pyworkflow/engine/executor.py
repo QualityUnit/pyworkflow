@@ -23,6 +23,7 @@ from pyworkflow.core.exceptions import (
     WorkflowNotFoundError,
 )
 from pyworkflow.core.registry import get_workflow_by_func
+from pyworkflow.core.strategy import WorkflowRunStrategy
 from pyworkflow.core.workflow import execute_workflow_with_context
 from pyworkflow.engine.events import (
     EventType,
@@ -134,6 +135,7 @@ async def start(
     storage: StorageBackend | None = None,
     idempotency_key: str | None = None,
     tracing: dict | None = None,
+    workflow_run_strategy: WorkflowRunStrategy | None = None,
     **kwargs: Any,
 ) -> str:
     """
@@ -151,6 +153,10 @@ async def start(
         idempotency_key: Optional key for idempotent execution
         tracing: Optional tracing provider config dict (e.g. Langfuse credentials).
             Overrides the @workflow decorator's tracing parameter if provided.
+        workflow_run_strategy: Execution strategy for this run. ONE_THREAD runs
+            every step inline in the workflow task; DISTRIBUTED (the default)
+            dispatches each step to a step worker unless the step declares
+            force_local. Overrides the @workflow declaration if provided.
         **kwargs: Keyword arguments for workflow
 
     Returns:
@@ -258,6 +264,7 @@ async def start(
         max_duration=workflow_meta.max_duration,
         metadata={},  # Run-level metadata
         tracing=tracing,
+        workflow_run_strategy=workflow_run_strategy,
     )
 
 

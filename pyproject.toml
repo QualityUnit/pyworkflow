@@ -110,7 +110,7 @@ dev = [
     "types-PyYAML>=6.0.0",
 
     # Monitoring (optional)
-    "flower>=2.0.0",  # Celery web UI
+    "flower>=2.1.0",  # Celery web UI
 
     # Include all storage backends for development
     "redis>=5.0.0",

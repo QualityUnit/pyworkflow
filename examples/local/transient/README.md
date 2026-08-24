@@ -70,9 +70,11 @@ from pyworkflow import configure, start, step, workflow
 
 configure(default_durable=False)
 
+
 @step()
 async def process_order(order_id: str) -> dict:
     return {"order_id": order_id, "status": "processed"}
+
 
 @workflow(durable=False)
 async def order_workflow(order_id: str) -> dict:
@@ -93,6 +95,7 @@ async def order_workflow(order_id: str) -> dict:
 **Key patterns:**
 ```python
 attempt_count = 0
+
 
 @step(max_retries=3, retry_delay=1)
 async def call_flaky_api(order: dict) -> dict:
@@ -169,6 +172,7 @@ async def my_step(data: dict) -> dict:
 ```python
 from pyworkflow import FatalError
 
+
 @step()
 async def validate_input(value: int) -> int:
     if value < 0:
@@ -184,6 +188,7 @@ async def validate_input(value: int) -> int:
 
 ```python
 from pyworkflow import sleep
+
 
 @workflow(durable=False)
 async def workflow_with_delay():
@@ -209,19 +214,23 @@ from pyworkflow import configure, start, step, workflow
 
 configure(default_durable=False)
 
+
 @step()
 async def read_file(path: str) -> str:
     with open(path) as f:
         return f.read()
 
+
 @step()
 async def transform_data(content: str) -> str:
     return content.upper()
 
+
 @step()
 async def write_file(path: str, content: str):
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
         f.write(content)
+
 
 @workflow(durable=False)
 async def process_file(input_path: str, output_path: str):
@@ -229,8 +238,10 @@ async def process_file(input_path: str, output_path: str):
     transformed = await transform_data(content)
     await write_file(output_path, transformed)
 
+
 if __name__ == "__main__":
     import sys
+
     asyncio.run(start(process_file, sys.argv[1], sys.argv[2]))
 ```
 
@@ -243,14 +254,17 @@ async def fetch_data(url: str) -> dict:
         response = await client.get(url)
         return response.json()
 
+
 @step()
 async def transform_data(data: dict) -> list:
     return [item["value"] for item in data["items"]]
+
 
 @step()
 async def save_results(results: list):
     with open("results.json", "w") as f:
         json.dump(results, f)
+
 
 @workflow(durable=False)
 async def data_pipeline(url: str):
@@ -269,10 +283,7 @@ async def data_pipeline(url: str):
 # Switch to durable mode
 from pyworkflow.storage import InMemoryStorageBackend
 
-configure(
-    storage=InMemoryStorageBackend(),
-    default_durable=True
-)
+configure(storage=InMemoryStorageBackend(), default_durable=True)
 ```
 
 ### Sleep blocks the entire process
@@ -299,10 +310,8 @@ configure(default_durable=False)
 
 # After (durable)
 from pyworkflow.storage import FileStorageBackend
-configure(
-    storage=FileStorageBackend("./workflow_data"),
-    default_durable=True
-)
+
+configure(storage=FileStorageBackend("./workflow_data"), default_durable=True)
 ```
 
 Your workflow code stays the same!

@@ -2906,8 +2906,7 @@ async def _handle_continue_as_new_celery(
     from pyworkflow.core.strategy import coerce_workflow_run_strategy
 
     continued_strategy = (
-        coerce_workflow_run_strategy(workflow_run_strategy)
-        or workflow_meta.workflow_run_strategy
+        coerce_workflow_run_strategy(workflow_run_strategy) or workflow_meta.workflow_run_strategy
     )
 
     # Generate new run_id

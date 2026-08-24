@@ -11,6 +11,8 @@ All source files use **snake_case** with `.py` extension (e.g., `workflow_base.p
 **snake_case** for all variables and functions:
 ```python
 async def start_child_workflow(workflow_func, *args, wait_for_completion=True): ...
+
+
 run_id: str = generate_run_id()
 retry_delay: str | int | list[int] = "exponential"
 ```
@@ -19,8 +21,14 @@ retry_delay: str | int | list[int] = "exponential"
 **PascalCase** with no prefix conventions:
 ```python
 class WorkflowContext: ...
+
+
 class LocalContext(WorkflowContext): ...
+
+
 class StorageBackend(ABC): ...
+
+
 class RetryableError(WorkflowError): ...
 ```
 
@@ -81,9 +89,9 @@ Never use wildcard imports (`from x import *`) outside of `__init__.py` re-expor
 ### Exception Hierarchy
 Raise from the project's exception hierarchy (`core/exceptions.py`); never raise bare `Exception`:
 ```python
-raise FatalError("Invalid order ID")          # non-retriable
+raise FatalError("Invalid order ID")  # non-retriable
 raise RetryableError("Rate limited", retry_after="60s")  # auto-retried
-raise WorkflowNotFoundError(run_id)           # domain error
+raise WorkflowNotFoundError(run_id)  # domain error
 ```
 
 `SuspensionSignal` and `ContinueAsNewSignal` extend `BaseException` — catch them explicitly before `except Exception` blocks.
@@ -101,6 +109,7 @@ raise ValueError("Not found")
 Use the project logger from `observability/logging.py`. Pass structured key-value pairs — do not use f-strings in log messages:
 ```python
 from pyworkflow.observability.logging import get_logger
+
 logger = get_logger()
 logger.info("Step completed", run_id=ctx.run_id, step_id=step_id, result=result)
 ```
@@ -153,6 +162,7 @@ async def test_workflow_execution():
 Unit tests mock storage and Celery. Use `InMemoryStorageBackend` for integration tests that need real storage behavior without database setup:
 ```python
 from pyworkflow.storage.memory import InMemoryStorageBackend
+
 storage = InMemoryStorageBackend()
 ```
 

@@ -87,16 +87,19 @@ celery -A pyworkflow.celery.app beat --loglevel=info
 ```python
 from pyworkflow import workflow, step, start, sleep
 
+
 @step()
 async def process_item(item_id: int):
     # This runs on any available worker
     return f"Processed {item_id}"
+
 
 @workflow
 async def my_workflow(item_id: int):
     result = await process_item(item_id)
     await sleep("5m")  # Automatically resumes after 5 minutes!
     return result
+
 
 # Start workflow - executes across workers
 run_id = start(my_workflow, item_id=123)
@@ -233,7 +236,7 @@ from pyworkflow.celery import create_celery_app
 app = create_celery_app(
     broker_url="redis://redis-cluster:6379/0",
     result_backend="redis://redis-cluster:6379/1",
-    app_name="my_workflows"
+    app_name="my_workflows",
 )
 
 # Additional configuration

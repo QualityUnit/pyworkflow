@@ -405,6 +405,45 @@ class TestOneThreadRunawayGuard:
         assert exc_info.value.run_id == "run_guard"
 
     @pytest.mark.asyncio
+    async def test_guard_counts_steps_from_earlier_passes(self, tmp_path):
+        """The guard has to mean "steps in this run", not "steps in this pass".
+
+        A run that suspends repeatedly gets a fresh context each time; if the
+        counter restarted with it, a runaway loop would never trip the limit.
+        """
+        configure(event_hard_limit=3)
+
+        @step(name="ees_guard_replayed", force_local=False)
+        async def guarded_step(index: int):
+            return index
+
+        storage = FileStorageBackend(base_path=str(tmp_path))
+        first = _celery_ctx(tmp_path, "run_guard_replay", WorkflowRunStrategy.ONE_THREAD)
+        set_context(first)
+        try:
+            await guarded_step(0)
+            await guarded_step(1)
+        finally:
+            set_context(None)
+
+        # Resume: a new context replaying the two completed steps
+        resumed = LocalContext(
+            run_id="run_guard_replay",
+            workflow_name="test_workflow",
+            storage=storage,
+            event_log=await storage.get_events("run_guard_replay"),
+        )
+        resumed._runtime = "celery"
+        resumed._workflow_run_strategy = WorkflowRunStrategy.ONE_THREAD
+
+        set_context(resumed)
+        try:
+            with pytest.raises(EventLimitExceededError):
+                await guarded_step(2)
+        finally:
+            set_context(None)
+
+    @pytest.mark.asyncio
     async def test_guard_stays_clear_below_the_limit(self, tmp_path):
         configure(event_hard_limit=50)
 

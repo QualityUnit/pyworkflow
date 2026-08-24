@@ -127,6 +127,13 @@ class LocalContext(WorkflowContext):
             self._replay_events(event_log)
             self._is_replaying = False
 
+            # Carry the steps this run already ran into the inline runaway
+            # guard. Without it the guard would count only the current pass, so
+            # a run that suspends repeatedly could execute without bound — the
+            # journal-based validate_event_limits it replaces counts the whole
+            # run, and the guard has to mean the same thing.
+            self._inline_step_count = len(self._step_results)
+
     def _replay_events(self, events: list[Any]) -> None:
         """Replay events to restore state."""
         from pyworkflow.engine.events import EventType

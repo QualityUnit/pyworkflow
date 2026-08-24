@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from pyworkflow.context.step_context import StepContext
+    from pyworkflow.core.strategy import WorkflowRunStrategy
 
 from celery.exceptions import MaxRetriesExceededError, Retry
 from loguru import logger
@@ -1611,6 +1612,7 @@ async def _recover_workflow_on_worker(
             storage_config=storage_config,
             new_args=e.workflow_args,
             new_kwargs=e.workflow_kwargs,
+            workflow_run_strategy=(_recover_strategy or workflow_meta.workflow_run_strategy),
         )
 
         # Cancel all running children (TERMINATE policy)
@@ -2037,6 +2039,7 @@ async def _start_workflow_on_worker(
             storage_config=storage_config,
             new_args=e.workflow_args,
             new_kwargs=e.workflow_kwargs,
+            workflow_run_strategy=(workflow_run_strategy or workflow_meta.workflow_run_strategy),
         )
 
         # Cancel all running children (TERMINATE policy)
@@ -2675,6 +2678,7 @@ async def _resume_workflow_on_worker(
             storage_config=storage_config,
             new_args=e.workflow_args,
             new_kwargs=e.workflow_kwargs,
+            workflow_run_strategy=(_resume_strategy or workflow_meta.workflow_run_strategy),
             parent_run_id=run.parent_run_id,
         )
 
@@ -2871,6 +2875,7 @@ async def _handle_continue_as_new_celery(
     new_args: tuple,
     new_kwargs: dict,
     parent_run_id: str | None = None,
+    workflow_run_strategy: "WorkflowRunStrategy | str | None" = None,
 ) -> str:
     """
     Handle continue-as-new in Celery context.
@@ -2891,10 +2896,20 @@ async def _handle_continue_as_new_celery(
         new_args: Arguments for the new workflow
         new_kwargs: Keyword arguments for the new workflow
         parent_run_id: Parent run ID if this is a child workflow
+        workflow_run_strategy: The continuing run's execution strategy. Carried
+            over so a ONE_THREAD run does not silently revert to DISTRIBUTED on
+            continuation; falls back to the @workflow declaration.
 
     Returns:
         New run ID
     """
+    from pyworkflow.core.strategy import coerce_workflow_run_strategy
+
+    continued_strategy = (
+        coerce_workflow_run_strategy(workflow_run_strategy)
+        or workflow_meta.workflow_run_strategy
+    )
+
     # Generate new run_id
     new_run_id = f"run_{uuid.uuid4().hex[:16]}"
 
@@ -2946,6 +2961,7 @@ async def _handle_continue_as_new_celery(
         kwargs_json=kwargs_json,
         run_id=new_run_id,
         storage_config=storage_config,
+        workflow_run_strategy=(continued_strategy.value if continued_strategy else None),
     )
 
     return new_run_id

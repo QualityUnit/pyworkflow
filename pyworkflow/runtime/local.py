@@ -388,6 +388,13 @@ class LocalRuntime(Runtime):
         args = deserialize_args(run.input_args)
         kwargs = deserialize_kwargs(run.input_kwargs)
 
+        # Service kwargs the Celery runtime persists alongside the workflow's own
+        # (tasks.py::_start_workflow_on_worker). They are not workflow parameters,
+        # so a run started there and resumed here must not pass them on to the
+        # workflow function. Mirrors _resume_workflow_on_worker.
+        _resume_tracing = kwargs.pop("_tracing_config", None)
+        _resume_strategy = kwargs.pop("_workflow_run_strategy", None)
+
         # Update status to running
         await storage.update_run_status(run_id=run_id, status=RunStatus.RUNNING)
 
@@ -403,6 +410,8 @@ class LocalRuntime(Runtime):
                 event_log=events,
                 durable=True,  # Resume is always durable
                 parent_run_id=run.parent_run_id,
+                tracing=workflow_meta.tracing or _resume_tracing,
+                workflow_run_strategy=(_resume_strategy or workflow_meta.workflow_run_strategy),
             )
 
             # Update run status to completed

@@ -259,8 +259,8 @@ def step(
             # earlier pass (re-emitting its side effects and re-charging its
             # cost). validate_event_limits() goes with STEP_STARTED because it
             # loads the whole journal just to count it, which is the cost this
-            # strategy exists to avoid; the runaway guard still fires at every
-            # suspension point.
+            # strategy exists to avoid; count_inline_step() keeps the runaway
+            # guard from memory instead.
             if not _run_is_one_thread:
                 # Validate event limits before executing step
                 await ctx.validate_event_limits()
@@ -275,6 +275,10 @@ def step(
                     attempt=current_attempt,
                 )
                 await ctx.storage.record_event(start_event)  # type: ignore[union-attr]
+            else:
+                # No STEP_STARTED means no journal to count, so the runaway guard
+                # counts the steps this pass has run, in memory.
+                ctx.count_inline_step()
 
             logger.info(
                 f"Executing step: {step_name} (attempt {current_attempt}/{max_retries + 1})",

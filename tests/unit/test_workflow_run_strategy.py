@@ -14,10 +14,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from pyworkflow.aws.context import AWSWorkflowContext
+from pyworkflow.config import configure, reset_config
 from pyworkflow.context import LocalContext, set_context
 from pyworkflow.context.aws import AWSContext
 from pyworkflow.context.mock import MockContext
-from pyworkflow.core.exceptions import SuspensionSignal
+from pyworkflow.core.exceptions import EventLimitExceededError, SuspensionSignal
 from pyworkflow.core.registry import _registry
 from pyworkflow.core.step import step
 from pyworkflow.core.strategy import (
@@ -29,7 +30,10 @@ from pyworkflow.core.workflow import execute_workflow_with_context, workflow
 from pyworkflow.engine.events import EventType
 from pyworkflow.primitives.hooks import hook
 from pyworkflow.primitives.resume_hook import resume_hook
+from pyworkflow.serialization.encoder import serialize_args, serialize_kwargs
 from pyworkflow.storage.file import FileStorageBackend
+from pyworkflow.storage.memory import InMemoryStorageBackend
+from pyworkflow.storage.schemas import RunStatus, WorkflowRun
 
 
 def _celery_ctx(tmp_path, run_id: str, strategy: WorkflowRunStrategy) -> LocalContext:
@@ -364,3 +368,155 @@ class TestOneThreadEventPersistence:
 
         assert result == "value"
         assert runs == ["ran"], "the step before the hook re-executed on resume"
+
+
+class TestOneThreadRunawayGuard:
+    """ONE_THREAD keeps a runaway guard even though it records no STEP_STARTED.
+
+    ``validate_event_limits`` counts the journal, so skipping the event skips the
+    guard with it. ``count_inline_step`` replaces it from memory.
+    """
+
+    @pytest.fixture(autouse=True)
+    def reset_config_fixture(self):
+        reset_config()
+        yield
+        reset_config()
+
+    @pytest.mark.asyncio
+    async def test_inline_steps_hit_the_hard_limit(self, tmp_path):
+        configure(event_hard_limit=3)
+
+        @step(name="ees_guarded", force_local=False)
+        async def guarded_step(index: int):
+            return index
+
+        set_context(_celery_ctx(tmp_path, "run_guard", WorkflowRunStrategy.ONE_THREAD))
+        try:
+            assert await guarded_step(0) == 0
+            assert await guarded_step(1) == 1
+
+            with pytest.raises(EventLimitExceededError) as exc_info:
+                await guarded_step(2)
+        finally:
+            set_context(None)
+
+        assert exc_info.value.limit == 3
+        assert exc_info.value.run_id == "run_guard"
+
+    @pytest.mark.asyncio
+    async def test_guard_stays_clear_below_the_limit(self, tmp_path):
+        configure(event_hard_limit=50)
+
+        @step(name="ees_unguarded", force_local=False)
+        async def cheap_step(index: int):
+            return index
+
+        set_context(_celery_ctx(tmp_path, "run_no_guard", WorkflowRunStrategy.ONE_THREAD))
+        try:
+            for i in range(10):
+                assert await cheap_step(i) == i
+        finally:
+            set_context(None)
+
+
+class TestContinueAsNewCarriesStrategy:
+    """A continuation must not silently fall back to DISTRIBUTED."""
+
+    @pytest.mark.asyncio
+    async def test_strategy_reaches_the_new_run(self):
+        from pyworkflow.celery import tasks as celery_tasks
+
+        @workflow(name="ees_can_strategy")
+        async def continued_wf():
+            return "ok"
+
+        meta = _registry.get_workflow("ees_can_strategy")
+        storage = InMemoryStorageBackend()
+        await storage.create_run(
+            WorkflowRun(
+                run_id="run_can_old",
+                workflow_name="ees_can_strategy",
+                status=RunStatus.RUNNING,
+            )
+        )
+
+        with patch.object(celery_tasks, "start_workflow_task") as mock_task:
+            await celery_tasks._handle_continue_as_new_celery(
+                current_run_id="run_can_old",
+                workflow_meta=meta,
+                storage=storage,
+                storage_config=None,
+                new_args=(),
+                new_kwargs={},
+                workflow_run_strategy=WorkflowRunStrategy.ONE_THREAD,
+            )
+
+        _, call_kwargs = mock_task.delay.call_args
+        assert call_kwargs["workflow_run_strategy"] == WorkflowRunStrategy.ONE_THREAD.value
+
+    @pytest.mark.asyncio
+    async def test_no_strategy_stays_none(self):
+        from pyworkflow.celery import tasks as celery_tasks
+
+        @workflow(name="ees_can_undeclared")
+        async def continued_wf():
+            return "ok"
+
+        meta = _registry.get_workflow("ees_can_undeclared")
+        storage = InMemoryStorageBackend()
+        await storage.create_run(
+            WorkflowRun(
+                run_id="run_can_none",
+                workflow_name="ees_can_undeclared",
+                status=RunStatus.RUNNING,
+            )
+        )
+
+        with patch.object(celery_tasks, "start_workflow_task") as mock_task:
+            await celery_tasks._handle_continue_as_new_celery(
+                current_run_id="run_can_none",
+                workflow_meta=meta,
+                storage=storage,
+                storage_config=None,
+                new_args=(),
+                new_kwargs={},
+            )
+
+        _, call_kwargs = mock_task.delay.call_args
+        assert call_kwargs["workflow_run_strategy"] is None
+
+
+class TestLocalRuntimeResumeIgnoresServiceKwargs:
+    """A run started on Celery carries service kwargs in input_kwargs.
+
+    They are not workflow parameters: handing them to the workflow function
+    raises TypeError. The Celery resume path pops them; the local one has to too.
+    """
+
+    @pytest.mark.asyncio
+    async def test_resume_does_not_pass_service_kwargs_to_the_workflow(self):
+        from pyworkflow.runtime.local import LocalRuntime
+
+        @workflow(name="ees_local_resume")
+        async def resumable_wf(value: str):
+            return value
+
+        storage = InMemoryStorageBackend()
+        await storage.create_run(
+            WorkflowRun(
+                run_id="run_local_resume",
+                workflow_name="ees_local_resume",
+                status=RunStatus.SUSPENDED,
+                input_args=serialize_args(),
+                input_kwargs=serialize_kwargs(
+                    value="carried",
+                    _tracing_config=None,
+                    _workflow_run_strategy=WorkflowRunStrategy.ONE_THREAD.value,
+                ),
+            )
+        )
+
+        result = await LocalRuntime().resume_workflow("run_local_resume", storage=storage)
+
+        assert result == "carried"

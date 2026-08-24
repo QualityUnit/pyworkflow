@@ -439,6 +439,10 @@ class WorkflowContext(ABC):
         """Validate event count against configured limits."""
         pass  # Default: no validation
 
+    def count_inline_step(self) -> None:
+        """Count one inline step against the runaway guard."""
+        pass  # Default: no validation
+
     # =========================================================================
     # Child workflow support - used by start_child_workflow
     # =========================================================================

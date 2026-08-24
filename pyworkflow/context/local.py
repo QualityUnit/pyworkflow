@@ -92,6 +92,7 @@ class LocalContext(WorkflowContext):
         self._retry_states: dict[str, dict[str, Any]] = {}
         self._is_replaying = False
         self._last_warning_count: int = 0  # Track last event count for warning interval
+        self._inline_step_count: int = 0  # Steps run inline (ONE_THREAD runaway guard)
 
         # Cancellation state
         self._cancellation_requested: bool = False
@@ -630,6 +631,27 @@ class LocalContext(WorkflowContext):
                     hard_limit=config.event_hard_limit,
                 )
                 self._last_warning_count = event_count
+
+    def count_inline_step(self) -> None:
+        """
+        Count one inline step and enforce the runaway guard.
+
+        ``validate_event_limits`` cannot serve a ONE_THREAD run: it counts the
+        journal, and that strategy deliberately records no ``STEP_STARTED``.
+        Counting executed steps in memory keeps the guard against a runaway
+        workflow without the storage read the strategy exists to avoid.
+
+        Raises:
+            EventLimitExceededError: If the inline step count reaches the hard limit
+        """
+        from pyworkflow.config import get_config
+        from pyworkflow.core.exceptions import EventLimitExceededError
+
+        self._inline_step_count += 1
+        hard_limit = get_config().event_hard_limit
+
+        if self._inline_step_count >= hard_limit:
+            raise EventLimitExceededError(self._run_id, self._inline_step_count, hard_limit)
 
     # =========================================================================
     # Step execution

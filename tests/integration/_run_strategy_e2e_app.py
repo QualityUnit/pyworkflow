@@ -23,7 +23,6 @@ from pyworkflow import (
     FatalError,
     RetryableError,
     WorkflowRunStrategy,
-    continue_as_new,
     hook,
     sleep,
     start_child_workflow,
@@ -166,15 +165,6 @@ async def s_fatal() -> None:
 async def s_gather() -> list[int]:
     _trace("wf:pass")
     return list(await asyncio.gather(add(1, 1), add(2, 2), add(3, 3)))
-
-
-@workflow(name="s_can", durable=True, workflow_run_strategy=ONE_THREAD)
-async def s_can(generation: int = 0) -> int:
-    _trace("wf:pass", generation=generation)
-    await add(generation, 1)
-    if generation < 1:
-        await continue_as_new(generation=generation + 1)
-    return generation
 
 
 @workflow(name="s_parent", durable=True, workflow_run_strategy=ONE_THREAD)

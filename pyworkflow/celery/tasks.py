@@ -52,7 +52,7 @@ from pyworkflow.engine.executor import (
     step_suspended_already_recorded,
 )
 from pyworkflow.serialization.decoder import deserialize_args, deserialize_kwargs
-from pyworkflow.serialization.encoder import serialize_args, serialize_kwargs
+from pyworkflow.serialization.encoder import serialize, serialize_args, serialize_kwargs
 from pyworkflow.storage.base import StorageBackend
 from pyworkflow.storage.schemas import RunStatus, WorkflowRun
 
@@ -2543,7 +2543,11 @@ async def _resume_workflow_on_worker(
             storage=storage,
             storage_config=storage_config,
             status=RunStatus.COMPLETED,
-            result=serialize_args(result),
+            # serialize(), not serialize_args(): the parent replays this with
+            # deserialize() (see LocalContext._replay_events CHILD_WORKFLOW_COMPLETED)
+            # and the fresh-start child path (_execute_child_workflow_on_worker)
+            # serialises the same way. serialize_args() handed the parent [result].
+            result=serialize(result),
         )
 
         logger.info(

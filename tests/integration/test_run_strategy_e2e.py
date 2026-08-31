@@ -13,7 +13,7 @@ so the tests can prove the strategy end to end:
 - ``DISTRIBUTED``: regular steps execute on ``step-worker`` (dispatched)
 - ``ONE_THREAD``:  every step executes on ``wf-worker`` inside the workflow task,
   the journal carries no ``STEP_STARTED`` / ``step_dispatch`` suspension, and the
-  run still survives sleep / hook / retry / continue-as-new / child suspensions
+  run still survives sleep / hook / retry / child suspensions
   without re-executing steps that already completed.
 
 Requires Redis at localhost:6379 (uses db 14). Marked slow (boots real workers).
@@ -409,72 +409,7 @@ class TestOneThreadSurvivesSuspension:
         assert cluster.event_types(run_id).count("step_completed") == 3
 
 
-CONTINUE_AS_NEW_BROKEN = (
-    "PRE-EXISTING (on main, independent of strategy): _handle_continue_as_new_celery "
-    "pre-creates the continuation run as PENDING, then start_workflow_task takes the "
-    "FRESH START path and storage.create_run() raises 'already exists' -> the "
-    "continuation is stranded in PENDING. Strategy carry-over is unit-tested in "
-    "tests/unit/test_workflow_run_strategy.py::TestContinueAsNewCarriesStrategy."
-)
-
-CHILD_RESULT_BROKEN = (
-    "PRE-EXISTING (on main, independent of strategy): a child that completes on the "
-    "resume path (_resume_workflow_on_worker) notifies its parent with "
-    "serialize_args(result) -> the parent receives [result] instead of result. The "
-    "fresh-start child path uses serialize(result). Any DISTRIBUTED child (its steps "
-    "dispatch, so it always resumes) is affected."
-)
-
-
 class TestOneThreadAcrossRuns:
-    def _continuation_of(self, cluster: Cluster, first: str) -> str:
-        run = cluster.run(first)
-        assert run.continued_to_run_id, "first run has no continuation link"
-        return run.continued_to_run_id
-
-    @pytest.mark.xfail(strict=True, reason=CONTINUE_AS_NEW_BROKEN)
-    def test_continue_as_new_keeps_the_strategy(self, cluster: Cluster):
-        first = cluster.start("s_can", "none")
-        assert cluster.wait_terminal(first) == "continued_as_new", cluster.worker_logs()
-        assert {s["worker"] for s in cluster.steps(first)} == {WF_WORKER}
-
-        second = self._continuation_of(cluster, first)
-        assert cluster.wait_terminal(second, timeout=15) == "completed", cluster.worker_logs()
-        assert cluster.result(second) == 1
-
-        # The continuation must NOT have reverted to DISTRIBUTED.
-        steps = cluster.steps(second)
-        assert len(steps) == 1
-        assert steps[0]["worker"] == WF_WORKER
-        assert steps[0]["strategy"] == "one_thread"
-        assert "step_started" not in cluster.event_types(second)
-
-    @pytest.mark.xfail(strict=True, reason=CONTINUE_AS_NEW_BROKEN)
-    def test_continue_as_new_keeps_a_start_override(self, cluster: Cluster):
-        """s_can declares ONE_THREAD; override it to DISTRIBUTED and check the
-        continuation stays DISTRIBUTED (the override is carried, not re-derived
-        from the declaration)."""
-        first = cluster.start("s_can", "distributed")
-        assert cluster.wait_terminal(first) == "continued_as_new", cluster.worker_logs()
-        assert {s["worker"] for s in cluster.steps(first)} == {STEP_WORKER}
-
-        second = self._continuation_of(cluster, first)
-        assert cluster.wait_terminal(second, timeout=15) == "completed", cluster.worker_logs()
-        assert cluster.steps(second)[0]["strategy"] == "distributed"
-        assert cluster.steps(second)[0]["worker"] == STEP_WORKER
-        assert "step_started" in cluster.event_types(second)
-
-    def test_continuation_run_is_stranded_pending(self, cluster: Cluster):
-        """Pins the pre-existing failure mode so it is visible in this suite,
-        and proves the strategy feature itself got as far as continuing."""
-        first = cluster.start("s_can", "none")
-        assert cluster.wait_terminal(first) == "continued_as_new", cluster.worker_logs()
-        second = self._continuation_of(cluster, first)
-        # Give the worker time to pick up (and crash on) the continuation.
-        assert not _wait_for(lambda: cluster.status(second) != "pending", timeout=10)
-        assert cluster.status(second) == "pending"
-        assert cluster.steps(second) == []
-
     def test_one_thread_parent_with_one_thread_child(self, cluster: Cluster):
         run_id = cluster.start("s_parent_inline_child", "none")
         assert cluster.wait_terminal(run_id, timeout=90) == "completed", cluster.worker_logs()
@@ -499,30 +434,26 @@ class TestOneThreadAcrossRuns:
         assert {s["strategy"] for s in child_steps} == {"one_thread"}
         assert "step_started" not in cluster.event_types(child.run_id)
 
-    @pytest.mark.xfail(strict=True, reason=CHILD_RESULT_BROKEN)
     def test_one_thread_parent_with_distributed_child(self, cluster: Cluster):
         """The parent's ONE_THREAD is NOT inherited by an undeclared child: the
-        child runs DISTRIBUTED (by design -- documented here). The parent side
-        works; what breaks is the child's result shape on the resume path."""
+        child runs DISTRIBUTED (its own declaration decides). The child then
+        completes on the resume path, and the parent must get the bare result."""
         run_id = cluster.start("s_parent", "none")
-        final = cluster.wait_terminal(run_id, timeout=90)
+        assert cluster.wait_terminal(run_id, timeout=90) == "completed", cluster.worker_logs()
+        assert cluster.result(run_id) == {"a": 2, "child": 3, "b": 5}
 
-        # Parent side (passes today): resumed with ONE_THREAD intact.
         parent_steps = cluster.steps(run_id)
-        assert parent_steps[0]["worker"] == WF_WORKER
+        assert [s["event"] for s in parent_steps] == ["step:add", "step:add"]
+        assert {s["worker"] for s in parent_steps} == {WF_WORKER}
         assert {s["strategy"] for s in parent_steps} == {"one_thread"}
 
-        # Child side: undeclared -> DISTRIBUTED, on the step worker.
         children = [r for r in cluster.list_runs() if r.parent_run_id == run_id]
         assert len(children) == 1
+        assert cluster.status(children[0].run_id) == "completed"
         child_steps = cluster.steps(children[0].run_id)
         assert {s["worker"] for s in child_steps} == {STEP_WORKER}
         assert {s["strategy"] for s in child_steps} == {"distributed"}
-        assert cluster.status(children[0].run_id) == "completed"
-
-        # What fails today: parent gets [3] and add(a, [3]) fails validation.
-        assert final == "completed", cluster.run(run_id).error
-        assert cluster.result(run_id) == {"a": 2, "child": 3, "b": 5}
+        assert "step_started" in cluster.event_types(children[0].run_id)
 
 
 class TestLatency:

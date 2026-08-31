@@ -30,6 +30,11 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from loguru import logger
 
+from pyworkflow.core.strategy import (
+    DEFAULT_WORKFLOW_RUN_STRATEGY,
+    WorkflowRunStrategy,
+)
+
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
@@ -368,6 +373,20 @@ class WorkflowContext(ABC):
         return None  # Default: local/inline execution
 
     @property
+    def workflow_run_strategy(self) -> WorkflowRunStrategy:
+        """
+        Get the execution strategy for this run.
+
+        ``DISTRIBUTED`` dispatches each step to a step worker on a distributed
+        runtime; ``ONE_THREAD`` runs every step inline. Read by the ``@step``
+        decorator to decide whether to dispatch.
+
+        Returns:
+            The run's strategy, defaulting to ``DISTRIBUTED``
+        """
+        return DEFAULT_WORKFLOW_RUN_STRATEGY  # Default: dispatch per step
+
+    @property
     def storage_config(self) -> dict[str, Any] | None:
         """Get storage configuration for distributed workers."""
         return None
@@ -418,6 +437,10 @@ class WorkflowContext(ABC):
 
     async def validate_event_limits(self) -> None:
         """Validate event count against configured limits."""
+        pass  # Default: no validation
+
+    def count_inline_step(self) -> None:
+        """Count one inline step against the runaway guard."""
         pass  # Default: no validation
 
     # =========================================================================

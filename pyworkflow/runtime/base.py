@@ -12,7 +12,10 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
+from pyworkflow.core.strategy import DEFAULT_WORKFLOW_RUN_STRATEGY
+
 if TYPE_CHECKING:
+    from pyworkflow.core.strategy import WorkflowRunStrategy
     from pyworkflow.storage.base import StorageBackend
 
 
@@ -38,6 +41,7 @@ class Runtime(ABC):
         max_duration: str | None = None,
         metadata: dict | None = None,
         tracing: dict | None = None,
+        workflow_run_strategy: "WorkflowRunStrategy" = DEFAULT_WORKFLOW_RUN_STRATEGY,
     ) -> str:
         """
         Start a new workflow execution.

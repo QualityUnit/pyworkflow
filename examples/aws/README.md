@@ -50,10 +50,12 @@ from pyworkflow.context import AWSContext
 runtime = AWSRuntime(region="us-east-1")
 configure(default_runtime=runtime)
 
+
 @step()
 async def process_data(data: dict) -> dict:
     # This will execute on AWS Lambda with automatic checkpointing
     return transform_data(data)
+
 
 @workflow(durable=True)
 async def serverless_workflow(input_data: dict) -> dict:
@@ -65,9 +67,11 @@ async def serverless_workflow(input_data: dict) -> dict:
     final = await process_data(result)
     return final
 
+
 # Deploy to AWS Lambda
 # lambda_function.py:
 from pyworkflow.aws import aws_workflow_handler
+
 
 @aws_workflow_handler
 async def handler(event, context):
@@ -95,11 +99,7 @@ async def expensive_computation(data):
 ### Parallel Execution
 Built-in parallel step support:
 ```python
-results = await parallel(
-    process_data(data1),
-    process_data(data2),
-    process_data(data3)
-)
+results = await parallel(process_data(data1), process_data(data2), process_data(data3))
 ```
 
 ## Stay Updated

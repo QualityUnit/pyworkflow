@@ -90,6 +90,10 @@ from pyworkflow.core.scheduled import (
     scheduled_workflow,
 )
 from pyworkflow.core.step import step
+from pyworkflow.core.strategy import (
+    DEFAULT_WORKFLOW_RUN_STRATEGY,
+    WorkflowRunStrategy,
+)
 from pyworkflow.core.workflow import workflow
 
 # Discovery
@@ -196,6 +200,8 @@ __all__ = [
     # Core decorators
     "workflow",
     "step",
+    "WorkflowRunStrategy",
+    "DEFAULT_WORKFLOW_RUN_STRATEGY",
     "scheduled_workflow",
     # Schedule management
     "create_schedule",

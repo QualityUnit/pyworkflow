@@ -20,6 +20,10 @@ from loguru import logger
 from pyworkflow.context import LocalContext, reset_context, set_context
 from pyworkflow.core.exceptions import CancellationError, ContinueAsNewSignal, SuspensionSignal
 from pyworkflow.core.registry import register_workflow
+from pyworkflow.core.strategy import (
+    DEFAULT_WORKFLOW_RUN_STRATEGY,
+    WorkflowRunStrategy,
+)
 from pyworkflow.engine.events import (
     create_workflow_cancelled_event,
     create_workflow_completed_event,
@@ -37,6 +41,7 @@ def workflow(
     max_recovery_attempts: int | None = None,
     context_class: type | None = None,
     tracing: dict[str, Any] | None = None,
+    workflow_run_strategy: WorkflowRunStrategy | None = None,
 ) -> Callable:
     """
     Decorator to mark async functions as workflows.
@@ -59,6 +64,11 @@ def workflow(
         tracing: Optional tracing provider config dict. When provided, enables
             observability tracing (e.g. Langfuse) for the workflow and its steps.
             Example: {"provider": "langfuse", "public_key": "...", "secret_key": "...", "host": "..."}
+        workflow_run_strategy: Default execution strategy for runs of this
+            workflow. ``DISTRIBUTED`` (the default) dispatches each step to a
+            step worker on a distributed runtime; ``ONE_THREAD`` runs every step
+            inline in the workflow task. ``start(workflow_run_strategy=...)``
+            overrides this per run.
 
     Returns:
         Decorated workflow function
@@ -134,6 +144,7 @@ def workflow(
             tags=validated_tags,
             context_class=context_class,
             tracing=tracing,
+            workflow_run_strategy=workflow_run_strategy,
         )
 
         # Store metadata on wrapper
@@ -150,6 +161,9 @@ def workflow(
         )
         wrapper.__workflow_context_class__ = context_class  # type: ignore[attr-defined]
         wrapper.__workflow_tracing__ = tracing  # type: ignore[attr-defined]
+        wrapper.__workflow_run_strategy__ = (  # type: ignore[attr-defined]
+            workflow_run_strategy  # None = use the DISTRIBUTED default
+        )
 
         return wrapper
 
@@ -170,6 +184,7 @@ async def execute_workflow_with_context(
     storage_config: dict | None = None,
     parent_run_id: str | None = None,
     tracing: dict | None = None,
+    workflow_run_strategy: WorkflowRunStrategy = DEFAULT_WORKFLOW_RUN_STRATEGY,
 ) -> Any:
     """
     Execute workflow function with proper context setup.
@@ -193,6 +208,9 @@ async def execute_workflow_with_context(
         cancellation_requested: Whether cancellation was requested before execution
         runtime: Runtime environment slug (e.g., "celery") for distributed step dispatch
         storage_config: Storage configuration dict for distributed step workers
+        workflow_run_strategy: The run's execution strategy, already resolved
+            by the entry point via ``resolve_workflow_run_strategy`` (start()
+            argument > @workflow declaration > default). Never None here.
 
     Returns:
         Workflow result
@@ -218,6 +236,9 @@ async def execute_workflow_with_context(
     ctx._runtime = runtime
     ctx._storage_config = storage_config
     ctx._parent_run_id = parent_run_id
+
+    # Already resolved at the entry point (see resolve_workflow_run_strategy).
+    ctx._workflow_run_strategy = workflow_run_strategy
 
     # Tracing config resolution order:
     # 1. pyworkflow.start(tracing={...}) — runtime creds (e.g. from FlowHunt)

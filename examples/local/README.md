@@ -126,23 +126,24 @@ from pyworkflow import configure, start, step, workflow
 from pyworkflow.storage import InMemoryStorageBackend
 
 # Configure with storage backend
-configure(
-    storage=InMemoryStorageBackend(),
-    default_durable=True
-)
+configure(storage=InMemoryStorageBackend(), default_durable=True)
+
 
 @step()
 async def process_data(value: int) -> int:
     return value * 2
+
 
 @workflow(durable=True)
 async def my_workflow(value: int) -> int:
     result = await process_data(value)
     return result
 
+
 async def main():
     run_id = await start(my_workflow, 42)
     print(f"Workflow completed: {run_id}")
+
 
 asyncio.run(main())
 ```
@@ -156,18 +157,22 @@ from pyworkflow import configure, start, step, workflow
 # Configure for transient mode (no storage)
 configure(default_durable=False)
 
+
 @step()
 async def process_data(value: int) -> int:
     return value * 2
+
 
 @workflow(durable=False)
 async def my_workflow(value: int) -> int:
     result = await process_data(value)
     return result
 
+
 async def main():
     run_id = await start(my_workflow, 42)
     print(f"Workflow completed: {run_id}")
+
 
 asyncio.run(main())
 ```

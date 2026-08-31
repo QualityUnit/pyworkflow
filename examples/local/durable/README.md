@@ -38,7 +38,7 @@ Workflows can pause execution and resume later:
 async def long_running_workflow():
     await step1()
     await sleep("1h")  # Suspends here, releases resources
-    await step2()      # Resumes after 1 hour
+    await step2()  # Resumes after 1 hour
 ```
 
 **How it works:**
@@ -63,7 +63,7 @@ The examples in this directory use **manual resumption** (`await resume(run_id)`
 ```python
 run_id = await start(my_workflow)
 await asyncio.sleep(delay)  # Manual wait
-await resume(run_id)        # Manual resume
+await resume(run_id)  # Manual resume
 ```
 
 **Why this is NOT recommended for production:**
@@ -91,7 +91,7 @@ await resume(run_id)        # Manual resume
 configure(
     default_runtime="celery",
     celery_broker="redis://localhost:6379/0",
-    storage=RedisStorageBackend()
+    storage=RedisStorageBackend(),
 )
 ```
 
@@ -185,6 +185,7 @@ assert run_id_1 == run_id_2  # True!
 async def process_order(order_id: str) -> dict:
     return {"order_id": order_id, "status": "processed"}
 
+
 @workflow(durable=True)
 async def order_workflow(order_id: str, amount: float) -> dict:
     order = await process_order(order_id)
@@ -244,7 +245,7 @@ async def call_flaky_api(order: dict) -> dict:
 async def long_running_workflow():
     await step1()
     await sleep("1h")  # Suspends here
-    await step2()      # Resumes after manual resume() call
+    await step2()  # Resumes after manual resume() call
 ```
 
 **Run:** `python 04_long_running.py 2>/dev/null`
@@ -317,6 +318,7 @@ async def order_workflow(order_id: str):
             await refund_payment(order_id)
         raise
 
+
 # Cancel a workflow
 await cancel_workflow(run_id, reason="Customer cancelled")
 ```
@@ -342,10 +344,7 @@ from pyworkflow import configure, reset_config
 from pyworkflow.storage import InMemoryStorageBackend
 
 reset_config()
-configure(
-    storage=InMemoryStorageBackend(),
-    default_durable=True
-)
+configure(storage=InMemoryStorageBackend(), default_durable=True)
 ```
 
 ### Workflow Definition

@@ -96,16 +96,19 @@ See [DISTRIBUTED.md](DISTRIBUTED.md) for complete deployment guide.
 ```python
 from pyworkflow import workflow, step, start, sleep
 
+
 @step()
 async def send_welcome_email(user_id: str):
     # This runs on any available Celery worker
     print(f"Sending welcome email to user {user_id}")
     return f"Email sent to {user_id}"
 
+
 @step()
 async def send_tips_email(user_id: str):
     print(f"Sending tips email to user {user_id}")
     return f"Tips sent to {user_id}"
+
 
 @workflow()
 async def onboarding_workflow(user_id: str):
@@ -119,6 +122,7 @@ async def onboarding_workflow(user_id: str):
     await send_tips_email(user_id)
 
     return "Onboarding complete"
+
 
 # Start workflow - executes across Celery workers
 run_id = start(onboarding_workflow, user_id="user_123")
@@ -145,6 +149,7 @@ Workflows are the top-level orchestration functions. They coordinate steps, hand
 ```python
 from pyworkflow import workflow, start
 
+
 @workflow(name="process_order", max_duration="1h")
 async def process_order(order_id: str):
     """
@@ -163,6 +168,7 @@ async def process_order(order_id: str):
 
     return {"order_id": order_id, "status": "completed"}
 
+
 # Start the workflow
 run_id = start(process_order, order_id="ORD-123")
 ```
@@ -173,6 +179,7 @@ Steps are the building blocks of workflows. Each step is an isolated, retryable 
 
 ```python
 from pyworkflow import step, RetryableError, FatalError
+
 
 @step(max_retries=5, retry_delay="exponential")
 async def call_external_api(url: str):
@@ -205,10 +212,12 @@ By default, steps in a Celery runtime are dispatched to worker processes via the
 ```python
 from pyworkflow import step
 
+
 @step(force_local=True)
 async def quick_transform(data: dict):
     """Runs inline even when runtime is Celery."""
     return {k: v.upper() for k, v in data.items()}
+
 
 @step()
 async def heavy_computation(data: dict):
@@ -234,6 +243,7 @@ Workflows can sleep for any duration. During sleep, the workflow suspends and co
 
 ```python
 from pyworkflow import workflow, sleep
+
 
 @workflow()
 async def scheduled_reminder(user_id: str):
@@ -331,35 +341,33 @@ Use Python's native `asyncio.gather()` for parallel step execution:
 import asyncio
 from pyworkflow import workflow, step
 
+
 @step()
 async def fetch_user(user_id: str):
     # Fetch user data
     return {"id": user_id, "name": "Alice"}
+
 
 @step()
 async def fetch_orders(user_id: str):
     # Fetch user orders
     return [{"id": "ORD-1"}, {"id": "ORD-2"}]
 
+
 @step()
 async def fetch_recommendations(user_id: str):
     # Fetch recommendations
     return ["Product A", "Product B"]
 
+
 @workflow()
 async def dashboard_data(user_id: str):
     # Fetch all data in parallel
     user, orders, recommendations = await asyncio.gather(
-        fetch_user(user_id),
-        fetch_orders(user_id),
-        fetch_recommendations(user_id)
+        fetch_user(user_id), fetch_orders(user_id), fetch_recommendations(user_id)
     )
 
-    return {
-        "user": user,
-        "orders": orders,
-        "recommendations": recommendations
-    }
+    return {"user": user, "orders": orders, "recommendations": recommendations}
 ```
 
 ### Error Handling
@@ -368,6 +376,7 @@ PyWorkflow distinguishes between retriable and fatal errors:
 
 ```python
 from pyworkflow import FatalError, RetryableError, step
+
 
 @step(max_retries=3, retry_delay="exponential")
 async def process_payment(amount: float):
@@ -398,14 +407,15 @@ Workflows automatically recover from worker crashes:
 ```python
 from pyworkflow import workflow, step, sleep
 
+
 @workflow(
-    recover_on_worker_loss=True,    # Enable recovery (default for durable)
-    max_recovery_attempts=5,         # Max recovery attempts
+    recover_on_worker_loss=True,  # Enable recovery (default for durable)
+    max_recovery_attempts=5,  # Max recovery attempts
 )
 async def resilient_workflow(data_id: str):
-    data = await fetch_data(data_id)    # Completed steps are skipped on recovery
-    await sleep("10m")                   # Sleep state is preserved
-    return await process_data(data)      # Continues from here after crash
+    data = await fetch_data(data_id)  # Completed steps are skipped on recovery
+    await sleep("10m")  # Sleep state is preserved
+    return await process_data(data)  # Continues from here after crash
 ```
 
 **What happens on worker crash:**
@@ -440,18 +450,10 @@ Prevent duplicate workflow executions with idempotency keys:
 from pyworkflow import start
 
 # Same idempotency key = same workflow
-run_id_1 = start(
-    process_order,
-    order_id="ORD-123",
-    idempotency_key="order-ORD-123"
-)
+run_id_1 = start(process_order, order_id="ORD-123", idempotency_key="order-ORD-123")
 
 # This will return the same run_id, not start a new workflow
-run_id_2 = start(
-    process_order,
-    order_id="ORD-123",
-    idempotency_key="order-ORD-123"
-)
+run_id_2 = start(process_order, order_id="ORD-123", idempotency_key="order-ORD-123")
 
 assert run_id_1 == run_id_2  # True!
 ```
@@ -468,7 +470,7 @@ configure_logging(
     level="INFO",
     log_file="workflow.log",
     json_logs=True,  # JSON format for production
-    show_context=True  # Include run_id, step_id, etc.
+    show_context=True,  # Include run_id, step_id, etc.
 )
 
 # Logs automatically include:
@@ -489,14 +491,17 @@ import pytest
 from pyworkflow import workflow, step, start, configure, reset_config
 from pyworkflow.storage.memory import InMemoryStorageBackend
 
+
 @step()
 async def my_step(x: int):
     return x * 2
+
 
 @workflow()
 async def my_workflow(x: int):
     result = await my_step(x)
     return result + 1
+
 
 @pytest.fixture(autouse=True)
 def setup_storage():
@@ -505,6 +510,7 @@ def setup_storage():
     configure(storage=storage, default_durable=True)
     yield storage
     reset_config()
+
 
 @pytest.mark.asyncio
 async def test_my_workflow(setup_storage):

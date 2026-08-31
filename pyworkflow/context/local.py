@@ -20,6 +20,10 @@ from pydantic import BaseModel
 
 from pyworkflow.context.base import StepFunction, WorkflowContext
 from pyworkflow.core.exceptions import SuspensionSignal
+from pyworkflow.core.strategy import (
+    DEFAULT_WORKFLOW_RUN_STRATEGY,
+    WorkflowRunStrategy,
+)
 from pyworkflow.utils.duration import parse_duration
 
 
@@ -88,6 +92,7 @@ class LocalContext(WorkflowContext):
         self._retry_states: dict[str, dict[str, Any]] = {}
         self._is_replaying = False
         self._last_warning_count: int = 0  # Track last event count for warning interval
+        self._inline_step_count: int = 0  # Steps run inline (ONE_THREAD runaway guard)
 
         # Cancellation state
         self._cancellation_requested: bool = False
@@ -104,6 +109,7 @@ class LocalContext(WorkflowContext):
 
         # Runtime environment (e.g., "celery", "temporal", None for local)
         self._runtime: str | None = None
+        self._workflow_run_strategy: WorkflowRunStrategy = DEFAULT_WORKFLOW_RUN_STRATEGY
         self._storage_config: dict[str, Any] | None = None
         self._is_step_worker: bool = False
         self._parent_run_id: str | None = None
@@ -120,6 +126,13 @@ class LocalContext(WorkflowContext):
             self._is_replaying = True
             self._replay_events(event_log)
             self._is_replaying = False
+
+            # Carry the steps this run already ran into the inline runaway
+            # guard. Without it the guard would count only the current pass, so
+            # a run that suspends repeatedly could execute without bound — the
+            # journal-based validate_event_limits it replaces counts the whole
+            # run, and the guard has to mean the same thing.
+            self._inline_step_count = len(self._step_results)
 
     def _replay_events(self, events: list[Any]) -> None:
         """Replay events to restore state."""
@@ -282,6 +295,20 @@ class LocalContext(WorkflowContext):
             Runtime slug string or None for local execution
         """
         return self._runtime
+
+    @property
+    def workflow_run_strategy(self) -> WorkflowRunStrategy:
+        """
+        Get the execution strategy for this run.
+
+        ``DISTRIBUTED`` dispatches each step to a step worker on a distributed
+        runtime; ``ONE_THREAD`` runs every step inline. Read by the ``@step``
+        decorator to decide whether to dispatch.
+
+        Returns:
+            The run's strategy, defaulting to ``DISTRIBUTED``
+        """
+        return self._workflow_run_strategy
 
     @property
     def storage_config(self) -> dict[str, Any] | None:
@@ -611,6 +638,27 @@ class LocalContext(WorkflowContext):
                     hard_limit=config.event_hard_limit,
                 )
                 self._last_warning_count = event_count
+
+    def count_inline_step(self) -> None:
+        """
+        Count one inline step and enforce the runaway guard.
+
+        ``validate_event_limits`` cannot serve a ONE_THREAD run: it counts the
+        journal, and that strategy deliberately records no ``STEP_STARTED``.
+        Counting executed steps in memory keeps the guard against a runaway
+        workflow without the storage read the strategy exists to avoid.
+
+        Raises:
+            EventLimitExceededError: If the inline step count reaches the hard limit
+        """
+        from pyworkflow.config import get_config
+        from pyworkflow.core.exceptions import EventLimitExceededError
+
+        self._inline_step_count += 1
+        hard_limit = get_config().event_hard_limit
+
+        if self._inline_step_count >= hard_limit:
+            raise EventLimitExceededError(self._run_id, self._inline_step_count, hard_limit)
 
     # =========================================================================
     # Step execution

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from pyworkflow.context.step_context import StepContext
+    from pyworkflow.core.strategy import WorkflowRunStrategy
 
 from celery.exceptions import MaxRetriesExceededError, Retry
 from loguru import logger
@@ -34,6 +35,7 @@ from pyworkflow.core.exceptions import (
     SuspensionSignal,
 )
 from pyworkflow.core.registry import WorkflowMetadata, get_workflow
+from pyworkflow.core.strategy import resolve_workflow_run_strategy
 from pyworkflow.core.validation import validate_step_parameters
 from pyworkflow.core.workflow import execute_workflow_with_context
 from pyworkflow.engine.events import (
@@ -50,7 +52,7 @@ from pyworkflow.engine.executor import (
     step_suspended_already_recorded,
 )
 from pyworkflow.serialization.decoder import deserialize_args, deserialize_kwargs
-from pyworkflow.serialization.encoder import serialize_args, serialize_kwargs
+from pyworkflow.serialization.encoder import serialize, serialize_args, serialize_kwargs
 from pyworkflow.storage.base import StorageBackend
 from pyworkflow.storage.schemas import RunStatus, WorkflowRun
 
@@ -914,6 +916,7 @@ def start_workflow_task(
     storage_config: dict[str, Any] | None = None,
     idempotency_key: str | None = None,
     tracing: dict[str, Any] | None = None,
+    workflow_run_strategy: str | None = None,
 ) -> str:
     """
     Start a workflow execution.
@@ -966,6 +969,7 @@ def start_workflow_task(
             idempotency_key=idempotency_key,
             run_id=run_id,
             tracing=tracing,
+            workflow_run_strategy=workflow_run_strategy,
         )
     )
 
@@ -1084,6 +1088,12 @@ async def _execute_child_workflow_on_worker(
     )
     from pyworkflow.serialization.encoder import serialize
 
+    # A child is its own entry point: its declaration (not the parent's
+    # strategy) decides how it runs. Resolved once, here.
+    child_strategy = resolve_workflow_run_strategy(
+        None, getattr(workflow_func, "__workflow_run_strategy__", None)
+    )
+
     try:
         # Update status to RUNNING
         await storage.update_run_status(child_run_id, RunStatus.RUNNING)
@@ -1101,6 +1111,7 @@ async def _execute_child_workflow_on_worker(
             runtime="celery",
             storage_config=storage_config,
             parent_run_id=parent_run_id,
+            workflow_run_strategy=child_strategy,
         )
 
         # Update status to COMPLETED
@@ -1201,6 +1212,7 @@ async def _execute_child_workflow_on_worker(
             storage=storage,
             storage_config=storage_config,
             new_args=e.workflow_args,
+            workflow_run_strategy=child_strategy,
             new_kwargs=e.workflow_kwargs,
             parent_run_id=parent_run_id,
         )
@@ -1496,6 +1508,10 @@ async def _recover_workflow_on_worker(
 
     # Extract tracing config persisted at start
     _recover_tracing = kwargs.pop("_tracing_config", None)
+    # Resolved here, at the recovery entry point (persisted value > declaration).
+    recover_strategy = resolve_workflow_run_strategy(
+        kwargs.pop("_workflow_run_strategy", None), workflow_meta.workflow_run_strategy
+    )
 
     # Execute workflow with event replay
     try:
@@ -1511,6 +1527,7 @@ async def _recover_workflow_on_worker(
             storage_config=storage_config,
             parent_run_id=run.parent_run_id,
             tracing=workflow_meta.tracing or _recover_tracing,
+            workflow_run_strategy=recover_strategy,
         )
 
         # Update run status to completed
@@ -1607,6 +1624,7 @@ async def _recover_workflow_on_worker(
             storage_config=storage_config,
             new_args=e.workflow_args,
             new_kwargs=e.workflow_kwargs,
+            workflow_run_strategy=recover_strategy,
         )
 
         # Cancel all running children (TERMINATE policy)
@@ -1650,6 +1668,7 @@ async def _start_workflow_on_worker(
     idempotency_key: str | None = None,
     run_id: str | None = None,
     tracing: dict[str, Any] | None = None,
+    workflow_run_strategy: str | None = None,
 ) -> str:
     """
     Internal function to start workflow on Celery worker.
@@ -1746,6 +1765,13 @@ async def _start_workflow_on_worker(
                     status=existing_run.status.value,
                 )
                 return existing_run.run_id
+
+    # Resolve the strategy here, at the worker entry point: the Celery boundary
+    # may hand us None (a producer that predates the parameter, a scheduled
+    # start) or the serialised str. Past this line it is always a member.
+    strategy = resolve_workflow_run_strategy(
+        workflow_run_strategy, workflow_meta.workflow_run_strategy
+    )
 
     # Use provided run_id or generate a new one
     if run_id is None:
@@ -1850,7 +1876,11 @@ async def _start_workflow_on_worker(
         created_at=datetime.now(UTC),
         started_at=datetime.now(UTC),
         input_args=serialize_args(*args),
-        input_kwargs=serialize_kwargs(**kwargs, _tracing_config=tracing),
+        input_kwargs=serialize_kwargs(
+            **kwargs,
+            _tracing_config=tracing,
+            _workflow_run_strategy=strategy.value,
+        ),
         idempotency_key=idempotency_key,
         max_duration=workflow_meta.max_duration,
         context={},  # Step context data
@@ -1884,6 +1914,7 @@ async def _start_workflow_on_worker(
             runtime="celery",
             storage_config=storage_config,
             tracing=tracing or workflow_meta.tracing,
+            workflow_run_strategy=strategy,
         )
 
         # Update run status to completed
@@ -2027,6 +2058,7 @@ async def _start_workflow_on_worker(
             storage_config=storage_config,
             new_args=e.workflow_args,
             new_kwargs=e.workflow_kwargs,
+            workflow_run_strategy=strategy,
         )
 
         # Cancel all running children (TERMINATE policy)
@@ -2471,6 +2503,10 @@ async def _resume_workflow_on_worker(
 
     # Extract tracing config persisted at start
     _resume_tracing = kwargs.pop("_tracing_config", None)
+    # Resolved here, at the resume entry point (persisted value > declaration).
+    resume_strategy = resolve_workflow_run_strategy(
+        kwargs.pop("_workflow_run_strategy", None), workflow_meta.workflow_run_strategy
+    )
 
     # Execute workflow with event replay
     try:
@@ -2487,6 +2523,7 @@ async def _resume_workflow_on_worker(
             storage_config=storage_config,
             parent_run_id=run.parent_run_id,
             tracing=workflow_meta.tracing or _resume_tracing,
+            workflow_run_strategy=resume_strategy,
         )
 
         # Update run status to completed
@@ -2506,7 +2543,11 @@ async def _resume_workflow_on_worker(
             storage=storage,
             storage_config=storage_config,
             status=RunStatus.COMPLETED,
-            result=serialize_args(result),
+            # serialize(), not serialize_args(): the parent replays this with
+            # deserialize() (see LocalContext._replay_events CHILD_WORKFLOW_COMPLETED)
+            # and the fresh-start child path (_execute_child_workflow_on_worker)
+            # serialises the same way. serialize_args() handed the parent [result].
+            result=serialize(result),
         )
 
         logger.info(
@@ -2663,6 +2704,7 @@ async def _resume_workflow_on_worker(
             storage_config=storage_config,
             new_args=e.workflow_args,
             new_kwargs=e.workflow_kwargs,
+            workflow_run_strategy=resume_strategy,
             parent_run_id=run.parent_run_id,
         )
 
@@ -2858,6 +2900,7 @@ async def _handle_continue_as_new_celery(
     storage_config: dict[str, Any] | None,
     new_args: tuple,
     new_kwargs: dict,
+    workflow_run_strategy: "WorkflowRunStrategy",
     parent_run_id: str | None = None,
 ) -> str:
     """
@@ -2879,6 +2922,9 @@ async def _handle_continue_as_new_celery(
         new_args: Arguments for the new workflow
         new_kwargs: Keyword arguments for the new workflow
         parent_run_id: Parent run ID if this is a child workflow
+        workflow_run_strategy: The current run's (already resolved) execution
+            strategy, carried over so a ONE_THREAD run does not silently revert
+            to DISTRIBUTED on continuation.
 
     Returns:
         New run ID
@@ -2934,6 +2980,7 @@ async def _handle_continue_as_new_celery(
         kwargs_json=kwargs_json,
         run_id=new_run_id,
         storage_config=storage_config,
+        workflow_run_strategy=workflow_run_strategy.value,
     )
 
     return new_run_id

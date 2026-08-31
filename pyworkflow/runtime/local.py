@@ -20,7 +20,11 @@ from pyworkflow.core.exceptions import (
     SuspensionSignal,
     WorkflowNotFoundError,
 )
-from pyworkflow.core.strategy import WorkflowRunStrategy
+from pyworkflow.core.strategy import (
+    DEFAULT_WORKFLOW_RUN_STRATEGY,
+    WorkflowRunStrategy,
+    resolve_workflow_run_strategy,
+)
 from pyworkflow.runtime.base import Runtime
 
 if TYPE_CHECKING:
@@ -136,7 +140,7 @@ class LocalRuntime(Runtime):
         max_duration: str | None = None,
         metadata: dict | None = None,
         tracing: dict | None = None,
-        workflow_run_strategy: WorkflowRunStrategy | None = None,
+        workflow_run_strategy: WorkflowRunStrategy = DEFAULT_WORKFLOW_RUN_STRATEGY,
     ) -> str:
         """Start a workflow execution in the current process."""
         from pyworkflow.core.workflow import execute_workflow_with_context
@@ -393,7 +397,10 @@ class LocalRuntime(Runtime):
         # so a run started there and resumed here must not pass them on to the
         # workflow function. Mirrors _resume_workflow_on_worker.
         _resume_tracing = kwargs.pop("_tracing_config", None)
-        _resume_strategy = kwargs.pop("_workflow_run_strategy", None)
+        # Resolved here, at the resume entry point (persisted value > declaration).
+        resume_strategy = resolve_workflow_run_strategy(
+            kwargs.pop("_workflow_run_strategy", None), workflow_meta.workflow_run_strategy
+        )
 
         # Update status to running
         await storage.update_run_status(run_id=run_id, status=RunStatus.RUNNING)
@@ -411,7 +418,7 @@ class LocalRuntime(Runtime):
                 durable=True,  # Resume is always durable
                 parent_run_id=run.parent_run_id,
                 tracing=workflow_meta.tracing or _resume_tracing,
-                workflow_run_strategy=(_resume_strategy or workflow_meta.workflow_run_strategy),
+                workflow_run_strategy=resume_strategy,
             )
 
             # Update run status to completed
@@ -696,6 +703,9 @@ class LocalRuntime(Runtime):
                 durable=True,
                 event_log=None,  # Fresh execution
                 parent_run_id=parent_run_id,
+                workflow_run_strategy=resolve_workflow_run_strategy(
+                    None, getattr(workflow_func, "__workflow_run_strategy__", None)
+                ),
             )
 
             # Update status to COMPLETED

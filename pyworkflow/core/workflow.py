@@ -23,7 +23,6 @@ from pyworkflow.core.registry import register_workflow
 from pyworkflow.core.strategy import (
     DEFAULT_WORKFLOW_RUN_STRATEGY,
     WorkflowRunStrategy,
-    coerce_workflow_run_strategy,
 )
 from pyworkflow.engine.events import (
     create_workflow_cancelled_event,
@@ -185,7 +184,7 @@ async def execute_workflow_with_context(
     storage_config: dict | None = None,
     parent_run_id: str | None = None,
     tracing: dict | None = None,
-    workflow_run_strategy: WorkflowRunStrategy | str | None = None,
+    workflow_run_strategy: WorkflowRunStrategy = DEFAULT_WORKFLOW_RUN_STRATEGY,
 ) -> Any:
     """
     Execute workflow function with proper context setup.
@@ -209,9 +208,9 @@ async def execute_workflow_with_context(
         cancellation_requested: Whether cancellation was requested before execution
         runtime: Runtime environment slug (e.g., "celery") for distributed step dispatch
         storage_config: Storage configuration dict for distributed step workers
-        workflow_run_strategy: Execution strategy for this run, overriding the
-            @workflow declaration. Accepts the serialised str value so it can be
-            handed straight back from a persisted run.
+        workflow_run_strategy: The run's execution strategy, already resolved
+            by the entry point via ``resolve_workflow_run_strategy`` (start()
+            argument > @workflow declaration > default). Never None here.
 
     Returns:
         Workflow result
@@ -238,15 +237,8 @@ async def execute_workflow_with_context(
     ctx._storage_config = storage_config
     ctx._parent_run_id = parent_run_id
 
-    # Execution strategy resolution order, mirroring tracing above:
-    # 1. start(workflow_run_strategy=...) — per run, e.g. chosen from flow size
-    # 2. @workflow(workflow_run_strategy=...) — declared default
-    # 3. DISTRIBUTED — the historical behaviour
-    ctx._workflow_run_strategy = (
-        coerce_workflow_run_strategy(workflow_run_strategy)
-        or coerce_workflow_run_strategy(getattr(workflow_func, "__workflow_run_strategy__", None))
-        or DEFAULT_WORKFLOW_RUN_STRATEGY
-    )
+    # Already resolved at the entry point (see resolve_workflow_run_strategy).
+    ctx._workflow_run_strategy = workflow_run_strategy
 
     # Tracing config resolution order:
     # 1. pyworkflow.start(tracing={...}) — runtime creds (e.g. from FlowHunt)

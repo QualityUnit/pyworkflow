@@ -35,6 +35,27 @@ DEFAULT_WORKFLOW_RUN_STRATEGY = WorkflowRunStrategy.DISTRIBUTED
 """Strategy applied when neither ``start()`` nor ``@workflow`` names one."""
 
 
+def resolve_workflow_run_strategy(
+    requested: "WorkflowRunStrategy | str | None",
+    declared: WorkflowRunStrategy | None = None,
+) -> WorkflowRunStrategy:
+    """Pick the strategy for a run. Call this once, at the entry point.
+
+    Resolution order:
+
+    1. ``requested`` — ``start(workflow_run_strategy=...)``, or the value
+       persisted with the run (``str``) when it is resumed / recovered
+    2. ``declared`` — ``@workflow(workflow_run_strategy=...)``
+    3. :data:`DEFAULT_WORKFLOW_RUN_STRATEGY`
+
+    Always returns a member: past the entry point nothing should have to
+    handle ``None`` or a raw ``str`` again. An unrecognised ``requested``
+    value (a newer producer naming a strategy this worker does not know)
+    falls through to the declared/default strategy rather than failing.
+    """
+    return coerce_workflow_run_strategy(requested) or declared or DEFAULT_WORKFLOW_RUN_STRATEGY
+
+
 def coerce_workflow_run_strategy(
     value: "WorkflowRunStrategy | str | None",
 ) -> WorkflowRunStrategy | None:

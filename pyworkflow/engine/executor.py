@@ -23,7 +23,7 @@ from pyworkflow.core.exceptions import (
     WorkflowNotFoundError,
 )
 from pyworkflow.core.registry import get_workflow_by_func
-from pyworkflow.core.strategy import WorkflowRunStrategy
+from pyworkflow.core.strategy import WorkflowRunStrategy, resolve_workflow_run_strategy
 from pyworkflow.core.workflow import execute_workflow_with_context
 from pyworkflow.engine.events import (
     EventType,
@@ -209,9 +209,7 @@ async def start(
     effective_durable = (
         durable
         if durable is not None
-        else workflow_durable
-        if workflow_durable is not None
-        else config.default_durable
+        else workflow_durable if workflow_durable is not None else config.default_durable
     )
 
     # Validate runtime + durable combination
@@ -251,6 +249,12 @@ async def start(
         durable=effective_durable,
     )
 
+    # Resolve the strategy here, at the entry point: from this call on every
+    # layer receives a concrete WorkflowRunStrategy, never None.
+    resolved_strategy = resolve_workflow_run_strategy(
+        workflow_run_strategy, workflow_meta.workflow_run_strategy
+    )
+
     # Execute via runtime
     return await runtime_instance.start_workflow(
         workflow_func=workflow_meta.func,
@@ -264,7 +268,7 @@ async def start(
         max_duration=workflow_meta.max_duration,
         metadata={},  # Run-level metadata
         tracing=tracing,
-        workflow_run_strategy=workflow_run_strategy,
+        workflow_run_strategy=resolved_strategy,
     )
 
 
@@ -364,6 +368,9 @@ async def _execute_workflow_local(
             kwargs=kwargs,
             event_log=event_log,
             durable=True,  # Celery tasks are always durable
+            workflow_run_strategy=resolve_workflow_run_strategy(
+                None, getattr(workflow_func, "__workflow_run_strategy__", None)
+            ),
         )
 
         # Update run status to completed

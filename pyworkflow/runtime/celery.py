@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from loguru import logger
 
-from pyworkflow.core.strategy import WorkflowRunStrategy
+from pyworkflow.core.strategy import DEFAULT_WORKFLOW_RUN_STRATEGY, WorkflowRunStrategy
 from pyworkflow.runtime.base import Runtime
 
 if TYPE_CHECKING:
@@ -118,7 +118,7 @@ class CeleryRuntime(Runtime):
         max_duration: str | None = None,
         metadata: dict | None = None,
         tracing: dict | None = None,
-        workflow_run_strategy: WorkflowRunStrategy | None = None,
+        workflow_run_strategy: WorkflowRunStrategy = DEFAULT_WORKFLOW_RUN_STRATEGY,
     ) -> str:
         """
         Start a workflow execution by dispatching to Celery workers.
@@ -156,7 +156,7 @@ class CeleryRuntime(Runtime):
             storage_config=storage_config,
             idempotency_key=idempotency_key,
             tracing=tracing,
-            workflow_run_strategy=(workflow_run_strategy.value if workflow_run_strategy else None),
+            workflow_run_strategy=workflow_run_strategy.value,
         )
 
         logger.info(

@@ -25,6 +25,7 @@ from pyworkflow.core.strategy import (
     DEFAULT_WORKFLOW_RUN_STRATEGY,
     WorkflowRunStrategy,
     coerce_workflow_run_strategy,
+    resolve_workflow_run_strategy,
 )
 from pyworkflow.core.workflow import execute_workflow_with_context, workflow
 from pyworkflow.engine.events import EventType
@@ -118,6 +119,46 @@ class TestStrategyCoercion:
         assert coerce_workflow_run_strategy("teleportation") is None
 
 
+class TestStrategyResolution:
+    """resolve_workflow_run_strategy is the single place None is handled:
+    requested > declared > default, and it never returns None."""
+
+    def test_requested_member_wins_over_declaration(self):
+        assert (
+            resolve_workflow_run_strategy(
+                WorkflowRunStrategy.ONE_THREAD, WorkflowRunStrategy.DISTRIBUTED
+            )
+            is WorkflowRunStrategy.ONE_THREAD
+        )
+
+    def test_requested_str_wins_over_declaration(self):
+        assert (
+            resolve_workflow_run_strategy("one_thread", WorkflowRunStrategy.DISTRIBUTED)
+            is WorkflowRunStrategy.ONE_THREAD
+        )
+
+    def test_none_falls_back_to_declaration(self):
+        assert (
+            resolve_workflow_run_strategy(None, WorkflowRunStrategy.ONE_THREAD)
+            is WorkflowRunStrategy.ONE_THREAD
+        )
+
+    def test_nothing_falls_back_to_default(self):
+        assert resolve_workflow_run_strategy(None, None) is DEFAULT_WORKFLOW_RUN_STRATEGY
+        assert resolve_workflow_run_strategy(None) is DEFAULT_WORKFLOW_RUN_STRATEGY
+
+    def test_unknown_str_falls_back_to_declaration_then_default(self):
+        assert (
+            resolve_workflow_run_strategy("teleportation", WorkflowRunStrategy.ONE_THREAD)
+            is WorkflowRunStrategy.ONE_THREAD
+        )
+        assert resolve_workflow_run_strategy("teleportation") is DEFAULT_WORKFLOW_RUN_STRATEGY
+
+    @pytest.mark.parametrize("requested", [None, "one_thread", WorkflowRunStrategy.DISTRIBUTED])
+    def test_never_returns_none(self, requested):
+        assert isinstance(resolve_workflow_run_strategy(requested), WorkflowRunStrategy)
+
+
 class TestOneThreadSkipsDispatch:
     """ONE_THREAD runs steps inline even where DISTRIBUTED would dispatch."""
 
@@ -201,6 +242,9 @@ class TestStrategyResolutionOrder:
             storage=FileStorageBackend(base_path=str(tmp_path)),
             args=(),
             kwargs={},
+            workflow_run_strategy=resolve_workflow_run_strategy(
+                None, _registry.get_workflow("ees_resolve_declared").workflow_run_strategy
+            ),
         )
         assert seen == [WorkflowRunStrategy.ONE_THREAD]
 
@@ -231,7 +275,8 @@ class TestStrategyResolutionOrder:
 
     @pytest.mark.asyncio
     async def test_serialised_value_from_a_persisted_run_resolves(self, tmp_path):
-        """A resume hands back the str value read out of input_kwargs."""
+        """A resume resolves the str read out of input_kwargs at its entry point
+        and hands the running context a member."""
         seen: list[WorkflowRunStrategy] = []
 
         @workflow(name="ees_resolve_from_str")
@@ -241,6 +286,8 @@ class TestStrategyResolutionOrder:
             seen.append(get_context().workflow_run_strategy)
             return "ok"
 
+        meta = _registry.get_workflow("ees_resolve_from_str")
+        assert meta is not None
         await execute_workflow_with_context(
             workflow_func=plain_wf,
             run_id="run_resolve_from_str",
@@ -248,7 +295,9 @@ class TestStrategyResolutionOrder:
             storage=FileStorageBackend(base_path=str(tmp_path)),
             args=(),
             kwargs={},
-            workflow_run_strategy=WorkflowRunStrategy.ONE_THREAD.value,
+            workflow_run_strategy=resolve_workflow_run_strategy(
+                WorkflowRunStrategy.ONE_THREAD.value, meta.workflow_run_strategy
+            ),
         )
         assert seen == [WorkflowRunStrategy.ONE_THREAD]
 
@@ -348,6 +397,9 @@ class TestOneThreadEventPersistence:
                 args=(),
                 kwargs={},
                 runtime="celery",
+                workflow_run_strategy=resolve_workflow_run_strategy(
+                    None, _registry.get_workflow("ees_hook_wf").workflow_run_strategy
+                ),
             )
         assert runs == ["ran"]
 
@@ -364,6 +416,9 @@ class TestOneThreadEventPersistence:
             kwargs={},
             event_log=await storage.get_events("run_hook_once"),
             runtime="celery",
+            workflow_run_strategy=resolve_workflow_run_strategy(
+                None, _registry.get_workflow("ees_hook_wf").workflow_run_strategy
+            ),
         )
 
         assert result == "value"
@@ -495,7 +550,9 @@ class TestContinueAsNewCarriesStrategy:
         assert call_kwargs["workflow_run_strategy"] == WorkflowRunStrategy.ONE_THREAD.value
 
     @pytest.mark.asyncio
-    async def test_no_strategy_stays_none(self):
+    async def test_undeclared_run_continues_with_the_default(self):
+        """The caller resolves at its entry point; the continuation is sent
+        the concrete default, never None."""
         from pyworkflow.celery import tasks as celery_tasks
 
         @workflow(name="ees_can_undeclared")
@@ -520,10 +577,13 @@ class TestContinueAsNewCarriesStrategy:
                 storage_config=None,
                 new_args=(),
                 new_kwargs={},
+                workflow_run_strategy=resolve_workflow_run_strategy(
+                    None, meta.workflow_run_strategy
+                ),
             )
 
         _, call_kwargs = mock_task.delay.call_args
-        assert call_kwargs["workflow_run_strategy"] is None
+        assert call_kwargs["workflow_run_strategy"] == DEFAULT_WORKFLOW_RUN_STRATEGY.value
 
 
 class TestLocalRuntimeResumeIgnoresServiceKwargs:

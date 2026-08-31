@@ -337,9 +337,9 @@ class TestOneThreadSurvivesSuspension:
 
     def test_hook_resumes_with_strategy_intact(self, cluster: Cluster):
         run_id = cluster.start("s_hook", "none")
-        assert (
-            cluster.wait_status(run_id, "suspended", timeout=60) == "suspended"
-        ), cluster.worker_logs()
+        assert cluster.wait_status(run_id, "suspended", timeout=60) == "suspended", (
+            cluster.worker_logs()
+        )
         token = cluster.token(run_id)
         assert token.startswith(f"{run_id}:")
         # Only the pre-hook step has run so far.
@@ -357,9 +357,9 @@ class TestOneThreadSurvivesSuspension:
 
     def test_step_hook_inside_inline_step(self, cluster: Cluster):
         run_id = cluster.start("s_step_hook", "none")
-        assert (
-            cluster.wait_status(run_id, "suspended", timeout=60) == "suspended"
-        ), cluster.worker_logs()
+        assert cluster.wait_status(run_id, "suspended", timeout=60) == "suspended", (
+            cluster.worker_logs()
+        )
         token = cluster.token(run_id)
         cluster.deliver_hook(token, {"score": 5})
         assert cluster.wait_terminal(run_id) == "completed", cluster.worker_logs()
@@ -418,9 +418,9 @@ class TestOneThreadAcrossRuns:
         parent_steps = cluster.steps(run_id)
         assert [s["event"] for s in parent_steps] == ["step:add", "step:add"]
         assert {s["worker"] for s in parent_steps} == {WF_WORKER}
-        assert {s["strategy"] for s in parent_steps} == {
-            "one_thread"
-        }, "parent lost ONE_THREAD when resumed after the child completed"
+        assert {s["strategy"] for s in parent_steps} == {"one_thread"}, (
+            "parent lost ONE_THREAD when resumed after the child completed"
+        )
         assert "step_started" not in cluster.event_types(run_id)
         assert "child_workflow_completed" in cluster.event_types(run_id)
 

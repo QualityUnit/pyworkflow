@@ -12,7 +12,7 @@
     "format": "prettier --write ."
   },
   "overrides": {
-    "follow-redirects": "^1.16.0"
+    "follow-redirects": "^1.16.1"
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.2",

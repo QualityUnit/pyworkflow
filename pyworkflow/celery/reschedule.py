@@ -136,7 +136,13 @@ def install_sigterm_handoff(worker: Any) -> bool:
     try:
         from celery.apps import worker as celery_worker
 
-        if celery_worker.REMAP_SIGTERM:
+        if not all(hasattr(celery_worker, n) for n in ("on_cold_shutdown", "during_soft_shutdown")):
+            logger.warning(
+                "reschedule: SIGTERM handoff needs Celery >= 5.5 (soft shutdown), "
+                "keeping Celery's warm shutdown"
+            )
+            return False
+        if getattr(celery_worker, "REMAP_SIGTERM", None):
             return False  # Celery already maps SIGTERM to the cold shutdown.
         if not _is_prefork(worker):
             logger.info("reschedule: SIGTERM handoff requires the prefork pool, skipping")

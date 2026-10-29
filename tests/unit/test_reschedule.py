@@ -96,6 +96,14 @@ class TestInstallSigtermHandoff:
             assert reschedule.install_sigterm_handoff(_prefork_worker()) is False
         install.assert_not_called()
 
+    @pytest.mark.parametrize("missing", ["on_cold_shutdown", "during_soft_shutdown"])
+    def test_celery_without_soft_shutdown_keeps_warm_shutdown(self, monkeypatch, missing):
+        # pyproject allows Celery >= 5.3; soft shutdown only exists from 5.5.
+        monkeypatch.delattr(celery_worker, missing)
+        with patch.object(celery_worker, "install_worker_term_hard_handler") as install:
+            assert reschedule.install_sigterm_handoff(_prefork_worker()) is False
+        install.assert_not_called()
+
     def test_off_main_thread_is_skipped(self):
         results = []
         with patch.object(celery_worker, "install_worker_term_hard_handler") as install:

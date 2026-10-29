@@ -125,7 +125,7 @@ class _Cluster:
         )
         return proc
 
-    def start_parent(self) -> str:
+    def start_parent(self, workflow_name: str = "e2e_parent") -> str:
         started = subprocess.run(
             [
                 sys.executable,
@@ -135,7 +135,7 @@ class _Cluster:
                 APP_MODULE,
                 "workflows",
                 "run",
-                "e2e_parent",
+                workflow_name,
                 "--no-wait",
             ],
             env=self.env,
@@ -243,3 +243,28 @@ def test_sigterm_lets_a_step_finish_within_the_soft_timeout(cluster_factory):
     assert c.run_status(run_id) == "completed", c.logs()
     assert [r["worker"] for r in c.executions("agent_start")] == ["A"], c.logs()
     assert [r["worker"] for r in c.executions("agent_done")] == ["A"], c.logs()
+
+
+def test_sigterm_hands_off_a_step_running_inside_a_resume_task(cluster_factory):
+    """
+    The killed task is a resume_workflow task: its redelivery must recover the
+    RUNNING child instead of skipping it as a duplicate resume.
+    """
+    c = cluster_factory(inline=True, soft_shutdown_timeout=2)
+    worker_a = c.spawn("A")
+    run_id = c.start_parent("e2e_resume_parent")
+    assert _wait_for(lambda: (c.markers / "started").exists(), 60), c.logs()
+    c.spawn("B")
+
+    worker_a.send_signal(signal.SIGTERM)
+    assert worker_a.wait(timeout=60) is not None
+    (c.markers / "release").write_text("go")
+
+    assert _wait_for(lambda: c.run_status(run_id) in ("completed", "failed"), 90), c.logs()
+    assert c.run_status(run_id) == "completed", c.logs()
+    assert "Resume redelivered for a RUNNING workflow, recovering" in c.logs()
+    assert [r["worker"] for r in c.executions("prep")] == ["A"], c.logs()
+    starts = c.executions("agent_start")
+    assert [r["worker"] for r in starts] == ["A", "B"], c.logs()
+    assert [r["worker"] for r in c.executions("agent_done")] == ["B"], c.logs()
+    assert c.last_tick("A") < starts[1]["t"], "the copy started while A was still running"

@@ -2236,10 +2236,12 @@ async def _start_workflow_on_worker(
 @celery_app.task(
     name="pyworkflow.resume_workflow",
     base=SingletonWorkflowTask,
+    bind=True,
     queue="pyworkflow.schedules",
     unique_on=["run_id", "dedup_scope"],
 )
 def resume_workflow_task(
+    self: SingletonWorkflowTask,
     run_id: str,
     storage_config: dict[str, Any] | None = None,
     triggered_by_hook_id: str | None = None,
@@ -2269,7 +2271,7 @@ def resume_workflow_task(
     logger.info(
         f"RESUME_WORKFLOW_TASK ENTRY: {run_id}",
         run_id=run_id,
-        celery_task_id=resume_workflow_task.request.id,
+        celery_task_id=self.request.id,
         triggered_by_hook_id=triggered_by_hook_id,
     )
 
@@ -2277,8 +2279,10 @@ def resume_workflow_task(
     storage = _get_storage_backend(storage_config)
 
     # Set by the broker when an earlier delivery of this message was never
-    # acked, e.g. its worker was terminated by the SIGTERM handoff.
-    delivery_info = resume_workflow_task.request.delivery_info or {}
+    # acked, e.g. its worker was terminated by the SIGTERM handoff. Read it from
+    # the bound task: a worker built by create_celery_app() runs its own task
+    # instance, so the module-level resume_workflow_task.request is empty there.
+    delivery_info = self.request.delivery_info or {}
 
     # Resume workflow directly on worker
     result = run_async(

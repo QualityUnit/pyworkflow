@@ -3,7 +3,8 @@ Standalone workflow module for the SIGTERM-handoff end-to-end test (#733).
 
 Imported by the worker subprocesses (via PYWORKFLOW_MODULE) and by the CLI that
 starts the workflow. A parent starts a child; the child runs a quick step, then
-a long "agent" step that blocks until a `release` marker file appears, so the
+a long "agent" step (``e2e_resume_child`` sleeps in between, so the agent step
+runs inside a resume task) that blocks until a `release` marker file appears, so the
 test can SIGTERM the worker while the agent step is running.
 
 Everything the steps do is recorded under $E2E_MARKER_DIR, tagged with the
@@ -25,7 +26,7 @@ from pathlib import Path
 
 from celery.signals import worker_ready
 
-from pyworkflow import step, workflow
+from pyworkflow import sleep, step, workflow
 from pyworkflow.primitives.child_workflow import start_child_workflow
 
 _INLINE = os.environ.get("E2E_INLINE", "1") == "1"
@@ -81,3 +82,16 @@ async def e2e_child() -> str:
 @workflow(durable=True)
 async def e2e_parent() -> str:
     return await start_child_workflow(e2e_child, wait_for_completion=True)
+
+
+@workflow(durable=True)
+async def e2e_resume_child() -> str:
+    prepped = await prep_step()
+    # The agent step then runs inside a resume_workflow task, not the start task.
+    await sleep("1s")
+    return await agent_step(prepped)
+
+
+@workflow(durable=True)
+async def e2e_resume_parent() -> str:
+    return await start_child_workflow(e2e_resume_child, wait_for_completion=True)

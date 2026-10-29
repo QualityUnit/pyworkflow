@@ -41,11 +41,22 @@ The timeout must be lower than the orchestrator's grace period (Kubernetes
 ``terminationGracePeriodSeconds``, 30s by default). A SIGKILL during the soft
 phase leaves the message unacked until the ``visibility_timeout`` again.
 
+Broker connection loss
+----------------------
+Losing the broker connection (a Redis restart, a Sentinel failover) runs the
+same kombu restore: Celery collects the old connection and the unacked messages
+go back to the queue. By default Celery leaves the running tasks alive, so the
+original and the redelivered copy run at the same time. We enable Celery's
+``worker_cancel_long_running_tasks_on_connection_loss`` (the default from
+Celery 6) so the original is terminated as its message is restored.
+
 Gates:
 - ``PYWORKFLOW_RESCHEDULE_ON_SIGTERM`` (default on; set to ``0``/``false``/``no``
   to fall back to Celery's plain warm shutdown).
 - ``PYWORKFLOW_SOFT_SHUTDOWN_TIMEOUT`` (seconds, default 20). ``0`` hands tasks
   off immediately without waiting for them.
+- ``PYWORKFLOW_CANCEL_TASKS_ON_CONNECTION_LOSS`` (default on; ``0`` keeps
+  running tasks alive across a broker reconnect, at the risk of a duplicate).
 """
 
 import os
@@ -57,12 +68,12 @@ from loguru import logger
 DEFAULT_SOFT_SHUTDOWN_TIMEOUT = 20.0
 
 
+def _flag(name: str) -> bool:
+    return os.getenv(name, "1").strip().lower() not in ("0", "false", "no")
+
+
 def _enabled() -> bool:
-    return os.getenv("PYWORKFLOW_RESCHEDULE_ON_SIGTERM", "1").strip().lower() not in (
-        "0",
-        "false",
-        "no",
-    )
+    return _flag("PYWORKFLOW_RESCHEDULE_ON_SIGTERM")
 
 
 def soft_shutdown_timeout() -> float:
@@ -85,6 +96,15 @@ def soft_shutdown_config() -> dict[str, Any]:
     if not _enabled():
         return {}
     return {"worker_soft_shutdown_timeout": soft_shutdown_timeout()}
+
+
+def connection_loss_config() -> dict[str, Any]:
+    """Celery settings that stop a task before a broker reconnect redelivers it."""
+    return {
+        "worker_cancel_long_running_tasks_on_connection_loss": _flag(
+            "PYWORKFLOW_CANCEL_TASKS_ON_CONNECTION_LOSS"
+        )
+    }
 
 
 def _is_worker_stopping() -> bool:

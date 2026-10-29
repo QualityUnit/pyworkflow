@@ -62,6 +62,24 @@ class TestSoftShutdownConfig:
         assert app.conf.worker_soft_shutdown_timeout == 12.0
 
 
+class TestConnectionLossConfig:
+    """A broker reconnect redelivers unacked messages; the originals must stop."""
+
+    def test_cancels_running_tasks_on_connection_loss_by_default(self, monkeypatch):
+        from pyworkflow.celery.app import create_celery_app
+
+        monkeypatch.delenv("PYWORKFLOW_CANCEL_TASKS_ON_CONNECTION_LOSS", raising=False)
+        app = create_celery_app(broker_url="memory://")
+        assert app.conf.worker_cancel_long_running_tasks_on_connection_loss is True
+
+    @pytest.mark.parametrize("value", ["0", "false", "no"])
+    def test_opt_out(self, monkeypatch, value):
+        monkeypatch.setenv("PYWORKFLOW_CANCEL_TASKS_ON_CONNECTION_LOSS", value)
+        assert reschedule.connection_loss_config() == {
+            "worker_cancel_long_running_tasks_on_connection_loss": False
+        }
+
+
 class TestInstallSigtermHandoff:
     def test_installs_cold_shutdown_handler_on_sigterm(self):
         worker = _prefork_worker()

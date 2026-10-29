@@ -291,6 +291,8 @@ def create_celery_app(
             "0"/"false"/"no" to disable. See pyworkflow/celery/reschedule.py.
         PYWORKFLOW_SOFT_SHUTDOWN_TIMEOUT: Seconds a SIGTERMed worker lets running tasks finish before handing
             them off (default 20). Must be lower than the orchestrator's grace period.
+        PYWORKFLOW_CANCEL_TASKS_ON_CONNECTION_LOSS: Terminate running tasks when the broker connection is lost,
+            since their messages are redelivered (default on; "0" keeps them running at the risk of duplicates).
 
     Examples:
         # Default configuration (uses env vars if set, otherwise localhost Redis)
@@ -462,10 +464,12 @@ def create_celery_app(
         )
 
     # SIGTERM handoff: let running tasks finish for a bounded time, then terminate
-    # them and let the broker redeliver each one once. See reschedule.py.
-    from pyworkflow.celery.reschedule import soft_shutdown_config
+    # them and let the broker redeliver each one once. On a broker reconnect,
+    # terminate running tasks whose messages are being redelivered. See reschedule.py.
+    from pyworkflow.celery.reschedule import connection_loss_config, soft_shutdown_config
 
     config_dict.update(soft_shutdown_config())
+    config_dict.update(connection_loss_config())
 
     # Configure Celery
     app.conf.update(config_dict)

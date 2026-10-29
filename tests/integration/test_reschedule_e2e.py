@@ -1,24 +1,30 @@
 """
-End-to-end test for SIGTERM task rescheduling with REAL worker subprocesses.
+End-to-end test for the SIGTERM handoff with REAL worker subprocesses (#733).
 
-Proves the production scenario: a prefork Celery worker is running a step when it
-receives SIGTERM (spot reclaim); its ``worker_shutting_down`` handler re-enqueues
-the in-flight step; a fresh worker picks it up and the workflow COMPLETES within
-seconds -- instead of hanging until the broker visibility_timeout (~1h).
+Production scenario: a prefork worker is running a child workflow's long step
+when it receives SIGTERM (deploy, scale-down, spot reclaim). The step must run
+on exactly one worker at a time:
 
-Sequence (deterministic):
-1. Worker A runs the step, which blocks until a `release` marker appears.
-2. SIGTERM A; wait until A *logs* the re-enqueue (its worker_shutting_down handler).
-3. SIGKILL A's whole process group, so A cannot finish the step itself -- only a
-   fresh worker can (mirrors k8s SIGKILL after the grace period).
-4. Worker B starts, the step is released, and the workflow completes.
+- If the step finishes within the soft shutdown timeout, it runs once, on the
+  worker that received SIGTERM, and is not handed off.
+- Otherwise the worker terminates it at the end of the timeout and the broker
+  redelivers it once. A live worker continues the child from its event log:
+  completed steps are not re-run, and the interrupted step starts again only
+  after the original is dead.
 
-Requires Redis at localhost:6379. Uses a dedicated broker db (13) and a temp
-FileStorageBackend shared across processes. Marked slow (boots real workers).
+Before the fix, the original kept running through warm shutdown while two
+copies started on other workers (a re-published one and the original message
+restored by kombu), so the step ran three times concurrently.
+
+The worker that receives SIGTERM is never SIGKILLed here: it must exit on its
+own. Requires Redis (PYWORKFLOW_E2E_REDIS, default redis://localhost:6379); uses
+broker db 13 and a temp FileStorageBackend shared across processes. Marked slow
+(boots real workers).
 """
 
 import asyncio
 import contextlib
+import json
 import os
 import re
 import signal
@@ -29,10 +35,12 @@ from pathlib import Path
 
 import pytest
 
+REDIS = os.environ.get("PYWORKFLOW_E2E_REDIS", "redis://localhost:6379").rstrip("/")
+
 try:
     import redis as _redis
 
-    _redis.from_url("redis://localhost:6379/0").ping()
+    _redis.from_url(f"{REDIS}/0").ping()
     REDIS_AVAILABLE = True
 except Exception:
     REDIS_AVAILABLE = False
@@ -43,74 +51,13 @@ pytestmark = [
     pytest.mark.skipif(not REDIS_AVAILABLE, reason="Redis not available"),
 ]
 
-BROKER = "redis://localhost:6379/13"
+BROKER = f"{REDIS}/13"
 APP_MODULE = "_reschedule_e2e_app"
-WORKFLOW = "e2e_blocking_workflow"
-RESCHEDULE_LOG = "re-enqueued in-flight task on shutdown"
 _APP_DIR = os.path.dirname(os.path.abspath(__file__))
 _RUN_ID_RE = re.compile(r"run_[0-9a-f]{16}")
 
 
-def _base_env(storage_path: str, marker_dir: str) -> dict:
-    env = os.environ.copy()
-    env.update(
-        {
-            "PYWORKFLOW_CELERY_BROKER": BROKER,
-            "PYWORKFLOW_CELERY_RESULT_BACKEND": BROKER,
-            "PYWORKFLOW_RUNTIME": "celery",
-            "PYWORKFLOW_STORAGE_TYPE": "file",
-            "PYWORKFLOW_STORAGE_PATH": storage_path,
-            "PYWORKFLOW_MODULE": APP_MODULE,
-            "E2E_MARKER_DIR": marker_dir,
-            "PYWORKFLOW_RESCHEDULE_ON_SIGTERM": "1",
-            "PYTHONPATH": _APP_DIR + os.pathsep + env.get("PYTHONPATH", ""),
-        }
-    )
-    return env
-
-
-def _spawn_worker(env: dict, hostname: str, logfile) -> subprocess.Popen:
-    # start_new_session so we can signal the whole group (main + prefork children).
-    return subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "pyworkflow.cli",
-            "--module",
-            APP_MODULE,
-            "worker",
-            "run",
-            "--loglevel",
-            "warning",
-        ],
-        env={**env, "HOSTNAME": hostname},
-        stdout=logfile,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
-
-
-def _killpg(proc: subprocess.Popen | None) -> None:
-    if proc and proc.poll() is None:
-        with contextlib.suppress(Exception):
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        with contextlib.suppress(Exception):
-            proc.wait(timeout=10)
-
-
-def _run_status(storage_path: str, run_id: str) -> str:
-    from pyworkflow.storage.file import FileStorageBackend
-
-    storage = FileStorageBackend(base_path=storage_path)
-
-    async def _get():
-        run = await storage.get_run(run_id)
-        return run.status.value if run else "NONE"
-
-    return asyncio.run(_get())
-
-
-def _wait_for(predicate, timeout: float, interval: float = 0.5) -> bool:
+def _wait_for(predicate, timeout: float, interval: float = 0.25) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
         if predicate():
@@ -119,82 +66,180 @@ def _wait_for(predicate, timeout: float, interval: float = 0.5) -> bool:
     return False
 
 
-def test_sigterm_reschedule_resumes_workflow(tmp_path):
-    storage_path = str(tmp_path / "storage")
-    marker_dir = tmp_path / "markers"
-    marker_dir.mkdir()
-    env = _base_env(storage_path, str(marker_dir))
-    log_a = tmp_path / "worker_a.log"
-    log_b = tmp_path / "worker_b.log"
+class _Cluster:
+    """Worker subprocesses sharing one broker, one file storage and one marker dir."""
 
-    raw = _redis.from_url(BROKER, decode_responses=True)
+    def __init__(self, tmp_path: Path, *, inline: bool, soft_shutdown_timeout: float):
+        self.tmp_path = tmp_path
+        self.storage_path = str(tmp_path / "storage")
+        self.markers = tmp_path / "markers"
+        self.markers.mkdir()
+        self.env = os.environ.copy()
+        self.env.update(
+            {
+                "PYWORKFLOW_CELERY_BROKER": BROKER,
+                "PYWORKFLOW_CELERY_RESULT_BACKEND": BROKER,
+                "PYWORKFLOW_RUNTIME": "celery",
+                "PYWORKFLOW_STORAGE_TYPE": "file",
+                "PYWORKFLOW_STORAGE_PATH": self.storage_path,
+                "PYWORKFLOW_MODULE": APP_MODULE,
+                "PYWORKFLOW_RESCHEDULE_ON_SIGTERM": "1",
+                "PYWORKFLOW_SOFT_SHUTDOWN_TIMEOUT": str(soft_shutdown_timeout),
+                "E2E_MARKER_DIR": str(self.markers),
+                "E2E_INLINE": "1" if inline else "0",
+                "PYTHONPATH": _APP_DIR + os.pathsep + os.environ.get("PYTHONPATH", ""),
+            }
+        )
+        self.env.pop("REMAP_SIGTERM", None)  # exercise pyworkflow's own handler
+        self.workers: dict[str, subprocess.Popen] = {}
+        self._logs: list = []
+
+    def spawn(self, name: str) -> subprocess.Popen:
+        log = open(self.tmp_path / f"worker_{name}.log", "w")  # noqa: SIM115
+        self._logs.append(log)
+        # start_new_session so cleanup can signal the whole group (main + children).
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "pyworkflow.cli",
+                "--module",
+                APP_MODULE,
+                "worker",
+                "run",
+                "--loglevel",
+                "info",
+                "--hostname",
+                f"{name}@e2e",
+                "--",
+                "--concurrency=2",
+            ],
+            env={**self.env, "HOSTNAME": name},
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        self.workers[name] = proc
+        assert _wait_for(lambda: (self.markers / f"ready-{name}").exists(), 60), (
+            f"worker {name} never became ready\n{self.logs()}"
+        )
+        return proc
+
+    def start_parent(self) -> str:
+        started = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pyworkflow.cli",
+                "--module",
+                APP_MODULE,
+                "workflows",
+                "run",
+                "e2e_parent",
+                "--no-wait",
+            ],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        m = _RUN_ID_RE.search(started.stdout + started.stderr)
+        assert m, f"no run id:\n{started.stdout}\n{started.stderr}"
+        return m.group(0)
+
+    def run_status(self, run_id: str) -> str:
+        from pyworkflow.storage.file import FileStorageBackend
+
+        async def _get():
+            run = await FileStorageBackend(base_path=self.storage_path).get_run(run_id)
+            return run.status.value if run else "NONE"
+
+        return asyncio.run(_get())
+
+    def executions(self, event: str) -> list[dict]:
+        path = self.markers / "executions.jsonl"
+        if not path.exists():
+            return []
+        records = [json.loads(line) for line in path.read_text().splitlines()]
+        return [r for r in records if r["event"] == event]
+
+    def last_tick(self, worker: str) -> float:
+        ticks = [float(p.read_text()) for p in self.markers.glob(f"tick-{worker}-*")]
+        assert ticks, f"no heartbeat from worker {worker}"
+        return max(ticks)
+
+    def logs(self) -> str:
+        return "\n".join(
+            f"--- {p.name} ---\n{p.read_text()}" for p in sorted(self.tmp_path.glob("worker_*.log"))
+        )
+
+    def close(self) -> None:
+        for proc in self.workers.values():
+            if proc.poll() is None:
+                with contextlib.suppress(Exception):
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                with contextlib.suppress(Exception):
+                    proc.wait(timeout=10)
+        for log in self._logs:
+            log.close()
+
+
+@pytest.fixture
+def cluster_factory(tmp_path):
+    raw = _redis.from_url(BROKER)
+    raw.flushdb()
+    clusters: list[_Cluster] = []
+
+    def make(**kwargs) -> _Cluster:
+        cluster = _Cluster(tmp_path, **kwargs)
+        clusters.append(cluster)
+        return cluster
+
+    yield make
+    for cluster in clusters:
+        cluster.close()
     raw.flushdb()
 
-    worker_a = worker_b = None
-    with open(log_a, "w") as fa, open(log_b, "w") as fb:
-        try:
-            # 1. Worker A (prefork) -- will run the step, then we SIGTERM it.
-            worker_a = _spawn_worker(env, "e2e-pod-a", fa)
 
-            # 2. Start the workflow (separate CLI process, same broker/storage).
-            started = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "pyworkflow.cli",
-                    "--module",
-                    APP_MODULE,
-                    "workflows",
-                    "run",
-                    WORKFLOW,
-                    "--no-wait",
-                ],
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            m = _RUN_ID_RE.search(started.stdout + started.stderr)
-            if m:
-                run_id = m.group(0)
-            else:
-                runs = list((Path(storage_path) / "runs").glob("run_*.json"))
-                assert runs, f"no run created:\n{started.stdout}\n{started.stderr}"
-                run_id = runs[0].stem
+def test_sigterm_hands_off_an_inflight_child_exactly_once(cluster_factory):
+    """The step outlasts the soft timeout: terminated, then redelivered once."""
+    c = cluster_factory(inline=True, soft_shutdown_timeout=2)
+    worker_a = c.spawn("A")
+    run_id = c.start_parent()
+    assert _wait_for(lambda: (c.markers / "started").exists(), 60), c.logs()
+    c.spawn("B")
 
-            # 3. Wait until the step is actually executing on worker A.
-            assert _wait_for(lambda: (marker_dir / "started").exists(), timeout=60), (
-                f"step never started on worker A\n{log_a.read_text()}"
-            )
+    worker_a.send_signal(signal.SIGTERM)
+    # A shuts itself down: wait 2s, terminate the step, exit. No SIGKILL.
+    assert worker_a.wait(timeout=60) is not None
+    (c.markers / "release").write_text("go")
 
-            # 4. SIGTERM A and wait until it LOGS the re-enqueue (handler fired).
-            worker_a.send_signal(signal.SIGTERM)
-            assert _wait_for(lambda: RESCHEDULE_LOG in log_a.read_text(), timeout=30), (
-                f"worker A never logged a reschedule on SIGTERM\n{log_a.read_text()}"
-            )
+    assert _wait_for(lambda: c.run_status(run_id) in ("completed", "failed"), 90), c.logs()
+    assert c.run_status(run_id) == "completed", c.logs()
 
-            # 5. Hard-kill A's whole group so it cannot complete the step itself;
-            #    only the re-enqueued copy on a fresh worker can finish it.
-            _killpg(worker_a)
+    # The completed prep step is replayed, not re-run.
+    assert [r["worker"] for r in c.executions("prep")] == ["A"], c.logs()
+    # The interrupted agent step ran again once, on B, after A's copy was dead.
+    starts = c.executions("agent_start")
+    assert [r["worker"] for r in starts] == ["A", "B"], c.logs()
+    assert [r["worker"] for r in c.executions("agent_done")] == ["B"], c.logs()
+    assert c.last_tick("A") < starts[1]["t"], "the copy started while A was still running"
 
-            # 6. Fresh worker B picks up the re-enqueued step.
-            worker_b = _spawn_worker(env, "e2e-pod-b", fb)
 
-            # 7. Release the (re-run) step so the workflow can finish.
-            (marker_dir / "release").write_text("go")
+def test_sigterm_lets_a_step_finish_within_the_soft_timeout(cluster_factory):
+    """The step finishes inside the soft timeout: it runs once and is not handed off."""
+    c = cluster_factory(inline=False, soft_shutdown_timeout=10)
+    worker_a = c.spawn("A")
+    run_id = c.start_parent()
+    assert _wait_for(lambda: (c.markers / "started").exists(), 60), c.logs()
+    c.spawn("B")
 
-            # 8. Must COMPLETE within seconds (visibility_timeout is 3600s, so a
-            #    completion now proves the reschedule -- not broker redelivery).
-            _wait_for(
-                lambda: _run_status(storage_path, run_id) in ("completed", "failed"),
-                timeout=90,
-            )
-            final = _run_status(storage_path, run_id)
-            assert final == "completed", (
-                f"run {run_id} ended {final!r}, expected completed\n"
-                f"--- A ---\n{log_a.read_text()}\n--- B ---\n{log_b.read_text()}"
-            )
-        finally:
-            _killpg(worker_a)
-            _killpg(worker_b)
-            raw.flushdb()
+    worker_a.send_signal(signal.SIGTERM)
+    time.sleep(1)
+    (c.markers / "release").write_text("go")
+    assert worker_a.wait(timeout=60) is not None
+
+    assert _wait_for(lambda: c.run_status(run_id) in ("completed", "failed"), 90), c.logs()
+    assert c.run_status(run_id) == "completed", c.logs()
+    assert [r["worker"] for r in c.executions("agent_start")] == ["A"], c.logs()
+    assert [r["worker"] for r in c.executions("agent_done")] == ["A"], c.logs()

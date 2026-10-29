@@ -1,41 +1,83 @@
 """
-Standalone workflow module for the SIGTERM-reschedule end-to-end test.
+Standalone workflow module for the SIGTERM-handoff end-to-end test (#733).
 
-Imported by the worker subprocess (via PYWORKFLOW_MODULE) and by the CLI that
-starts the workflow. The single step blocks until a `release` marker file
-appears, so the test can deterministically catch it mid-execution, SIGTERM the
-worker, and prove a fresh worker re-runs it and the workflow completes.
+Imported by the worker subprocesses (via PYWORKFLOW_MODULE) and by the CLI that
+starts the workflow. A parent starts a child; the child runs a quick step, then
+a long "agent" step that blocks until a `release` marker file appears, so the
+test can SIGTERM the worker while the agent step is running.
 
-Marker files live under $E2E_MARKER_DIR:
-- writes `started` as soon as the step runs (so the test knows it's in-flight)
-- waits for `release` before returning
+Everything the steps do is recorded under $E2E_MARKER_DIR, tagged with the
+worker ($HOSTNAME) and pid, so the test can prove what ran where and when:
+- executions.jsonl: one line per step execution start/finish
+- tick-<worker>-<pid>: last heartbeat of a running agent step
+- started: the agent step is running
+- ready-<worker>: the worker is consuming (and its SIGTERM handler is installed)
+
+E2E_INLINE=1 runs the steps inline in the child workflow task (force_local);
+otherwise they are dispatched to step workers.
 """
 
 import asyncio
+import json
 import os
+import time
 from pathlib import Path
 
+from celery.signals import worker_ready
+
 from pyworkflow import step, workflow
+from pyworkflow.primitives.child_workflow import start_child_workflow
+
+_INLINE = os.environ.get("E2E_INLINE", "1") == "1"
 
 
 def _marker_dir() -> Path:
-    return Path(os.environ["E2E_MARKER_DIR"])
-
-
-@step(max_retries=1)
-async def blocking_step() -> str:
-    d = _marker_dir()
+    d = Path(os.environ["E2E_MARKER_DIR"])
     d.mkdir(parents=True, exist_ok=True)
-    # Signal that the step is executing (the test waits for this before SIGTERM).
+    return d
+
+
+def _worker() -> str:
+    return os.environ.get("HOSTNAME", "?")
+
+
+def _record(event: str) -> None:
+    line = json.dumps({"t": time.time(), "event": event, "worker": _worker(), "pid": os.getpid()})
+    with open(_marker_dir() / "executions.jsonl", "a") as f:
+        f.write(line + "\n")
+
+
+@worker_ready.connect
+def _mark_ready(**_):
+    (_marker_dir() / f"ready-{_worker()}").write_text("1")
+
+
+@step(force_local=_INLINE)
+async def prep_step() -> str:
+    _record("prep")
+    return "prepped"
+
+
+@step(force_local=_INLINE, max_retries=0)
+async def agent_step(prepped: str) -> str:
+    d = _marker_dir()
+    _record("agent_start")
     (d / "started").write_text("1")
-    # Block until released, so the step is reliably in-flight when the worker dies.
-    for _ in range(240):  # up to ~120s
+    tick = d / f"tick-{_worker()}-{os.getpid()}"
+    for _ in range(480):  # up to ~120s
+        tick.write_text(str(time.time()))
         if (d / "release").exists():
-            return "released"
-        await asyncio.sleep(0.5)
+            _record("agent_done")
+            return f"{prepped}+agent"
+        await asyncio.sleep(0.25)
     raise TimeoutError("release marker never appeared")
 
 
 @workflow(durable=True)
-async def e2e_blocking_workflow() -> str:
-    return await blocking_step()
+async def e2e_child() -> str:
+    return await agent_step(await prep_step())
+
+
+@workflow(durable=True)
+async def e2e_parent() -> str:
+    return await start_child_workflow(e2e_child, wait_for_completion=True)

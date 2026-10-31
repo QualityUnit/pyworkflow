@@ -392,6 +392,9 @@ Environment variables provide deployment flexibility:
 | `PYWORKFLOW_CELERY_BROKER` | Celery broker URL |
 | `PYWORKFLOW_CELERY_RESULT_BACKEND` | Celery result backend URL |
 | `PYWORKFLOW_DISCOVER` | Modules to import for workflow discovery |
+| `PYWORKFLOW_RESCHEDULE_ON_SIGTERM` | Hand in-flight tasks off to another worker when a worker gets SIGTERM (default on; `0` falls back to Celery's warm shutdown) |
+| `PYWORKFLOW_SOFT_SHUTDOWN_TIMEOUT` | Seconds a SIGTERMed worker lets running tasks finish before terminating them and letting the broker redeliver each once (default `20`). Keep it below your orchestrator's grace period (Kubernetes `terminationGracePeriodSeconds`, 30s by default), or a SIGKILL during the wait leaves tasks unacked until the broker's `visibility_timeout` |
+| `PYWORKFLOW_CANCEL_TASKS_ON_CONNECTION_LOSS` | Terminate running tasks when the worker loses its broker connection (Redis restart, Sentinel failover), because their messages are redelivered to another worker (default on). `0` keeps them running, and the redelivered copy then runs at the same time |
 
 ```bash
 # Example: Production deployment with environment variables

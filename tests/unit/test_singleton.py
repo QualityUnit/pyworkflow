@@ -954,11 +954,10 @@ class TestSingletonConfigSentinel:
 
 class TestReleaseLockKeyReproduction:
     """
-    The SIGTERM reschedule path (pyworkflow/celery/reschedule.py) releases a
-    running task's singleton lock by calling release_lock() with the task's
-    captured args/kwargs, then re-enqueues. This verifies release_lock() unlocks
-    exactly the key generate_lock() produced for a keyword-arg dispatch (how
-    execute_step_task is actually called).
+    Callers that schedule a follow-up task release a running task's singleton
+    lock by calling release_lock() with the task's args/kwargs. This verifies
+    release_lock() unlocks exactly the key generate_lock() produced for a
+    keyword-arg dispatch (how execute_step_task is actually called).
     """
 
     @pytest.fixture

@@ -1094,11 +1094,14 @@ async def _execute_child_workflow_on_worker(
         None, getattr(workflow_func, "__workflow_run_strategy__", None)
     )
 
-    try:
-        # Update status to RUNNING
-        await storage.update_run_status(child_run_id, RunStatus.RUNNING)
+    # This task can be delivered more than once (SIGTERM handoff, broker
+    # redelivery), so claim the run before executing it.
+    event_log = await _claim_child_run(child_run_id, storage, storage_config)
+    if event_log is None:
+        return
 
-        # Execute the child workflow
+    try:
+        # Execute the child workflow ([] = fresh start, otherwise replay)
         result = await execute_workflow_with_context(
             run_id=child_run_id,
             workflow_func=workflow_func,
@@ -1107,7 +1110,7 @@ async def _execute_child_workflow_on_worker(
             kwargs=kwargs,
             storage=storage,
             durable=True,
-            event_log=None,  # Fresh execution
+            event_log=event_log,
             runtime="celery",
             storage_config=storage_config,
             parent_run_id=parent_run_id,
@@ -1251,6 +1254,140 @@ async def _execute_child_workflow_on_worker(
         # If parent is waiting, trigger resumption (will raise error on replay)
         if wait_for_completion:
             await _trigger_parent_resumption_celery(parent_run_id, storage, storage_config)
+
+
+async def _claim_child_run(
+    child_run_id: str,
+    storage: StorageBackend,
+    storage_config: dict[str, Any] | None,
+) -> list[Any] | None:
+    """
+    Decide what a delivery of ``start_child_workflow_task`` should do.
+
+    Returns the event log to execute with (``[]`` for a fresh start, the stored
+    events to replay after an interrupted delivery), or None when there is
+    nothing to execute because another delivery started or finished the child.
+    """
+    run = await storage.get_run(child_run_id)
+    if run is None:
+        logger.error("Child workflow run not found, skipping", child_run_id=child_run_id)
+        return None
+
+    if run.status == RunStatus.PENDING:
+        if await storage.try_claim_run(child_run_id, RunStatus.PENDING, RunStatus.RUNNING):
+            return []
+        logger.info(
+            "Child workflow already claimed by another delivery, skipping",
+            child_run_id=child_run_id,
+        )
+        return None
+
+    if run.status in (RunStatus.RUNNING, RunStatus.INTERRUPTED):
+        # A previous delivery was interrupted (worker lost or handed off on
+        # shutdown). Replay from the event log so completed steps aren't re-run.
+        logger.info(
+            f"Child workflow redelivered with status {run.status.value}, recovering",
+            child_run_id=child_run_id,
+        )
+        if not await _handle_workflow_recovery(run=run, storage=storage):
+            await _notify_parent_of_failed_recovery(child_run_id, storage, storage_config)
+            return None
+        await storage.update_run_status(child_run_id, RunStatus.RUNNING)
+        events = await storage.get_events(child_run_id)
+        events = await _complete_pending_sleeps(child_run_id, events, storage)
+        return _forget_interrupted_inline_steps(events)
+
+    if run.status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
+        # The child already finished. If the delivery that finished it died
+        # before telling the parent, tell it now so the parent doesn't hang.
+        if run.parent_run_id and not await _parent_has_child_outcome(run, storage):
+            await _notify_parent_of_child_completion(
+                run=run,
+                storage=storage,
+                storage_config=storage_config,
+                status=run.status,
+                result=await _child_result_for_parent(run, storage),
+                error=run.error,
+            )
+        logger.info(
+            f"Child workflow already {run.status.value}, skipping duplicate delivery",
+            child_run_id=child_run_id,
+        )
+        return None
+
+    # SUSPENDED: the resume path owns it from here.
+    logger.info(
+        f"Child workflow already {run.status.value}, skipping duplicate delivery",
+        child_run_id=child_run_id,
+    )
+    return None
+
+
+async def _parent_has_child_outcome(run: WorkflowRun, storage: StorageBackend) -> bool:
+    """True if the parent's log already records this child's terminal outcome."""
+    if run.parent_run_id is None:
+        return False
+    for event_type in (
+        EventType.CHILD_WORKFLOW_COMPLETED,
+        EventType.CHILD_WORKFLOW_FAILED,
+        EventType.CHILD_WORKFLOW_CANCELLED,
+    ):
+        if await storage.has_event(run.parent_run_id, event_type.value, child_run_id=run.run_id):
+            return True
+    return False
+
+
+async def _notify_parent_of_failed_recovery(
+    run_id: str,
+    storage: StorageBackend,
+    storage_config: dict[str, Any] | None,
+) -> None:
+    """Tell a child's parent that recovery gave up and the child is now FAILED."""
+    failed_run = await storage.get_run(run_id)
+    if failed_run is not None and failed_run.status == RunStatus.FAILED:
+        await _notify_parent_of_child_completion(
+            run=failed_run,
+            storage=storage,
+            storage_config=storage_config,
+            status=RunStatus.FAILED,
+            error=failed_run.error,
+            error_type="WorkerLostError",
+        )
+
+
+async def _child_result_for_parent(run: WorkflowRun, storage: StorageBackend) -> str | None:
+    """
+    The child's result as the parent replays it (``serialize(result)``).
+
+    Read from the child's WORKFLOW_COMPLETED event: ``run.result`` is encoded
+    differently depending on whether the child finished on the start or the
+    resume path.
+    """
+    if run.status != RunStatus.COMPLETED:
+        return None
+    completed = await storage.get_events(
+        run.run_id, event_types=[EventType.WORKFLOW_COMPLETED.value]
+    )
+    return completed[-1].data.get("result") if completed else None
+
+
+def _forget_interrupted_inline_steps(events: list[Any]) -> list[Any]:
+    """
+    Drop STEP_STARTED for steps that were running inline in a delivery that died.
+
+    Replay treats a STEP_STARTED without a completion as "running on a step
+    worker" and suspends to wait for it. That holds for a dispatched step, which
+    is always followed by a WORKFLOW_SUSPENDED naming it. An inline step has no
+    such event: it was running in the task that was interrupted, so nothing
+    will ever complete it, and recovery must execute it again. Only call this
+    when recovering an interrupted delivery.
+    """
+    suspended_on = {e.data.get("step_id") for e in events if e.type == EventType.WORKFLOW_SUSPENDED}
+    return [
+        e
+        for e in events
+        if e.type != EventType.STEP_STARTED or e.data.get("step_id") in suspended_on
+    ]
 
 
 async def _trigger_parent_resumption_celery(
@@ -1501,6 +1638,9 @@ async def _recover_workflow_on_worker(
 
     # Complete any pending sleeps (mark them as done before resuming)
     events = await _complete_pending_sleeps(run_id, events, storage)
+
+    # The interrupted delivery may have died inside an inline step
+    events = _forget_interrupted_inline_steps(events)
 
     # Deserialize arguments
     args = deserialize_args(run.input_args)
@@ -2096,10 +2236,12 @@ async def _start_workflow_on_worker(
 @celery_app.task(
     name="pyworkflow.resume_workflow",
     base=SingletonWorkflowTask,
+    bind=True,
     queue="pyworkflow.schedules",
     unique_on=["run_id", "dedup_scope"],
 )
 def resume_workflow_task(
+    self: SingletonWorkflowTask,
     run_id: str,
     storage_config: dict[str, Any] | None = None,
     triggered_by_hook_id: str | None = None,
@@ -2129,17 +2271,27 @@ def resume_workflow_task(
     logger.info(
         f"RESUME_WORKFLOW_TASK ENTRY: {run_id}",
         run_id=run_id,
-        celery_task_id=resume_workflow_task.request.id,
+        celery_task_id=self.request.id,
         triggered_by_hook_id=triggered_by_hook_id,
     )
 
     # Get storage backend
     storage = _get_storage_backend(storage_config)
 
+    # Set by the broker when an earlier delivery of this message was never
+    # acked, e.g. its worker was terminated by the SIGTERM handoff. Read it from
+    # the bound task: a worker built by create_celery_app() runs its own task
+    # instance, so the module-level resume_workflow_task.request is empty there.
+    delivery_info = self.request.delivery_info or {}
+
     # Resume workflow directly on worker
     result = run_async(
         _resume_workflow_on_worker(
-            run_id, storage, storage_config, triggered_by_hook_id=triggered_by_hook_id
+            run_id,
+            storage,
+            storage_config,
+            triggered_by_hook_id=triggered_by_hook_id,
+            redelivered=bool(delivery_info.get("redelivered")),
         )
     )
 
@@ -2410,6 +2562,7 @@ async def _resume_workflow_on_worker(
     storage: StorageBackend,
     storage_config: dict[str, Any] | None = None,
     triggered_by_hook_id: str | None = None,
+    redelivered: bool = False,
 ) -> Any | None:
     """
     Internal function to resume workflow on Celery worker.
@@ -2423,6 +2576,9 @@ async def _resume_workflow_on_worker(
         triggered_by_hook_id: Optional hook ID that triggered this resume.
                               If provided, we verify the hook is still relevant
                               before resuming to prevent spurious resumes.
+        redelivered: The broker redelivered this task message after an earlier
+                     delivery died without acking it. A RUNNING run is then
+                     recovered instead of skipped as a duplicate.
     """
     from pyworkflow.core.exceptions import WorkflowNotFoundError
 
@@ -2449,13 +2605,28 @@ async def _resume_workflow_on_worker(
     # condition between step completion and suspension handler). Only one
     # succeeds; duplicates see the claim fail and return.
     claimed = await storage.try_claim_run(run_id, RunStatus.SUSPENDED, RunStatus.RUNNING)
+    recovering = False
     if not claimed:
+        if not (redelivered and run.status == RunStatus.RUNNING):
+            logger.info(
+                "Workflow status is not SUSPENDED (already claimed) - skipping duplicate resume",
+                run_id=run_id,
+                workflow_name=run.workflow_name,
+            )
+            return None
+
+        # The broker redelivered this message, so the delivery that claimed the
+        # run died mid-execution (e.g. terminated by the SIGTERM handoff) and
+        # left it RUNNING. Recover it instead of dropping it.
         logger.info(
-            "Workflow status is not SUSPENDED (already claimed) - skipping duplicate resume",
+            "Resume redelivered for a RUNNING workflow, recovering",
             run_id=run_id,
             workflow_name=run.workflow_name,
         )
-        return None
+        if not await _handle_workflow_recovery(run=run, storage=storage):
+            await _notify_parent_of_failed_recovery(run_id, storage, storage_config)
+            return None
+        recovering = True
 
     # If this resume was triggered by a specific hook, verify the hook is still relevant.
     # A hook is "stale" if the workflow has already moved past it (created a newer hook).
@@ -2496,6 +2667,10 @@ async def _resume_workflow_on_worker(
 
     # Complete any pending sleeps (mark them as done before resuming)
     events = await _complete_pending_sleeps(run_id, events, storage)
+
+    if recovering:
+        # The interrupted delivery may have died inside an inline step
+        events = _forget_interrupted_inline_steps(events)
 
     # Deserialize arguments
     args = deserialize_args(run.input_args)

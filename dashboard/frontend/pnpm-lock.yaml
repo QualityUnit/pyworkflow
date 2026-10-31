@@ -12,8 +12,8 @@ importers:
         specifier: ^6.0.2
         version: 6.0.2
       '@hookform/resolvers':
-        specifier: ^5.9.2
-        version: 5.9.2(@standard-schema/spec@1.1.0)(react-hook-form@7.91.0(@types/react@19.3.0)(react@19.3.1))(zod@4.6.7)
+        specifier: ^6.0.2
+        version: 6.0.2(@standard-schema/spec@1.1.0)(react-hook-form@7.91.0(@types/react@19.3.0)(react@19.3.1))(zod@4.6.7)
       '@radix-ui/react-alert-dialog':
         specifier: ^1.2.1
         version: 1.2.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -91,7 +91,7 @@ importers:
         version: 4.25.12(@babel/runtime@8.0.10)(@codemirror/autocomplete@6.20.4)(@codemirror/language@6.13.1)(@codemirror/lint@6.9.7)(@codemirror/search@6.7.2)(@codemirror/state@6.7.6)(@codemirror/theme-one-dark@6.1.3)(@codemirror/view@6.43.15)(codemirror@6.0.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       axios:
         specifier: ^1.21.0
-        version: 1.21.0
+        version: 1.21.0(debug@4.4.3)
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -373,12 +373,11 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
-  '@hookform/resolvers@5.9.2':
-    resolution: {integrity: sha512-RtjTnZqsC38s4NKp2XO3fD8IA5uyN4tB7McQ5C6uiMPcV+WWO8F+wVa3e+BXUpH2ScgxghAlwFRMVqjT9WChAQ==}
+  '@hookform/resolvers@6.0.2':
+    resolution: {integrity: sha512-e2dqUOlaGuirKVOd/iZWk/Yg5zeaGw7t0hSc3LzxL3o7eZGwZkTyEbBL8H52m0wRKEsNLWoMGOiXGHbPHTXlEQ==}
     peerDependencies:
       '@sinclair/typebox': '>=0.25.24'
       '@standard-schema/spec': ^1.0.0
-      '@typeschema/main': '>=0.13.7'
       '@vinejs/vine': ^2.0.0 || ^3.0.0 || ^4.0.0
       ajv: ^8.12.0
       ajv-errors: ^3.0.0
@@ -388,7 +387,7 @@ packages:
       class-transformer: '>=0.4.0'
       class-validator: '>=0.12.0'
       computed-types: ^1.0.0
-      effect: ^3.10.3
+      effect: ^4.0.0
       fluentvalidation-ts: ^3.0.0
       fp-ts: ^2.7.0
       io-ts: ^2.0.0
@@ -405,8 +404,6 @@ packages:
       '@sinclair/typebox':
         optional: true
       '@standard-schema/spec':
-        optional: true
-      '@typeschema/main':
         optional: true
       '@vinejs/vine':
         optional: true
@@ -2756,19 +2753,9 @@ packages:
     peerDependencies:
       seroval: ^1.0
 
-  seroval-plugins@1.7.6:
-    resolution: {integrity: sha512-/TPCAd6q5stAZnugD2fsvNKtM2UpgwrS8/fO1cXTgPC0EqCsGB+UfkEEsToFCfg35CDTMlWkppfr/zWnLJGpBA==}
-    engines: {node: '>=20'}
-    peerDependencies:
-      seroval: ^1.0
-
   seroval@1.6.12:
     resolution: {integrity: sha512-CqbIVfk/7GL3ITwZI55lcPbpQbjHZ2DD5cUj4iH7E9YsCfHNJV1mx7yNp86Z84w5IpmkZZS/2s5vPOWmVWSdQg==}
     engines: {node: '>=10'}
-
-  seroval@1.7.5:
-    resolution: {integrity: sha512-UdNgpHdq0gVpme5JdQF+S3jNscnjFr4NTwUWOc1qcOa8OuWZmbV0+YX2hsqxkUZshBpHnpxDZfAKVZG2ugbrJA==}
-    engines: {node: '>=20'}
 
   shebang-command@2.0.0:
     resolution: {integrity: sha512-kHxr2zZpYtdmrN1qDjrrX/Z1rR1kG8Dx+gkpK1G4eXmvXswmcE1hTWBWYUzlraYw1/yZp6YuDY77YtvbN0dmDA==}
@@ -3264,7 +3251,7 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@hookform/resolvers@5.9.2(@standard-schema/spec@1.1.0)(react-hook-form@7.91.0(@types/react@19.3.0)(react@19.3.1))(zod@4.6.7)':
+  '@hookform/resolvers@6.0.2(@standard-schema/spec@1.1.0)(react-hook-form@7.91.0(@types/react@19.3.0)(react@19.3.1))(zod@4.6.7)':
     dependencies:
       '@standard-schema/utils': 0.3.0
       react-hook-form: 7.91.0(@types/react@19.3.0)(react@19.3.1)
@@ -4218,8 +4205,8 @@ snapshots:
     dependencies:
       '@tanstack/history': 1.162.5
       cookie-es: 3.1.1
-      seroval: 1.7.5
-      seroval-plugins: 1.7.6(seroval@1.7.5)
+      seroval: 1.6.12
+      seroval-plugins: 1.6.12(seroval@1.6.12)
 
   '@tanstack/router-devtools-core@1.168.2(@tanstack/router-core@1.171.39)(csstype@3.2.3)':
     dependencies:
@@ -4593,9 +4580,9 @@ snapshots:
 
   asynckit@0.4.0: {}
 
-  axios@1.21.0:
+  axios@1.21.0(debug@4.4.3):
     dependencies:
-      follow-redirects: 1.16.2
+      follow-redirects: 1.16.2(debug@4.4.3)
       form-data: 4.0.6
       https-proxy-agent: 5.0.1
       proxy-from-env: 2.1.0
@@ -5021,7 +5008,9 @@ snapshots:
 
   flatted@3.4.4: {}
 
-  follow-redirects@1.16.2: {}
+  follow-redirects@1.16.2(debug@4.4.3):
+    optionalDependencies:
+      debug: 4.4.3
 
   form-data@4.0.6:
     dependencies:
@@ -5486,13 +5475,7 @@ snapshots:
     dependencies:
       seroval: 1.6.12
 
-  seroval-plugins@1.7.6(seroval@1.7.5):
-    dependencies:
-      seroval: 1.7.5
-
   seroval@1.6.12: {}
-
-  seroval@1.7.5: {}
 
   shebang-command@2.0.0:
     dependencies:

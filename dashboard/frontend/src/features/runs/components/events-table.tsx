@@ -7,16 +7,10 @@ import {
   type ColumnDef,
   type ColumnFiltersState,
   type SortingState,
-  type VisibilityState,
+  type ColumnVisibilityState,
   type ExpandedState,
   flexRender,
-  getCoreRowModel,
-  getFacetedRowModel,
-  getFacetedUniqueValues,
-  getFilteredRowModel,
-  getSortedRowModel,
-  getExpandedRowModel,
-  useReactTable,
+  useTable,
 } from '@tanstack/react-table'
 import { formatDistanceToNow, format } from 'date-fns'
 import { ChevronDown, ChevronRight } from 'lucide-react'
@@ -32,6 +26,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DataTableColumnHeader } from '@/components/data-table/column-header'
 import { DataTableToolbar } from '@/components/data-table/toolbar'
+import { dataTableFeatures, type DataTableFeatures } from '@/components/data-table/features'
 import type { Event } from '@/api/types'
 
 interface EventsTableProps {
@@ -76,7 +71,7 @@ export function EventsTable({
     { id: 'sequence', desc: false },
   ])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
+  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>({})
   const [expanded, setExpanded] = useState<ExpandedState>({})
 
   // Apply initial filters when they change
@@ -206,7 +201,7 @@ export function EventsTable({
   }, [events])
 
 
-  const columns: ColumnDef<Event>[] = useMemo(() => [
+  const columns: ColumnDef<DataTableFeatures, Event>[] = useMemo(() => [
     {
       id: 'expander',
       header: () => null,
@@ -313,7 +308,8 @@ export function EventsTable({
     },
   ], [getDuration])
 
-  const table = useReactTable({
+  const table = useTable({
+    features: dataTableFeatures,
     data: events,
     columns,
     state: {
@@ -326,12 +322,8 @@ export function EventsTable({
     onColumnFiltersChange: handleColumnFiltersChange,
     onColumnVisibilityChange: setColumnVisibility,
     onExpandedChange: setExpanded,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFacetedRowModel: getFacetedRowModel(),
-    getFacetedUniqueValues: getFacetedUniqueValues(),
-    getExpandedRowModel: getExpandedRowModel(),
+    // The event timeline always lists every event, so skip the shared paginated row model.
+    manualPagination: true,
     getRowCanExpand: (row) => Object.keys(row.original.data || {}).length > 0,
   })
 

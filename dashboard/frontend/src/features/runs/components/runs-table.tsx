@@ -9,12 +9,9 @@ import {
   type PaginationState,
   type RowSelectionState,
   type SortingState,
-  type VisibilityState,
+  type ColumnVisibilityState,
   flexRender,
-  getCoreRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
+  useTable,
 } from '@tanstack/react-table'
 import { formatDistanceToNow } from 'date-fns'
 import { MoreHorizontal, XCircle, ExternalLink, X, ChevronDown } from 'lucide-react'
@@ -44,6 +41,7 @@ import {
 import { DataTableColumnHeader } from '@/components/data-table/column-header'
 import { DataTableViewOptions } from '@/components/data-table/view-options'
 import { DataTablePagination } from '@/components/data-table/pagination'
+import { dataTableFeatures, type DataTableFeatures } from '@/components/data-table/features'
 import { StatusBadge } from './status-badge'
 import { DateRangeFilter } from './date-range-filter'
 import { useWorkflows } from '@/hooks/use-workflows'
@@ -100,7 +98,7 @@ export function RunsTable({
   const [sorting, setSorting] = useState<SortingState>([
     { id: 'started_at', desc: true },
   ])
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
+  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>({})
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
@@ -210,7 +208,7 @@ export function RunsTable({
 
   const hasActiveFilters = effectiveFilters.searchQuery || effectiveFilters.statusFilter || effectiveFilters.workflowFilter
 
-  const columns: ColumnDef<Run>[] = [
+  const columns: ColumnDef<DataTableFeatures, Run>[] = [
     {
       id: 'select',
       header: ({ table }) => (
@@ -368,7 +366,8 @@ export function RunsTable({
     },
   ]
 
-  const table = useReactTable({
+  const table = useTable({
+    features: dataTableFeatures,
     data: runs,
     columns,
     state: {
@@ -382,9 +381,6 @@ export function RunsTable({
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
     onPaginationChange: setPagination,
-    getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
   })
 
   // Count selected rows

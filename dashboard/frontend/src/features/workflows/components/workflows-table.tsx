@@ -9,15 +9,9 @@ import {
   type ColumnFiltersState,
   type FilterFn,
   type SortingState,
-  type VisibilityState,
+  type ColumnVisibilityState,
   flexRender,
-  getCoreRowModel,
-  getFacetedRowModel,
-  getFacetedUniqueValues,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
+  useTable,
 } from '@tanstack/react-table'
 import { MoreHorizontal, Play, List } from 'lucide-react'
 import { NewRunModal } from './new-run-modal'
@@ -42,6 +36,7 @@ import {
 import { DataTableColumnHeader } from '@/components/data-table/column-header'
 import { DataTableToolbar } from '@/components/data-table/toolbar'
 import { DataTablePagination } from '@/components/data-table/pagination'
+import { dataTableFeatures, type DataTableFeatures } from '@/components/data-table/features'
 import type { Workflow } from '@/api/types'
 
 interface WorkflowsTableProps {
@@ -54,7 +49,7 @@ function truncateText(text: string, maxLength: number): string {
 }
 
 // Custom filter function for tags array
-const tagsFilterFn: FilterFn<Workflow> = (row, columnId, filterValue) => {
+const tagsFilterFn: FilterFn<DataTableFeatures, Workflow> = (row, columnId, filterValue) => {
   const tags = row.getValue(columnId) as string[]
   if (!filterValue || filterValue.length === 0) return true
   return filterValue.some((v: string) => tags.includes(v))
@@ -64,7 +59,7 @@ export function WorkflowsTable({ workflows }: WorkflowsTableProps) {
   const navigate = useNavigate()
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
+  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>({})
 
   // Modal state
   const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(null)
@@ -92,7 +87,7 @@ export function WorkflowsTable({ workflows }: WorkflowsTableProps) {
     [navigate]
   )
 
-  const columns: ColumnDef<Workflow>[] = [
+  const columns: ColumnDef<DataTableFeatures, Workflow>[] = [
     {
       accessorKey: 'name',
       header: ({ column }) => (
@@ -216,7 +211,8 @@ export function WorkflowsTable({ workflows }: WorkflowsTableProps) {
       .map((tag) => ({ label: tag, value: tag }))
   }, [workflows])
 
-  const table = useReactTable({
+  const table = useTable({
+    features: dataTableFeatures,
     data: workflows,
     columns,
     state: {
@@ -227,14 +223,9 @@ export function WorkflowsTable({ workflows }: WorkflowsTableProps) {
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFacetedRowModel: getFacetedRowModel(),
-    getFacetedUniqueValues: getFacetedUniqueValues(),
     initialState: {
       pagination: {
+        pageIndex: 0,
         pageSize: 10,
       },
       columnVisibility: {

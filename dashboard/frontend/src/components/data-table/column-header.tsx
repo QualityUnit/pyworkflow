@@ -4,7 +4,7 @@ import {
   CaretSortIcon,
   EyeNoneIcon,
 } from '@radix-ui/react-icons'
-import { type Column } from '@tanstack/react-table'
+import { type CellData, type Column, type RowData } from '@tanstack/react-table'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -14,18 +14,20 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import type { DataTableFeatures } from './features'
 
-type DataTableColumnHeaderProps<TData, TValue> =
-  React.HTMLAttributes<HTMLDivElement> & {
-    column: Column<TData, TValue>
-    title: string
-  }
+type DataTableColumnHeaderProps<
+  TData extends RowData,
+  TValue extends CellData,
+> = React.HTMLAttributes<HTMLDivElement> & {
+  column: Column<DataTableFeatures, TData, TValue>
+  title: string
+}
 
-export function DataTableColumnHeader<TData, TValue>({
-  column,
-  title,
-  className,
-}: DataTableColumnHeaderProps<TData, TValue>) {
+export function DataTableColumnHeader<
+  TData extends RowData,
+  TValue extends CellData,
+>({ column, title, className }: DataTableColumnHeaderProps<TData, TValue>) {
   if (!column.getCanSort()) {
     return <div className={cn(className)}>{title}</div>
   }

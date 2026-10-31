@@ -104,9 +104,29 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  dashboard:
+    name: Dashboard Startup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install dashboard and test dependencies
+        run: pip install -e . pytest pytest-asyncio fastapi==0.109.0 pydantic-settings==2.0.0
+
+      - name: Test default dashboard startup and configured storage
+        env:
+          PYTHONPATH: dashboard/backend
+        run: pytest dashboard/backend/tests/ -v --tb=short
+
   test-all:
     name: All Tests Passed
-    needs: [lint, type-check, test]
+    needs: [lint, type-check, test, dashboard]
     runs-on: ubuntu-latest
     steps:
       - name: All tests passed

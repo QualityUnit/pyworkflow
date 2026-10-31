@@ -13,6 +13,11 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
+# Frontend dependencies must come from npm ci inside the image. Copying host
+# modules over them can replace locked versions and include native host binaries.
+**/node_modules/
+dashboard/frontend/dist/
+
 # IDE
 .vscode/
 .idea/

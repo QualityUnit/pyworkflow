@@ -68,7 +68,7 @@
     "@tanstack/eslint-plugin-query": "^5.105.0",
     "@tanstack/react-query-devtools": "^5.105.0",
     "@tanstack/react-router-devtools": "^1.167.2",
-    "@tanstack/router-plugin": "^1.168.48",
+    "@tanstack/router-plugin": "^1.169.0",
     "@trivago/prettier-plugin-sort-imports": "^6.0.2",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",

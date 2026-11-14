@@ -91,7 +91,7 @@ importers:
         version: 4.25.12(@babel/runtime@8.0.10)(@codemirror/autocomplete@6.20.4)(@codemirror/language@6.13.1)(@codemirror/lint@6.9.7)(@codemirror/search@6.7.2)(@codemirror/state@6.7.6)(@codemirror/theme-one-dark@6.1.3)(@codemirror/view@6.43.15)(codemirror@6.0.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       axios:
         specifier: ^1.21.0
-        version: 1.21.0
+        version: 1.21.0(debug@4.4.3)
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -147,8 +147,8 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
       zustand:
-        specifier: ^5.0.16
-        version: 5.0.16(@types/react@19.3.0)(immer@11.2.9)(react@19.3.1)(use-sync-external-store@1.7.0(react@19.3.1))
+        specifier: ^5.1.0
+        version: 5.1.0(@types/react@19.3.0)(immer@11.2.9)(react@19.3.1)(use-sync-external-store@1.7.0(react@19.3.1))
     devDependencies:
       '@eslint/js':
         specifier: ^9.39.5
@@ -3013,8 +3013,8 @@ packages:
   zod@4.6.7:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
-  zustand@5.0.16:
-    resolution: {integrity: sha512-Uv7e327ihlCfayfja3hDc0M64Upev1LWBKpRobdK4NyovDDPeeX4imWXc/wzC1yc6fkYPoAY/ncKVPAs2jrtQw==}
+  zustand@5.1.0:
+    resolution: {integrity: sha512-ciJZlP48M1PTQbVQq81CGVFxHTLpZNrFjKqwjtCU34AWuXTZT/jrF3p9+fI84Cf1eSCMLapxqBy/SNTfwOBuqA==}
     engines: {node: '>=12.20.0'}
     peerDependencies:
       '@types/react': '>=18.0.0'
@@ -4593,9 +4593,9 @@ snapshots:
 
   asynckit@0.4.0: {}
 
-  axios@1.21.0:
+  axios@1.21.0(debug@4.4.3):
     dependencies:
-      follow-redirects: 1.16.2
+      follow-redirects: 1.16.2(debug@4.4.3)
       form-data: 4.0.6
       https-proxy-agent: 5.0.1
       proxy-from-env: 2.1.0
@@ -5021,7 +5021,9 @@ snapshots:
 
   flatted@3.4.4: {}
 
-  follow-redirects@1.16.2: {}
+  follow-redirects@1.16.2(debug@4.4.3):
+    optionalDependencies:
+      debug: 4.4.3
 
   form-data@4.0.6:
     dependencies:
@@ -5665,7 +5667,7 @@ snapshots:
 
   zod@4.6.7: {}
 
-  zustand@5.0.16(@types/react@19.3.0)(immer@11.2.9)(react@19.3.1)(use-sync-external-store@1.7.0(react@19.3.1)):
+  zustand@5.1.0(@types/react@19.3.0)(immer@11.2.9)(react@19.3.1)(use-sync-external-store@1.7.0(react@19.3.1)):
     optionalDependencies:
       '@types/react': 19.3.0
       immer: 11.2.9
